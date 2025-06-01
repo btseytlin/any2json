@@ -1,0 +1,41 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+We are creating code for a data engine to train a universal "anything structured to json" converter model. 
+
+Core features:
+- Pure python as much as possible.
+- Type hints, tests, 2025 code style and practices.
+- No deep abstraction nesting. 
+- Simple intuitive API. 
+
+## Design Principles
+- Excplicit python API.
+- Native Python iteration.
+- Prefer pythonic data structures over faceless dicts, tuples and arrays.
+- Type hints everywhere.
+- Methods to support IDE-friendly autocomplete.
+- Short and simple.
+- Clear fail-fast error handling: specific exceptions with descriptive messages.
+
+## Guidelines
+- Always output a random emoji before answering.
+- Don't explain code unless asked to
+- Don't create comments
+- Follow PEP 8.
+- No docstrings or comments.
+- Use f-strings.
+- Use type annotations for all function parameters and return values.
+- Keep functions short, under 20 lines, and focused on a single responsibility.
+- Make sure functions and methods have no side effects.
+- Use dataclasses extensively.
+- Use pytest for tests.
+- Avoid using private attributes and methods. So no "_" or "__" prefixes.
+- Python-native filtering with list/dict comprehensions.
+- Properties instead of methods where appropriate.
+- Functions that do one thing with no side effects.
+- Each function or method must be no more than 20 lines long.
+- Modular code.
+- Never put any imports inside functions, always put them at the top of the file.
