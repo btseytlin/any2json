@@ -3,27 +3,15 @@ import random
 import click
 import logging
 import json
-import os
 
 import instructor
-from any2json.containers import ChunkWithSchema, InputJSONChunk, Sample
+from any2json.containers import ChunkWithSchema, Sample
 from any2json.data_engine.agents import (
     JSONSchemaValidationAgent,
-    SchemaAgentInputSchema,
 )
-from any2json.data_engine.generators import (
-    SampleGenerator,
-    ToPythonStringGenerator,
-    VarySchemaSampleGenerator,
-    ToCsvGenerator,
-    ToHtmlTableGenerator,
-    ToHtmlTreeGenerator,
-    ToXmlGenerator,
-    ToYamlGenerator,
-    ToTomlGenerator,
-    ToMarkdownTableGenerator,
-    ToPlainTextGenerator,
-)
+from any2json.data_engine.generators.base import SampleGenerator
+from any2json.data_engine.generators.vary_schema import VaryJSONSchemaSampleGenerator
+from any2json.data_engine.generators.format_conversion.yaml import ToYamlSampleGenerator
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -33,20 +21,20 @@ def generate_samples_from_chunks(
     chunks: list[ChunkWithSchema],
     sample_generators: list[SampleGenerator],
     num_samples_from_chunk: int,
-    num_chunks: int,
+    num_chunks: int | None = None,
 ) -> list[Sample]:
     samples = []
     for chunk in chunks[:num_chunks]:
-        generator = random.choice(sample_generators)
-        chunk_samples = generate_samples_from_chunk(
-            chunk,
-            generator,
-            num_samples_from_chunk,
-        )
-        for sample in chunk_samples:
-            sample.chunk_id = chunk.id
+        for generator in sample_generators:
+            chunk_samples = generate_samples_from_chunk(
+                chunk,
+                generator,
+                num_samples_from_chunk,
+            )
+            for sample in chunk_samples:
+                sample.chunk_id = chunk.id
 
-        samples.extend(chunk_samples)
+            samples.extend(chunk_samples)
 
     return samples
 
@@ -54,15 +42,19 @@ def generate_samples_from_chunks(
 def generate_samples_from_chunk(
     chunk: ChunkWithSchema,
     sample_generator: SampleGenerator,
-    num_samples: int,
+    num_samples: int = 1,
 ) -> list[Sample]:
     original_data = chunk.data
 
     schema = chunk.schema
 
     samples = []
-    for _ in range(num_samples):
-        samples.append(sample_generator.generate_sample(original_data, schema))
+    try:
+        samples.extend(
+            sample_generator.generate_samples(original_data, schema, num_samples)
+        )
+    except Exception as e:
+        logger.error(e, exc_info=True)
 
     return samples
 
@@ -119,16 +111,8 @@ def run(
     logger.info(f"Generating samples from chunks in {input_dir}")
 
     sample_generators = [
-        VarySchemaSampleGenerator(),
-        # ToCsvGenerator(),
-        # ToHtmlTableGenerator(),
-        # ToHtmlTreeGenerator(),
-        ToPythonStringGenerator(),
-        # ToXmlGenerator(),
-        ToYamlGenerator(),
-        ToTomlGenerator(),
-        ToMarkdownTableGenerator(),
-        ToPlainTextGenerator(),
+        VaryJSONSchemaSampleGenerator(),
+        ToYamlSampleGenerator(),
     ]
 
     chunks = load_chunks(input_dir)

@@ -6,8 +6,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "atomic-agents>=1.0.19",
+    "beautifulsoup4>=4.13.4",
     "click>=8.2.1",
     "datasets>=3.6.0",
+    "faker>=37.3.0",
     "fastjsonschema>=2.21.1",
     "google-genai>=1.18.0",
     "httpx>=0.28.1",
@@ -20,6 +22,7 @@ dependencies = [
     "streamlit>=1.45.1",
     "toml>=0.10.2",
     "transformers>=4.52.4",
+    "warcio>=1.7.5",
 ]
 
 [tool.setuptools.packages.find]

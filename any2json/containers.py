@@ -40,16 +40,6 @@ class Sample:
 
 
 @dataclass
-class VarySchemaSample(Sample):
-    """
-    A sample that has been created by taking an input, obtaining it's schema, modifying the schema, and generating a new output matching the modified schema.
-    """
-
-    original_schema: dict
-    change: dict
-
-
-@dataclass
 class FromOtherFormatSample(Sample):
     """
     A sample that has been created by taking an input in one format, and generating an output in another format.

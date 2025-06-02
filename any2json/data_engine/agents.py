@@ -135,10 +135,10 @@ Please correct the schema and return a valid JSONSchema.
             previous_schema=previous_schema,
         )
 
-        logger.info(f"Prompt: {schema_prompt}")
+        logger.debug(f"Prompt: {schema_prompt}")
         response = self.agent.run_sync(schema_prompt)
 
-        logger.info(f"Response: {response}")
+        logger.debug(f"Response: {response}")
         schema = json.loads(response.output.output_schema)
         return schema
 
@@ -158,7 +158,7 @@ Please correct the schema and return a valid JSONSchema.
 
         for _ in range(self.max_retries):
             try:
-                logger.info(
+                logger.debug(
                     f"Generating schema for input: {input_string}, previous_schema: {previous_schema}, error_message: {error_message}"
                 )
                 generated_schema = self.generate_schema(
@@ -168,7 +168,7 @@ Please correct the schema and return a valid JSONSchema.
 
                 self.validate_schema(generated_schema, input_string)
 
-                logger.info(f"Successfully validated schema: {generated_schema}")
+                logger.debug(f"Successfully validated schema: {generated_schema}")
 
                 return generated_schema
 
@@ -177,7 +177,7 @@ Please correct the schema and return a valid JSONSchema.
                 fastjsonschema.JsonSchemaException,
                 AssertionError,
             ) as e:
-                logging.error(e, exc_info=True)
+                logger.debug(e, exc_info=True)
                 retries_used += 1
                 error_message = (
                     f"repr(e): {repr(e)}, str(e): {str(e)}, type(e): {type(e)}"
