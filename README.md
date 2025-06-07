@@ -10,3 +10,5 @@ Links:
 
 
 - https://koxudaxi.github.io/datamodel-code-generator/ !!!
+
+- https://github.com/2U1/Qwen2-VL-Finetune/blob/master/scripts/finetune.sh
