@@ -8,3 +8,5 @@ Links:
 - https://github.com/logpai/loghub
 - https://github.com/jdorfman/awesome-json-datasets?tab=readme-ov-file
 
+
+- https://koxudaxi.github.io/datamodel-code-generator/ !!!
