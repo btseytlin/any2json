@@ -1,4 +1,5 @@
 from dataclasses import asdict, dataclass
+import time
 from typing import Any
 import click
 import logging
@@ -11,40 +12,68 @@ from any2json.data_engine.agents import (
     JSONSchemaValidationAgent,
     SchemaAgentInputSchema,
 )
+from any2json.database.client import get_db_session
+from any2json.database.models import Chunk, JsonSchema
+from any2json.enums import ContentType
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
+def get_json_chunks_with_no_schema(db_session: Session) -> list[Chunk]:
+    return (
+        db_session.query(Chunk)
+        .filter(Chunk.schema_id.is_(None))
+        .filter(Chunk.content_type == ContentType.JSON.value)
+        .all()
+    )
+
+
 def generate_schemas_for_chunks(
-    chunks: list[InputJSONChunk],
+    db_session: Session,
+    chunks: list[Chunk],
     schema_agent: JSONSchemaValidationAgent,
-) -> list[ChunkWithSchema]:
-    chunks_with_schemas = []
-    for chunk in tqdm(chunks):
-        schema = generate_schema_for_chunk(
-            chunk,
+) -> tuple[list[JsonSchema], list[Chunk]]:
+    schemas = []
+    updated_chunks = []
+    for i, chunk in tqdm(
+        enumerate(chunks),
+        desc="Generating schemas for chunks",
+        total=len(chunks),
+    ):
+        schema = generate_schema_for_json(
+            json.loads(chunk.content),
             schema_agent,
         )
         if schema:
-            chunks_with_schemas.append(
-                ChunkWithSchema(
-                    id=chunk.id,
-                    data=chunk.data,
-                    source_dataset_name=chunk.source_dataset_name,
-                    source_dataset_index=chunk.source_dataset_index,
-                    schema=schema,
-                )
+            schema_entity = JsonSchema(
+                content=schema,
+                chunks=[chunk],
             )
+            schemas.append(schema_entity)
+            chunk.schema = schema_entity
+            updated_chunks.append(chunk)
 
-    return chunks_with_schemas
+            try:
+                db_session.add(schema_entity)
+                db_session.add(chunk)
+                db_session.commit()
+            except Exception as e:
+                logger.error(
+                    f"Error: {e}\nFailed to commit chunk {chunk.content} schema: {schema_entity.content}",
+                    exc_info=True,
+                )
+                raise e
+
+    return schemas, updated_chunks
 
 
-def generate_schema_for_chunk(
-    chunk: InputJSONChunk,
+def generate_schema_for_json(
+    json_content: dict,
     schema_agent: JSONSchemaValidationAgent,
 ) -> dict:
-    original_data = chunk.data
+    original_data = json_content
 
     input_string = json.dumps(original_data, indent=1)
 
@@ -53,7 +82,7 @@ def generate_schema_for_chunk(
             SchemaAgentInputSchema(input_string=input_string)
         )
     except Exception as e:
-        logger.error(f"Failed to generate schema for chunk {chunk}")
+        logger.error(f"Failed to generate schema for JSON {json_content}")
         logger.error(e)
         return None
 
@@ -61,7 +90,7 @@ def generate_schema_for_chunk(
 
 
 def create_schema_agent(
-    model: str = "gemini-2.5-flash-preview-05-20",
+    model: str = "gemini-2.0-flash",
     max_retries: int = 1,
     **kwargs,
 ) -> JSONSchemaValidationAgent:
@@ -72,24 +101,13 @@ def create_schema_agent(
     return JSONSchemaValidationAgent(client, model, max_retries)
 
 
-def load_chunks(input_dir: str) -> list[InputJSONChunk]:
-    with open(f"{input_dir}/input_json_chunks.json", "r") as f:
-        chunks = json.load(f)
-    return [InputJSONChunk(**chunk) for chunk in chunks]
-
-
 @click.command()
 @click.option(
-    "--input-dir",
-    default="data/intermediate",
-    type=click.Path(exists=True),
-    required=True,
-)
-@click.option(
-    "--output-dir",
-    default="data/intermediate",
+    "--db-file",
+    default="data/database.db",
     type=click.Path(),
     required=True,
+    help="Sqlite3 file to save the database to",
 )
 @click.option(
     "--model",
@@ -98,43 +116,54 @@ def load_chunks(input_dir: str) -> list[InputJSONChunk]:
     required=True,
 )
 @click.option(
+    "--max-retries",
+    default=2,
+    type=int,
+    required=False,
+    help="Maximum number of retries for schema generation",
+)
+@click.option(
     "--num-chunks",
     default=None,
     type=int,
     required=False,
 )
 def run(
-    input_dir: str,
-    output_dir: str,
+    db_file: str,
     model: str,
+    max_retries: int,
     num_chunks: int,
 ):
-    logger.info(f"Generating schemas from chunks in {input_dir}")
+    logger.info(f"Generating schemas from chunks in {db_file}")
 
     api_key = os.getenv("GEMINI_API_KEY")
 
     schema_agent = create_schema_agent(
         model=model,
-        max_retries=3,
+        max_retries=max_retries,
+        api_key=api_key,
     )
 
-    chunks = load_chunks(input_dir)
+    db_session = get_db_session(f"sqlite:///{db_file}")
 
-    if num_chunks:
-        chunks = chunks[:num_chunks]
+    try:
+        chunks = get_json_chunks_with_no_schema(db_session)
 
-    logger.info(f"Loaded {len(chunks)} chunks")
+        if num_chunks:
+            chunks = chunks[:num_chunks]
 
-    chunks_with_schemas = generate_schemas_for_chunks(
-        chunks,
-        schema_agent,
-    )
+        logger.info(f"Loaded {len(chunks)} JSON chunks with no schema for processing")
 
-    logger.info(f"Saving chunks with schemas to {output_dir}")
+        schemas, chunks = generate_schemas_for_chunks(
+            db_session=db_session,
+            chunks=chunks,
+            schema_agent=schema_agent,
+        )
 
-    chunk_dicts = [asdict(chunk) for chunk in chunks_with_schemas]
-    with open(f"{output_dir}/chunks_with_schemas.json", "w") as f:
-        json.dump(chunk_dicts, f, indent=2)
+        logger.info(f"Generated {len(schemas)} schemas for {len(chunks)} chunks")
+    except Exception as e:
+        db_session.rollback()
+        raise e
 
 
 if __name__ == "__main__":

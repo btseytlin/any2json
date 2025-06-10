@@ -1,3 +1,5 @@
+import json
+import fastjsonschema
 import pandas as pd
 from faker import Faker
 import random
@@ -5,20 +7,38 @@ from any2json.containers import FromOtherFormatSample, Sample
 from any2json.data_engine.generators.base import SampleGenerator
 from typing import Any, Callable, Dict, List, Literal, Union
 
+from any2json.utils import remove_list_types_from_schema
+
 
 class PandasGenerator(SampleGenerator):
-    def __init__(self):
+    def __init__(
+        self,
+        num_rows: int | None = None,
+        num_cols: int | None = None,
+        column_name_format: str | None = None,
+        column_configs: Dict[str, Dict[str, Any]] | None = None,
+        input_format: str | None = None,
+        format_name: str | None = None,
+    ):
         super().__init__()
         self.fake = Faker()
-        self.num_rows: int
-        self.num_cols: int
-        self.column_configs: Dict[str, Dict[str, Any]]
-        self.output_format_choice: str
-        self.format_name: str = ""
+        self.column_name_format: str | None = column_name_format
+        self.num_rows: int | None = num_rows
+        self.num_cols: int | None = num_cols
+        self.column_configs: Dict[str, Dict[str, Any]] | None = column_configs
+        self.input_format: str | None = input_format
+        self.format_name: str | None = format_name
 
     def setup(self):
-        self.num_rows = random.randint(3, 10)
-        self.num_cols = random.randint(2, 10)
+        self.column_name_format = random.choice(
+            [
+                "numbered",
+                "random_words",
+                "random_words_with_numbers",
+            ]
+        )
+        self.num_rows = random.randint(1, 5)
+        self.num_cols = random.randint(2, 20)
         self.column_configs = self.get_random_column_configs()
 
         conversion_options = [
@@ -33,25 +53,109 @@ class PandasGenerator(SampleGenerator):
             "json_values",
             "json_table",
         ]
-        self.output_format_choice = random.choice(conversion_options)
-        self.format_name = f"pandas_dataframe_to_{self.output_format_choice}"
+        self.input_format = random.choice(conversion_options)
+        if self.input_format in ("json_values", "json_split"):
+            self.column_name_format = "numbered"
+        self.format_name = self.input_format.split("_")[0]
+
+    def get_state(self) -> Dict[str, Any]:
+        return {
+            "num_rows": self.num_rows,
+            "num_cols": self.num_cols,
+            "column_name_format": self.column_name_format,
+            "input_format": self.input_format,
+            "format_name": self.format_name,
+        }
+
+    def generate_colname_words(self) -> str:
+        num_words = random.randint(1, 5)
+        sep = random.choice(["_", "-", " "])
+        is_camel_case = random.choice([True, False])
+        if is_camel_case:
+            return "".join(word.capitalize() for word in self.fake.words(num_words))
+        else:
+            return sep.join(self.fake.words(num_words))
+
+    def generate_column_name(self, i: int) -> str:
+        if self.column_name_format == "numbered":
+            return f"{i+1}"
+        elif self.column_name_format == "random_words":
+            return self.generate_colname_words()
+        elif self.column_name_format == "random_words_with_numbers":
+            sep = random.choice(["_", "-", "", " "])
+            return f"{self.generate_colname_words()}{sep}{i+1}"
+        else:
+            raise ValueError(f"Invalid column name format: {self.column_name_format}")
 
     def get_random_column_configs(self) -> Dict[str, Dict[str, Any]]:
         type_options: List[Dict[str, Any]] = [
             {"func": self.fake.name, "json_type": "string"},
+            {"func": self.fake.paragraph, "json_type": "string"},
+            {"func": self.fake.sentence, "json_type": "string"},
             {"func": self.fake.address, "json_type": "string"},
-            {"func": self.fake.random_int, "json_type": "integer"},
-            {"func": self.fake.random_float, "json_type": "number"},
             {
-                "func": self.fake.date_this_decade,
+                "func": lambda *args: self.fake.random_int(min=-1000000, max=1000000),
+                "json_type": "integer",
+            },
+            {
+                "func": lambda *args: self.fake.random_int(min=-100, max=100),
+                "json_type": "integer",
+            },
+            {
+                "func": lambda *args: str(self.fake.random_int(min=-100, max=100)),
+                "json_type": "string",
+            },
+            {
+                "func": lambda *args: self.fake.pydecimal(
+                    left_digits=random.randint(1, 3),
+                    right_digits=random.randint(1, 3),
+                ),
+                "json_type": "number",
+            },
+            {
+                "func": lambda *args: str(
+                    self.fake.pydecimal(
+                        left_digits=random.randint(1, 3),
+                        right_digits=random.randint(1, 3),
+                    )
+                ),
+                "json_type": "string",
+            },
+            {
+                "func": self.fake.date,
+                "json_type": "string",
+                "format": "date",
+            },
+            {
+                "func": self.fake.date_this_decade().isoformat,
                 "json_type": "string",
                 "format": "date",
             },
             {"func": self.fake.email, "json_type": "string", "format": "email"},
+            {"func": self.fake.phone_number, "json_type": "string", "format": "phone"},
+            {"func": self.fake.url, "json_type": "string", "format": "url"},
+            {"func": self.fake.ipv4, "json_type": "string", "format": "ipv4"},
+            {"func": self.fake.ipv6, "json_type": "string", "format": "ipv6"},
+            {"func": self.fake.uuid4, "json_type": "string", "format": "uuid"},
+            {"func": self.fake.boolean, "json_type": "boolean"},
+            {"func": self.fake.color_name, "json_type": "string", "format": "color"},
+            {
+                "func": self.fake.currency_code,
+                "json_type": "string",
+                "format": "currency",
+            },
+            {
+                "func": self.fake.currency_name,
+                "json_type": "string",
+                "format": "currency",
+            },
+            {"func": lambda *args: None, "json_type": "string"},
+            {"func": lambda *args: None, "json_type": "number"},
+            {"func": lambda *args: "", "json_type": "string"},
         ]
         chosen_configs: Dict[str, Dict[str, Any]] = {}
         for i in range(self.num_cols):
-            col_name = f"column_{i}"
+            col_name = self.generate_column_name(i)
             chosen_configs[col_name] = random.choice(type_options)
         return chosen_configs
 
@@ -67,19 +171,22 @@ class PandasGenerator(SampleGenerator):
     def infer_schema_from_dataframe(self, df: pd.DataFrame) -> Dict[str, Any]:
         properties: Dict[str, Any] = {}
         for col_name, config in self.column_configs.items():
-            prop = {"type": config["json_type"]}
-            if "format" in config:
-                prop["format"] = config["format"]
+            prop = {"type": [config["json_type"], "null"]}
             properties[col_name] = prop
 
-        return {
-            "type": "array",
-            "items": {
+        if len(df) > 1:
+            return {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": properties,
+                },
+            }
+        else:
+            return {
                 "type": "object",
                 "properties": properties,
-                "required": [],
-            },
-        }
+            }
 
     def convert_dataframe_to_format(self, df: pd.DataFrame, format_choice: str) -> str:
         if format_choice == "csv":
@@ -92,28 +199,31 @@ class PandasGenerator(SampleGenerator):
             return df.to_html(index=False)
         elif format_choice.startswith("json_"):
             orient = format_choice.replace("json_", "")
-            if orient == "index":
+            if orient in ("index", "columns", "split"):
                 return df.to_json(orient=orient)
             return df.to_json(orient=orient, index=False)
         else:
             raise ValueError(f"Unsupported output format: {format_choice}")
 
-    def generate_sample(
+    def generate_triplet(
         self,
-    ) -> Sample:
+    ) -> tuple[str, dict, str]:
         df = self.generate_synthetic_dataframe()
 
-        json_output_data = df.to_dict(orient="records")
         inferred_schema = self.infer_schema_from_dataframe(df)
 
-        formatted_str = self.convert_dataframe_to_format(df, self.output_format_choice)
+        if inferred_schema["type"] == "array":
+            json_output_data = df.to_json(orient="records")
+        elif inferred_schema["type"] == "object":
+            json_output_data = df.iloc[0].to_json()
+        else:
+            raise ValueError(f"Unsupported schema type: {inferred_schema['type']}")
 
-        return FromOtherFormatSample(
-            input_data=formatted_str,
-            schema=inferred_schema,
-            output=json_output_data,
-            input_format=self.format_name,
-            output_format="json",
-            chunk_id=None,
-            generator=self.__class__.__name__,
-        )
+        formatted_str = self.convert_dataframe_to_format(df, self.input_format)
+
+        validate = fastjsonschema.compile(inferred_schema)
+        validate(json.loads(json_output_data))
+
+        inferred_schema = remove_list_types_from_schema(inferred_schema)
+
+        return formatted_str, inferred_schema, json_output_data

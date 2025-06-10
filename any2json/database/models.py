@@ -19,7 +19,7 @@ class SourceDocument(Base):
     content = Column(Text, nullable=False)
     content_type = Column(String, nullable=False)
 
-    chunks = relationship("Chunk", back_populates="document")
+    chunks = relationship("Chunk", back_populates="parent_document")
 
     meta = Column(JSON, nullable=True)
 
@@ -43,16 +43,24 @@ class Chunk(Base):
     __tablename__ = "chunks"
     id = Column(Integer, primary_key=True)
     content = Column(Text, nullable=False)
-    type = Column(Text, nullable=False)
+    content_type = Column(Text, nullable=False)
     is_synthetic = Column(Boolean, default=False, nullable=False)
 
     parent_document_id = Column(
         Integer, ForeignKey("source_documents.id"), nullable=True
     )
-    document = relationship("SourceDocument", back_populates="chunks")
+    parent_document = relationship("SourceDocument", back_populates="chunks")
 
     parent_chunk_id = Column(Integer, ForeignKey("chunks.id"), nullable=True)
     parent_chunk = relationship("Chunk", remote_side=[id], backref="derived_chunks")
+
+    schema_id = Column(
+        Integer,
+        ForeignKey("json_schemas.id"),
+        nullable=True,
+        comment="Schema ID in case chunk is a json",
+    )
+    schema = relationship("JsonSchema", back_populates="chunks")
 
     meta = Column(JSON, nullable=True)
 

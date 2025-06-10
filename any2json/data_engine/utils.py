@@ -3,12 +3,13 @@ from any2json.containers import InputJSONChunk
 import random
 from datasets import Dataset
 
+from any2json.database.models import Chunk
+
 
 def get_chunks_from_record(
     record: dict | list,
     max_depth: int = 3,
-    **kwargs,
-) -> list[InputJSONChunk]:
+) -> list[dict | list]:
     """
     Get all the chunks from an arbitrary nested dictionary that might contain lists and dictionaries.
 
@@ -18,7 +19,7 @@ def get_chunks_from_record(
         record: A dictionary that might contain lists and dictionaries.
 
     Returns:
-        A list of InputJSONChunk objects.
+        A list of json-like objects.
     """
     chunks = []
 
@@ -39,7 +40,7 @@ def get_chunks_from_record(
         if not any_value:
             return chunks
 
-        chunks.append(InputJSONChunk(data=record, id=None, **kwargs))
+        chunks.append(record)
 
     if max_depth == 0:
         return chunks
@@ -47,20 +48,20 @@ def get_chunks_from_record(
     if isinstance(record, dict):
         for k, v in record.items():
             if isinstance(v, (list, dict)):
-                chunks.extend(get_chunks_from_record(v, max_depth - 1, **kwargs))
+                chunks.extend(get_chunks_from_record(v, max_depth - 1))
     elif isinstance(record, list):
         for v in record:
-            chunks.extend(get_chunks_from_record(v, max_depth - 1, **kwargs))
+            chunks.extend(get_chunks_from_record(v, max_depth - 1))
 
     return chunks
 
 
-def deduplicate_chunks(chunks: list[InputJSONChunk]) -> list[InputJSONChunk]:
+def deduplicate_chunks(chunks: list[Chunk]) -> list[Chunk]:
     seen_hashes = set()
 
     deduped_chunks = []
     for chunk in chunks:
-        hash_value = hash(json.dumps(chunk.data))
+        hash_value = hash(chunk.content.lower().strip())
         if hash_value not in seen_hashes:
             seen_hashes.add(hash_value)
             deduped_chunks.append(chunk)
@@ -68,23 +69,23 @@ def deduplicate_chunks(chunks: list[InputJSONChunk]) -> list[InputJSONChunk]:
     return deduped_chunks
 
 
-def generate_chunks_from_json_dataset(
-    dataset: Dataset,
-    dataset_name: str,
-    num_chunks_per_dataset: int,
-) -> list[InputJSONChunk]:
-    chunks = []
+# def generate_chunks_from_json_dataset(
+#     dataset: Dataset,
+#     dataset_name: str,
+#     num_chunks_per_dataset: int,
+# ) -> list[InputJSONChunk]:
+#     chunks = []
 
-    for i, record in enumerate(dataset):
-        chunks.extend(
-            get_chunks_from_record(
-                record,
-                source_dataset_name=dataset_name,
-                source_dataset_index=i,
-            )
-        )
+#     for i, record in enumerate(dataset):
+#         chunks.extend(
+#             get_chunks_from_record(
+#                 record,
+#                 source_dataset_name=dataset_name,
+#                 source_dataset_index=i,
+#             )
+#         )
 
-    chunks = deduplicate_chunks(chunks)
-    chunks = random.sample(chunks, min(num_chunks_per_dataset, len(chunks)))
+#     chunks = deduplicate_chunks(chunks)
+#     chunks = random.sample(chunks, min(num_chunks_per_dataset, len(chunks)))
 
-    return chunks
+#     return chunks
