@@ -3,10 +3,16 @@ description:
 globs: 
 alwaysApply: true
 ---
-We are creating code for a data engine to train a universal "anything structured to json" converter model. 
+We are creating code to train a universal "anything structured to json" converter LLM model. 
+
+It contains the following main modules:
+
+1. Data Engine responsible for generating a training dataset.
+2. Benchmark for benchmarking the quality of the model.
+3. Training, inference and other modelling code.
 
 Core features:
-- Pure python as much as possible.
+- Using SQLITE3 to store the dataset
 - Type hints, tests, 2025 code style and practices.
 - No deep abstraction nesting. 
 - Simple intuitive API. 
@@ -14,18 +20,16 @@ Core features:
 ## Design Principles
 - Excplicit python API.
 - Native Python iteration.
-- Prefer pythonic data structures over faceless dicts, tuples and arrays.
-- Type hints everywhere.
+- Prefer pythonic data structures like dataclasses and named types over faceless dicts, tuples and arrays.
 - Methods to support IDE-friendly autocomplete.
-- Short and simple.
+- Keep it simple stupid.
 - Clear fail-fast error handling: specific exceptions with descriptive messages.
 
 ## Guidelines
 - Always output a random emoji before answering.
-- Don't explain code unless asked to
-- Don't create comments
+- Don't explain code unless asked to.
+- Don't create comments unless asked to.
 - Follow PEP 8.
-- No docstrings or comments.
 - Use f-strings.
 - Use type annotations for all function parameters and return values.
 - Keep functions short, under 20 lines, and focused on a single responsibility.
@@ -38,4 +42,4 @@ Core features:
 - Functions that do one thing with no side effects.
 - Each function or method must be no more than 20 lines long.
 - Modular code.
-- Never put any imports inside functions, always put them at the top of the file.
+- Always put imports at the top of the file.
