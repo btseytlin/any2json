@@ -11,7 +11,7 @@ from any2json.data_engine.agents import (
 )
 from any2json.data_engine.generators.base import SampleGenerator
 from any2json.data_engine.generators.vary_schema import VaryJSONSchemaSampleGenerator
-from any2json.data_engine.generators.format_conversion.yaml import ToYamlSampleGenerator
+from any2json.data_engine.generators.converters.yaml import ToYamlSampleGenerator
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

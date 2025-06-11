@@ -10,3 +10,6 @@ class ContentType(Enum):
     HTML = "HTML"
     TEXT = "TEXT"
     OTHER = "OTHER"
+    YAML = "YAML"
+    TOML = "TOML"
+    PYTHON_STRING = "PYTHON_STRING"
