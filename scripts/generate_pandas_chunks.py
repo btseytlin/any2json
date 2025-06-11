@@ -64,6 +64,7 @@ def run(db_file: str, num_chunks: int, preview: bool):
                 content_type=input_format,
                 schema=schema_entity,
                 meta=meta,
+                is_synthetic=True,
             )
 
             output_chunk_entity = Chunk(
@@ -71,6 +72,7 @@ def run(db_file: str, num_chunks: int, preview: bool):
                 content_type=ContentType.JSON.value,
                 schema=schema_entity,
                 meta=meta,
+                is_synthetic=True,
             )
 
             input_chunks.append(chunk_entity)
