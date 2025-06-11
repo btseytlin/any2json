@@ -13,33 +13,46 @@ from faker import Faker
 from dataclasses import dataclass
 
 from any2json.data_engine.generators.base import SampleGenerator
+from any2json.utils import remove_list_types_from_schema
 
 
-@dataclass
-class VarySchemaSample(Sample):
+class VaryJSONSchemaGenerator(SampleGenerator):
     """
-    A sample that has been created by taking an input, obtaining it's schema, modifying the schema, and generating a new output matching the modified schema.
-    """
-
-    original_schema: dict
-    change: dict
-
-
-class VaryJSONSchemaSampleGenerator(SampleGenerator):
-    """
-    Generate samples by randomly varying a given JSON schema.
+    Generate synthetic JSON schemas and matching JSON chunks by randomly varying a given JSON schema.
     """
 
     def __init__(
         self,
         drop_field_proba: float = 0.2,
+        stringify_number_proba: float = 0.3,
         num_fields_to_add: int | None = None,
     ):
         self.drop_field_proba = drop_field_proba
-        self.num_fields_to_add = num_fields_to_add or random.randint(1, 3)
-        self.fake = Faker()
+        self.stringify_number_proba = stringify_number_proba
+        self.num_fields_to_add = num_fields_to_add
 
-    def drop_schema_keys(self, schema: dict) -> tuple[dict, list[str]]:
+    def setup(self):
+        self.fake = Faker()
+        self.num_fields_to_add = random.randint(1, 3)
+
+    def get_state(self) -> dict:
+        return {
+            "drop_field_proba": self.drop_field_proba,
+            "stringify_number_proba": self.stringify_number_proba,
+            "num_fields_to_add": self.num_fields_to_add,
+        }
+
+    def change_schema_key_types(self, schema: dict) -> tuple[dict, dict]:
+        new_schema = deepcopy(schema)
+        changed_types = {}
+        for key, value in new_schema["properties"].items():
+            if value["type"] in ["number", "integer"]:
+                if random.random() <= self.stringify_number_proba:
+                    value["type"] = "string"
+                    changed_types[key] = "number_to_string"
+        return new_schema, changed_types
+
+    def drop_schema_keys(self, schema: dict) -> tuple[dict, dict]:
         """
         Drops random keys from the schema.
 
@@ -80,18 +93,31 @@ class VaryJSONSchemaSampleGenerator(SampleGenerator):
 
         return new_schema, keys_to_add
 
-    def get_new_schema(self, input_schema: dict) -> tuple[dict, list[str], list[str]]:
+    def get_new_schema(self, input_schema: dict) -> tuple[dict, dict]:
         new_schema = deepcopy(input_schema)
 
         new_schema, keys_to_drop = self.drop_schema_keys(new_schema)
 
+        new_schema, changed_types = self.change_schema_key_types(new_schema)
+
         new_schema, keys_to_add = self.add_schema_keys(new_schema)
 
-        return new_schema, keys_to_drop, keys_to_add
+        changes = {}
+        if keys_to_drop:
+            changes["dropped_fields"] = keys_to_drop
+        if keys_to_add:
+            changes["added_fields"] = keys_to_add
+        if changed_types:
+            changes["changed_types"] = changed_types
 
-    def get_new_data(
-        self, input_data: dict, new_schema: dict, keys_to_add: list[str]
-    ) -> dict:
+        return new_schema, changes
+
+    def get_new_data(self, input_data: dict, new_schema: dict, changes: dict) -> dict:
+        if changes.get("changed_types"):
+            for key, value in changes["changed_types"].items():
+                if value == "number_to_string":
+                    input_data[key] = str(input_data[key])
+
         fields: dict[str, Any] = {}
         required_fields = new_schema.get("required", [])
 
@@ -140,7 +166,7 @@ class VaryJSONSchemaSampleGenerator(SampleGenerator):
         else:
             return type_map.get(json_type, Any)
 
-    def validate_source_data(self, source_data: dict, source_schema: dict) -> dict:
+    def validate_source_data(self, source_data: dict, source_schema: dict):
         assert isinstance(
             source_data, dict
         ), "Source data must be provided and be a dictionary"
@@ -151,35 +177,24 @@ class VaryJSONSchemaSampleGenerator(SampleGenerator):
         assert source_schema["type"] == "object", "Source schema must be an object"
         fastjsonschema.validate(source_schema, source_data)
 
-    def generate_sample(self, source_data: dict, source_schema: dict) -> Sample:
-        new_schema, keys_to_drop, keys_to_add = self.get_new_schema(source_schema)
+    def generate(
+        self,
+        source_data: dict,
+        source_schema: dict,
+    ) -> tuple[dict, dict, dict, dict, dict]:
+        new_schema, changes = self.get_new_schema(source_schema)
 
-        new_data = self.get_new_data(source_data, new_schema, keys_to_add)
+        new_data = self.get_new_data(source_data, new_schema, changes)
 
-        return VarySchemaSample(
-            input_data=source_data,
-            schema=new_schema,
-            output=new_data,
-            original_schema=source_schema,
-            change={
-                "dropped_fields": keys_to_drop,
-                "added_fields": keys_to_add,
-            },
-            chunk_id=None,
-            generator=self.__class__.__name__,
-        )
+        new_schema = remove_list_types_from_schema(new_schema)
+
+        return source_schema, source_data, new_schema, new_data, changes
 
     def generate_samples(
         self,
         source_data: dict = None,
         source_schema: dict = None,
         num_samples: int = 1,
-    ) -> list[Sample]:
-        """
-        Generate a sample from a dict by randomly varying the schema.
-        """
-
+    ) -> list[tuple[dict, dict, dict, dict, dict]]:
         self.validate_source_data(source_data, source_schema)
-        return [
-            self.generate_sample(source_data, source_schema) for _ in range(num_samples)
-        ]
+        return [self.generate(source_data, source_schema) for _ in range(num_samples)]
