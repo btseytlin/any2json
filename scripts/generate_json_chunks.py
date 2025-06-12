@@ -42,6 +42,7 @@ def generate_json_chunks(
                     parent_document_id=document.id,
                     content=json.dumps(chunk_json),
                     content_type=ContentType.JSON.value,
+                    is_synthetic=False,
                 )
             )
 
@@ -80,6 +81,8 @@ def run(db_file: str, max_depth: int):
     except Exception as e:
         db_session.rollback()
         raise e
+    finally:
+        db_session.close()
 
 
 if __name__ == "__main__":

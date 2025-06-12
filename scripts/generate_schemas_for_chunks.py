@@ -1,13 +1,10 @@
-from dataclasses import asdict, dataclass
-import time
-from typing import Any
+import random
 import click
 import logging
 import json
 import os
 from tqdm.auto import tqdm
 import instructor
-from any2json.containers import ChunkWithSchema, InputJSONChunk
 from any2json.data_engine.agents import (
     JSONSchemaValidationAgent,
     SchemaAgentInputSchema,
@@ -148,6 +145,7 @@ def run(
 
     try:
         chunks = get_json_chunks_with_no_schema(db_session)
+        random.shuffle(chunks)
 
         if num_chunks:
             chunks = chunks[:num_chunks]
@@ -164,6 +162,8 @@ def run(
     except Exception as e:
         db_session.rollback()
         raise e
+    finally:
+        db_session.close()
 
 
 if __name__ == "__main__":

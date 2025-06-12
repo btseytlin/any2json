@@ -1,7 +1,6 @@
 import logging
 import random
 import click
-import os
 import json
 
 from sqlalchemy.orm import Session
@@ -9,10 +8,9 @@ from sqlalchemy.orm import Session
 from any2json.data_engine.generators.vary_schema import VaryJSONSchemaGenerator
 from any2json.data_engine.utils import (
     deduplicate_chunks,
-    get_chunks_from_record,
 )
 from any2json.database.client import get_db_session
-from any2json.database.models import Chunk, JsonSchema, SourceDocument
+from any2json.database.models import Chunk, JsonSchema, SchemaConversion
 from any2json.enums import ContentType
 
 logger = logging.getLogger(__name__)
@@ -36,6 +34,7 @@ def generate_synthetic_schemas(
 ) -> list[Chunk]:
     new_chunks = []
     new_schemas = []
+    new_schema_conversions = []
 
     for chunk in chunks:
         schema = chunk.schema
@@ -87,17 +86,26 @@ def generate_synthetic_schemas(
                 content_type=ContentType.JSON.value,
                 schema=new_schema_entity,
                 parent_chunk_id=chunk.id,
+                matches_parent_chunk=False,
                 is_synthetic=True,
                 meta=meta,
             )
             new_chunks.append(new_chunk_entity)
+
+            schema_conversion_entity = SchemaConversion(
+                input_chunk=chunk,
+                schema=new_schema_entity,
+                output_chunk=new_chunk_entity,
+                meta=meta,
+            )
+            new_schema_conversions.append(schema_conversion_entity)
 
             if num_generations and len(new_schemas) >= num_generations:
                 break
         if num_generations and len(new_schemas) >= num_generations:
             break
 
-    return new_schemas, new_chunks
+    return new_schemas, new_chunks, new_schema_conversions
 
 
 @click.command()
@@ -139,7 +147,7 @@ def run(
         chunks = get_json_chunks_with_schema(db_session)
         random.shuffle(chunks)
 
-        new_schemas, new_chunks = generate_synthetic_schemas(
+        new_schemas, new_chunks, new_schema_conversions = generate_synthetic_schemas(
             chunks,
             num_generations=num_generations,
             num_variations_per_schema=num_variations_per_schema,
@@ -155,6 +163,7 @@ def run(
 
         db_session.add_all(deduplicated_schemas)
         db_session.add_all(deduplicated_chunks)
+        db_session.add_all(new_schema_conversions)
 
         if preview:
             for chunk in deduplicated_chunks:
@@ -173,6 +182,8 @@ def run(
     except Exception as e:
         db_session.rollback()
         raise e
+    finally:
+        db_session.close()
 
 
 if __name__ == "__main__":

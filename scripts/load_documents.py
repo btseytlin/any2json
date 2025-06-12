@@ -6,7 +6,6 @@ from datasets import Dataset
 from dataclasses import asdict
 
 from any2json.containers import InputJSONChunk
-from any2json.data_engine.utils import generate_chunks_from_json_dataset
 from any2json.database.client import create_tables, get_db_session
 from any2json.database.models import SourceDocument
 from any2json.enums import ContentType
@@ -88,8 +87,9 @@ def run(input_dir: str, db_file: str, num_samples_per_dataset: int):
 
     except Exception as e:
         db_session.rollback()
-        db_session.close()
         raise e
+    finally:
+        db_session.close()
 
 
 if __name__ == "__main__":

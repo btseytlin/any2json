@@ -39,24 +39,24 @@ class PandasGenerator(SampleGenerator):
         )
         self.num_rows = random.randint(1, 5)
         self.num_cols = random.randint(2, 20)
-        self.column_configs = self.get_random_column_configs()
 
         conversion_options = [
             "csv",
             "markdown",
             "string",
             "html",
-            "json_records",
             "json_split",
             "json_index",
             "json_columns",
-            "json_values",
             "json_table",
+            "json_values",
         ]
         self.input_format = random.choice(conversion_options)
         if self.input_format in ("json_values", "json_split"):
             self.column_name_format = "numbered"
         self.format_name = self.input_format.split("_")[0]
+
+        self.column_configs = self.get_random_column_configs()
 
     def get_state(self) -> Dict[str, Any]:
         return {

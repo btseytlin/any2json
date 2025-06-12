@@ -51,22 +51,37 @@ class Chunk(Base):
     )
     parent_document = relationship("SourceDocument", back_populates="chunks")
 
-    parent_chunk_id = Column(Integer, ForeignKey("chunks.id"), nullable=True)
+    parent_chunk_id = Column(
+        Integer,
+        ForeignKey("chunks.id"),
+        nullable=True,
+        comment="Chunk that was used to generate this chunk.",
+    )
+    matches_parent_chunk = Column(
+        Boolean,
+        default=False,
+        nullable=True,
+        comment="Whether this chunk is equivalent to the parent chunk in terms of contents. Null if there is no parent chunk.",
+    )
     parent_chunk = relationship("Chunk", remote_side=[id], backref="derived_chunks")
 
     schema_id = Column(
         Integer,
         ForeignKey("json_schemas.id"),
         nullable=True,
-        comment="Schema ID in case chunk is a json",
+        comment="Schema that describes the content of this chunk if the chunk is JSON.",
     )
     schema = relationship("JsonSchema", back_populates="chunks")
 
     meta = Column(JSON, nullable=True)
 
 
-class TrainingSample(Base):
-    __tablename__ = "training_samples"
+class SchemaConversion(Base):
+    """
+    Specifies that converting "input_chunk" with "schema" will result in "output_chunk".
+    """
+
+    __tablename__ = "schema_conversions"
     id = Column(Integer, primary_key=True)
 
     input_chunk_id = Column(Integer, ForeignKey("chunks.id"), nullable=False)
@@ -77,7 +92,7 @@ class TrainingSample(Base):
         "Chunk",
         foreign_keys=[input_chunk_id],
     )
-    target_schema = relationship(
+    schema = relationship(
         "JsonSchema",
         foreign_keys=[schema_id],
     )

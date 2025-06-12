@@ -5,7 +5,7 @@ import json
 from tqdm import tqdm
 
 from any2json.database.client import get_db_session
-from any2json.database.models import Chunk, JsonSchema
+from any2json.database.models import Chunk, JsonSchema, SchemaConversion
 from any2json.enums import ContentType
 from any2json.data_engine.generators.synthetic.pandas_generator import PandasGenerator
 
@@ -41,6 +41,7 @@ def run(db_file: str, num_chunks: int, preview: bool):
         input_chunks = []
         schemas = []
         output_chunks = []
+        schema_conversions = []
         for i in tqdm(range(num_chunks)):
             generator = PandasGenerator()
             generator.setup()
@@ -49,7 +50,7 @@ def run(db_file: str, num_chunks: int, preview: bool):
             input_str, schema, output_json = generator.generate_triplet()
 
             meta = {
-                "generator": "PandasGenerator",
+                "generator": generator.__class__.__name__,
                 "generator_state": generator_state,
             }
 
@@ -57,14 +58,6 @@ def run(db_file: str, num_chunks: int, preview: bool):
                 content=schema,
                 is_synthetic=True,
                 meta=meta,
-            )
-
-            chunk_entity = Chunk(
-                content=input_str,
-                content_type=input_format,
-                schema=schema_entity,
-                meta=meta,
-                is_synthetic=True,
             )
 
             output_chunk_entity = Chunk(
@@ -75,23 +68,44 @@ def run(db_file: str, num_chunks: int, preview: bool):
                 is_synthetic=True,
             )
 
-            input_chunks.append(chunk_entity)
+            input_chunk_entity = Chunk(
+                content=input_str,
+                content_type=input_format,
+                meta=meta,
+                is_synthetic=True,
+                parent_chunk_id=output_chunk_entity.id,
+                matches_parent_chunk=True,
+            )
+
+            schema_conversion_entity = SchemaConversion(
+                input_chunk=input_chunk_entity,
+                schema=schema_entity,
+                output_chunk=output_chunk_entity,
+                meta={
+                    "generator": generator.__class__.__name__,
+                },
+            )
+
+            input_chunks.append(input_chunk_entity)
             schemas.append(schema_entity)
             output_chunks.append(output_chunk_entity)
+            schema_conversions.append(schema_conversion_entity)
 
             db_session.add(schema_entity)
-            db_session.add(chunk_entity)
+            db_session.add(input_chunk_entity)
             db_session.add(output_chunk_entity)
+            db_session.add(schema_conversion_entity)
 
         logger.info(f"Generated {len(input_chunks)} input chunks")
 
         if not preview:
             db_session.commit()
         else:
-            for input_chunk, schema, output_chunk in zip(
+            for input_chunk, schema, output_chunk, schema_conversion in zip(
                 input_chunks,
                 schemas,
                 output_chunks,
+                schema_conversions,
                 strict=True,
             ):
                 print(f"{input_chunk.content=}")
@@ -99,10 +113,16 @@ def run(db_file: str, num_chunks: int, preview: bool):
                 print(f"{schema.content=}")
                 print()
                 print(f"{output_chunk.content=}")
+                print()
+                print(f"{schema_conversion=}")
+                print()
+                print()
 
     except Exception as e:
         db_session.rollback()
         raise e
+    finally:
+        db_session.close()
 
 
 if __name__ == "__main__":
