@@ -34,10 +34,6 @@ def download_huggingface_datasets(
             "args": (),
             "kwargs": {"split": "train"},
         },
-        "endomorphosis/Caselaw_Access_Project_JSON": {
-            "args": (),
-            "kwargs": {"split": "train"},
-        },
         "mdhasnainali/job-html-to-json": {
             "args": (),
             "kwargs": {"split": "train"},
