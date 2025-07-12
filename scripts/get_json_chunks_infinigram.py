@@ -1,7 +1,9 @@
 import logging
+import os
 import time
 import click
 import json
+from dotenv import load_dotenv
 import httpx
 import re
 from tqdm import tqdm
@@ -10,51 +12,12 @@ from any2json.data_engine.utils import deduplicate_chunks
 from any2json.database.client import get_db_session
 from any2json.database.models import Chunk, JsonSchema, SchemaConversion, SourceDocument
 from any2json.enums import ContentType
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
-
-
-def post_with_retry(
-    client: httpx.Client,
-    url: str,
-    payload: dict,
-    timeout: int = 10,
-    max_retries: int = 3,
-) -> dict:
-    for i in range(max_retries):
-        response = client.post(url, json=payload, timeout=timeout)
-
-        if response.status_code == 429:
-            time.sleep(i**2)
-            continue
-
-        response.raise_for_status()
-        return response
-
-    raise Exception(f"Failed to POST after {max_retries} retries")
-
-
-def extract_json_from_markdown(markdown_text: str, max_checks: int = 10) -> list[dict]:
-    json_chunks = []
-    pattern = r"```json\s*([\w\d\s\[\]{}\"\.,:;()]*)\s*```"
-    markdown_text = markdown_text.strip().replace("“", '"').replace("”", '"')
-    i = 0
-    for match in re.finditer(pattern, markdown_text):
-        json_str = match.group(1).strip()
-        logger.debug(f"{json_str=}")
-
-        try:
-            data = json.loads(json_str)
-            json_chunks.append(data)
-        except json.JSONDecodeError:
-            continue
-
-        i += 1
-        if i >= max_checks:
-            break
-
-    return json_chunks
+from any2json.utils import (
+    logger,
+    configure_loggers,
+    post_with_retry,
+    extract_json_from_markdown,
+)
 
 
 def find_documents(
@@ -92,7 +55,7 @@ def get_document_by_rank(
         logger.debug(f"Querying Infinigram API: POST {url} with payload {payload}")
         response = post_with_retry(client, url, payload, timeout=30.0)
 
-        logger.debug(f"{response.text=}")
+        # logger.debug(f"{response.text=}")
         response.raise_for_status()
         doc_data = response.json()
         if error := doc_data.get("error"):
@@ -139,15 +102,21 @@ def fetch_and_process_documents(
     collected_chunks = 0
     pbar = tqdm(range(num_chunks), desc="Retrieving documents from Infinigram")
 
+    seen_chunks = set()
+
     for shard_index, (shard_start, shard_end) in enumerate(segment_by_shard):
         for rank in range(shard_start, shard_end):
             doc_data = get_document_by_rank(client, url, index, shard_index, rank)
-            print(doc_data)
             if not doc_data:
                 continue
-            logger.debug(f"Processing document:\n{doc_data}")
+            # logger.debug(f"Processing document:\n{doc_data['metadata']['id']}")
             processed_doc = process_document(doc_data, rank)
             if processed_doc:
+                for chunk in processed_doc["json_chunks"]:
+                    chunk_str = json.dumps(chunk, ensure_ascii=False)
+                    if chunk_str in seen_chunks:
+                        continue  # if we saw this chunk before, skip the whole document
+                    seen_chunks.add(chunk_str)
                 results.append(processed_doc)
                 collected_chunks += len(processed_doc["json_chunks"])
                 pbar.set_postfix({"json_chunks": collected_chunks})
@@ -168,7 +137,7 @@ def get_json_chunks_infinigram(
     client = httpx.Client()
     find_results = find_documents(client, infinigram_url, infinigram_index, query)
 
-    logger.info(f"{find_results=}")
+    logger.debug(f"{find_results=}")
 
     doc_count = find_results.get("cnt", 0)
     if doc_count == 0:
@@ -304,4 +273,10 @@ def run(
 
 
 if __name__ == "__main__":
+    load_dotenv(override=True)
+    configure_loggers(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        basic_level=os.getenv("LOG_LEVEL_BASIC", "WARNING"),
+    )
+    logger.info("Starting script")
     run()
