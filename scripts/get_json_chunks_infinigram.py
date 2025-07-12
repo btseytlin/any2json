@@ -102,6 +102,7 @@ def fetch_and_process_documents(
     collected_chunks = 0
     pbar = tqdm(range(num_chunks), desc="Retrieving documents from Infinigram")
 
+    seen_documents = set()
     seen_chunks = set()
 
     for shard_index, (shard_start, shard_end) in enumerate(segment_by_shard):
@@ -109,6 +110,11 @@ def fetch_and_process_documents(
             doc_data = get_document_by_rank(client, url, index, shard_index, rank)
             if not doc_data:
                 continue
+            doc_id = json.loads(doc_data.get("metadata")).get("metadata", {}).get("id")
+            if doc_id in seen_documents:
+                continue
+            seen_documents.add(doc_id)
+
             # logger.debug(f"Processing document:\n{doc_data['metadata']['id']}")
             processed_doc = process_document(doc_data, rank)
             if processed_doc:
