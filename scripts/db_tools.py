@@ -7,7 +7,7 @@ from sqlalchemy import String, cast, create_engine, func, select
 from sqlalchemy.orm import Session
 
 from any2json.database.client import create_tables, get_db_session
-from any2json.database.models import Chunk, SourceDocument
+from any2json.database.models import Chunk, JsonSchema, SourceDocument
 from any2json.utils import configure_loggers, logger
 
 
@@ -180,6 +180,51 @@ def drop_duplicated_chunks(
         db_session.delete(chunk)
 
 
+def get_duplicated_schemas_by_content(
+    db_session: Session,
+) -> dict[str, list[JsonSchema]]:
+    """Return schemas that have the same content as other schemas."""
+    duplicate_content_subquery = (
+        select(JsonSchema.content)
+        .group_by(JsonSchema.content)
+        .having(func.count(JsonSchema.content) > 1)
+    )
+    query = select(JsonSchema).where(JsonSchema.content.in_(duplicate_content_subquery))
+    schemas = db_session.execute(query).scalars().all()
+    duplicates = defaultdict(list)
+    for schema in schemas:
+        content_fingerprint = json.dumps(schema.content)
+        duplicates[content_fingerprint].append(schema)
+    return duplicates
+
+
+def drop_duplicated_schemas(
+    db_session: Session,
+    duplicate_schemas: dict[str, list[JsonSchema]],
+):
+    if not duplicate_schemas:
+        return
+
+    schemas_to_delete = set()
+    for _, schemas in duplicate_schemas.items():
+        original_schema = schemas[0]
+        for schema in schemas[1:]:
+            for chunk in schema.chunks:
+                logger.debug(
+                    f"Chunk {chunk.id} schema reassigned {chunk.schema_id} -> {original_schema.id}"
+                )
+                chunk.schema = original_schema
+                db_session.add(chunk)
+            schemas_to_delete.add(schema)
+
+    logger.info(
+        f"Found {len(schemas_to_delete)} duplicate schemas to delete: {[s.id for s in schemas_to_delete]}"
+    )
+
+    for schema in schemas_to_delete:
+        db_session.delete(schema)
+
+
 @cli.command()
 @click.option(
     "--db-file",
@@ -216,6 +261,35 @@ def drop_duplicate_chunks(db_file: str, preview: bool):
         drop_duplicated_chunks(db_session, duplicate_chunks_by_content)
     else:
         logger.info("No duplicate chunks found")
+
+    if not preview:
+        db_session.commit()
+        logger.info("Committed changes to the database")
+    else:
+        logger.info("Preview mode, not deleting anything")
+
+
+@cli.command()
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Sqlite3 file to read the database from",
+)
+@click.option(
+    "--preview",
+    is_flag=True,
+    help="If true doesnt save changes to the database",
+)
+def drop_duplicate_schemas(db_file: str, preview: bool):
+    db_session = get_db_session(f"sqlite:///{db_file}")
+    duplicate_schemas_by_content = get_duplicated_schemas_by_content(db_session)
+    if duplicate_schemas_by_content:
+        logger.info("Dropping duplicate schemas")
+        drop_duplicated_schemas(db_session, duplicate_schemas_by_content)
+    else:
+        logger.info("No duplicate schemas found")
 
     if not preview:
         db_session.commit()
