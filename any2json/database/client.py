@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from .models import Base
+from contextlib import contextmanager
 
 engine = None
 session_maker = None
@@ -20,3 +21,16 @@ def get_db_session(database_uri: str) -> Session:
 
     db = session_maker()
     return db
+
+
+@contextmanager
+def db_session_scope(db_url: str):
+    session = get_db_session(db_url)
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

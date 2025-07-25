@@ -6,7 +6,7 @@ import click
 from sqlalchemy import String, cast, create_engine, func, select
 from sqlalchemy.orm import Session
 
-from any2json.database.client import get_db_session
+from any2json.database.client import create_tables, get_db_session
 from any2json.database.models import Chunk, SourceDocument
 from any2json.utils import configure_loggers, logger
 
@@ -178,6 +178,21 @@ def drop_duplicated_chunks(
 
     for chunk in chunks_to_delete:
         db_session.delete(chunk)
+
+
+@cli.command()
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(exists=False, dir_okay=False),
+    required=True,
+    help="Sqlite3 file to read the database from",
+)
+def init_db(db_file: str):
+    db_session = get_db_session(f"sqlite:///{db_file}")
+    create_tables(db_session)
+    db_session.commit()
+    db_session.close()
 
 
 @cli.command()

@@ -92,3 +92,54 @@ def extract_json_from_markdown(markdown_text: str, max_checks: int = 10) -> list
             break
 
     return json_chunks
+
+
+def to_supported_type_dict(type_dict: dict) -> dict:
+    type_dict = deepcopy(type_dict)
+    type_replaces = {
+        "date": "string",
+    }
+    drop_type_keys = ["enum", "format"]
+
+    type_dict = {k_: v_ for k_, v_ in type_dict.items() if k_ not in drop_type_keys}
+    type_dict["type"] = type_replaces.get(type_dict["type"], type_dict["type"])
+    return type_dict
+
+
+def to_supported_json_schema(schema: dict | list) -> dict | list:
+    schema = deepcopy(schema)
+    type_replaces = {
+        "date": "string",
+    }
+    drop_keys = [
+        "minItems",
+        "maxItems",
+        "minLength",
+        "maxLength",
+        "required",
+        "enum",
+        "format",
+        "additionalProperties",
+    ]
+
+    if isinstance(schema, list):
+        return [to_supported_json_schema(item) for item in schema]
+
+    if isinstance(schema, dict):
+        schema = {k: v for k, v in schema.items() if k not in drop_keys}
+
+        for k, v in schema.items():
+            if k == "type":
+                if isinstance(v, str) and v in type_replaces:
+                    schema[k] = type_replaces[v]
+                elif isinstance(v, dict):
+                    schema[k] = to_supported_type_dict(v)
+                elif isinstance(v, list):
+                    schema[k] = [to_supported_type_dict(item) for item in v]
+            elif k == "properties":
+                schema[k] = {k_: to_supported_json_schema(v_) for k_, v_ in v.items()}
+            elif k == "items":
+                schema[k] = to_supported_json_schema(v)
+            elif isinstance(v, (dict, list)):
+                schema[k] = to_supported_json_schema(v)
+    return schema

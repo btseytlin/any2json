@@ -27,7 +27,7 @@ class SourceDocument(Base):
 class JsonSchema(Base):
     __tablename__ = "json_schemas"
     id = Column(Integer, primary_key=True)
-    content = Column(JSON, nullable=False, unique=True)
+    content = Column(JSON, nullable=False, unique=False)
     is_synthetic = Column(Boolean, default=False, nullable=False)
 
     parent_schema_id = Column(Integer, ForeignKey("json_schemas.id"), nullable=True)
