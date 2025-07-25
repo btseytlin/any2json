@@ -1,4 +1,5 @@
 import os
+import random
 import click
 from dotenv import load_dotenv
 import logging
@@ -7,6 +8,9 @@ import time
 import click
 from datasets import Dataset, load_dataset
 from dotenv import load_dotenv
+from any2json.data_engine.generators.converters.utils import (
+    generate_synthetic_format_conversions,
+)
 from any2json.data_engine.generators.generator_utils import generate_synthetic_chunks
 from any2json.database.client import db_session_scope
 from any2json.utils import logger, configure_loggers
@@ -27,6 +31,9 @@ from any2json.data_engine.generators.synthetic.pandas_generator import PandasGen
 @click.group()
 def cli():
     pass
+
+
+# Step 0: Download datasets
 
 
 @cli.command()
@@ -137,7 +144,7 @@ def download_datasets(output_dir, max_records, overwrite):
         time.sleep(3)
 
 
-# Step 1: Process all source datasets, extract whatever we can from them
+# Step 1: Process all source datasets, extract inputs from them
 
 
 @cli.command()
@@ -162,7 +169,27 @@ def process_dataset(input_dir: str, db_file: str, num_samples_per_dataset: int):
         processor(db_session, input_dir, num_samples_per_dataset)
 
 
-# Step 2: Generate synthetic data from pandas
+# Step 2: Extract json chunks from source documents
+
+
+@cli.command(
+    name="scrape-json-chunks",
+)
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(),
+    required=True,
+    help="Sqlite3 file to save the database to",
+)
+def extract_json_chunks_command(db_file: str):
+    logger.info(f"Scraping json chunks from {db_file}")
+
+    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+        pass
+
+
+# Step 3: Generate synthetic data from pandas
 
 
 @cli.command()
@@ -198,24 +225,132 @@ def generate_pandas_chunks(db_file: str, num_chunks: int, preview: bool):
             )
         )
 
-        for input_chunk, schema, output_chunk, schema_conversion in zip(
-            input_chunks,
-            schemas,
-            output_chunks,
-            schema_conversions,
-            strict=True,
-        ):
-            print(f"{input_chunk.content=}")
-            print()
-            print(f"{schema.content=}")
-            print()
-            print(f"{output_chunk.content=}")
-            print()
-            print(f"{schema_conversion=}")
-            print()
-            print()
+        if preview:
+            for input_chunk, schema, output_chunk, schema_conversion in zip(
+                input_chunks,
+                schemas,
+                output_chunks,
+                schema_conversions,
+                strict=True,
+            ):
+                print(f"{input_chunk.content=}")
+                print()
+                print(f"{schema.content=}")
+                print()
+                print(f"{output_chunk.content=}")
+                print()
+                print(f"{schema_conversion=}")
+                print()
+                print()
+
+            raise Exception("Preview mode, not saving to database")
+
+
+# Step 4: Generate schemas for json chunks with no schema
+
+
+@cli.command(
+    name="generate-schemas",
+)
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(),
+    required=True,
+    help="Sqlite3 file to save the database to",
+)
+def generate_schemas_command(db_file: str):
+    logger.info(f"Generating synthetic schemas from {db_file}")
+
+    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+        pass
+
+
+# Step 5: Generate synthetic schemas from existing schemas
+
+
+@cli.command(
+    name="generate-synthetic-schemas",
+)
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(),
+    required=True,
+    help="Sqlite3 file to save the database to",
+)
+@click.option(
+    "--num-variations-per-schema",
+    default=1,
+    type=int,
+    required=True,
+)
+@click.option(
+    "--num-generations",
+    default=None,
+    type=int,
+    required=False,
+)
+def generate_synthetic_schemas_command(
+    db_file: str, num_variations_per_schema: int, num_generations: int | None
+):
+    logger.info(f"Generating synthetic schemas from {db_file}")
+
+    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+        pass
+
+
+# Step 6: Generate synthetic format conversions from JSON to other formats
+
+
+@cli.command(
+    name="generate-synthetic-format-conversions",
+)
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(),
+    required=True,
+    help="Sqlite3 file to save the database to",
+)
+@click.option(
+    "--num-generations",
+    default=None,
+    type=int,
+    required=False,
+)
+@click.option(
+    "--preview",
+    is_flag=True,
+    help="Preview the generated chunks, don't save to database",
+)
+def generate_synthetic_format_conversions_command(
+    db_file: str,
+    num_generations: int | None,
+    preview: bool,
+):
+    logger.info(f"Generating synthetic format conversions from {db_file}")
+
+    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+        synthetic_chunks, schema_conversions = generate_synthetic_format_conversions(
+            db_session,
+            num_generations=num_generations,
+        )
 
         if preview:
+            for synthetic_chunk, schema_conversion in zip(
+                synthetic_chunks,
+                schema_conversions,
+                strict=True,
+            ):
+                print(f"{schema_conversion.input_chunk.content=}")
+                print()
+                print(f"{schema_conversion.schema.content=}")
+                print()
+                print(f"{schema_conversion.output_chunk.content=}")
+                print()
+                print()
+
             raise Exception("Preview mode, not saving to database")
 
 
