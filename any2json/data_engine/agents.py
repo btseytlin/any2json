@@ -5,9 +5,10 @@ from pydantic import Field
 import fastjsonschema
 from pydantic_ai import Agent
 from pydantic import BaseModel
-import logging
+from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 
-logger = logging.getLogger(__name__)
+from any2json.utils import logger
+from any2json.schema_utils import to_supported_json_schema
 
 
 class SchemaAgentInputSchema(BaseModel):
@@ -35,22 +36,19 @@ class SchemaAgentOutputSchema(BaseModel):
 class JSONSchemaValidationAgent:
     def __init__(
         self,
-        client: Any,
-        model: str = "gemini-2.0-flash",
+        model: str = "gemini-2.5-flash-lite",
         max_retries: int = 3,
+        enable_thinking: bool = True,
     ):
-        system_prompt = """You are a JSONSchema generation expert. Your task is to:
+        self.system_prompt = """You are a JSONSchema generation expert. Your task is to:
 1. Parse the provided JSON string
 2. Analyze the structure and data types
 3. Generate a comprehensive JSONSchema that describes the data
-4. Ensure the schema is valid and follows JSON Schema specifications
+4. Ensure the schema is valid and follows JSON Schema specification
+5. Use only the basic subset of JSON Schema. Only use the following types: string, number, boolean, array, object. No "format", "enum" or other attributes. 
+No references and $defs. No "required", "additionalProperties", "minItems" or similar keys.
+6. Make sure every type is nullable
 
-Be precise with data types, required fields, and constraints. Generate schemas that are:
-- Accurate to the actual data structure
-- Comprehensive in type definitions
-- Properly formatted according to JSON Schema standards
-- Without descriptions
-- Include appropriate constraints and validation rules
 
 Never output a "{{}}" or "true" as the schema. While they are valid, they are not useful. You can expect every string you get to have a realistic JSON schema.
 
@@ -66,33 +64,46 @@ Input:
 
 Output:
 {
-    "type": "object",
+    "type": ["object", "null"],
     "properties": {
         "name": {
-            "type": "string",
+            "type": ["string", "null"],
         },
         "age": {
-            "type": "integer",
-            "minimum": 0
+            "type": ["integer", "null"],
         },
         "isStudent": {
-            "type": "boolean",
+            "type": ["boolean", "null"],
         },
         "courses": {
-            "type": "array",
+            "type": ["array", "null"],
             "items": {
-                "type": "string"
+                "type": ["string", "null"],
             },
         }
     },
-    "required": ["name", "age", "isStudent", "courses"]
 }
 """
 
+        self.model = GoogleModel(
+            model,
+            settings=(
+                GoogleModelSettings(
+                    google_thinking_config=(
+                        {
+                            "thinking_budget": 1024,
+                            "include_thoughts": False,
+                        }
+                    ),
+                )
+                if enable_thinking
+                else None
+            ),
+        )
+
         self.agent = Agent(
-            client=client,
-            model=model,
-            system_prompt=system_prompt,
+            model=self.model,
+            system_prompt=self.system_prompt,
             output_type=SchemaAgentOutputSchema,
         )
         self.max_retries = max_retries
@@ -135,15 +146,17 @@ Please correct the schema and return a valid JSONSchema.
             previous_schema=previous_schema,
         )
 
-        logger.debug(f"Prompt: {schema_prompt}")
+        logger.debug(f"LLM prompt: {schema_prompt}")
         response = self.agent.run_sync(schema_prompt)
 
-        logger.debug(f"Response: {response}")
+        logger.debug(f"LLM response: {response}")
         schema = json.loads(response.output.output_schema)
         return schema
 
     def validate_schema(
-        self, generated_schema: Dict[str, Any], input_data: str
+        self,
+        generated_schema: Dict[str, Any],
+        input_data: str,
     ) -> bool:
         assert generated_schema, "Generated schema cannot be empty"
         logger.debug(f"Validating {input_data} against schema: {generated_schema}")
@@ -164,9 +177,8 @@ Please correct the schema and return a valid JSONSchema.
                 generated_schema = self.generate_schema(
                     input_string, error_message, previous_schema
                 )
-                previous_schema = generated_schema
-
                 self.validate_schema(generated_schema, input_string)
+                previous_schema = generated_schema
 
                 logger.debug(f"Successfully validated schema: {generated_schema}")
 

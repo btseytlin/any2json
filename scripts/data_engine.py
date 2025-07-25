@@ -2,29 +2,29 @@ import os
 import random
 import click
 from dotenv import load_dotenv
-import logging
 import os
 import time
 import click
 from datasets import Dataset, load_dataset
 from dotenv import load_dotenv
+from any2json.data_engine.agents import JSONSchemaValidationAgent
 from any2json.data_engine.generators.converters.utils import (
     generate_synthetic_format_conversions,
 )
-from any2json.data_engine.generators.generator_utils import generate_synthetic_chunks
+from any2json.data_engine.helpers import (
+    deduplicate_chunks,
+    extract_json_chunks,
+    generate_schemas_for_chunks,
+    get_json_chunks_with_no_schema,
+    get_json_chunks_with_schema,
+    get_json_documents,
+    generate_synthetic_chunks,
+    generate_synthetic_schemas,
+)
 from any2json.database.client import db_session_scope
 from any2json.utils import logger, configure_loggers
 from any2json.dataset_processors import get_dataset_processor
 
-import logging
-import click
-import json
-
-from tqdm import tqdm
-
-from any2json.database.client import get_db_session
-from any2json.database.models import Chunk, JsonSchema, SchemaConversion
-from any2json.enums import ContentType
 from any2json.data_engine.generators.synthetic.pandas_generator import PandasGenerator
 
 
@@ -173,7 +173,7 @@ def process_dataset(input_dir: str, db_file: str, num_samples_per_dataset: int):
 
 
 @cli.command(
-    name="scrape-json-chunks",
+    name="extract-json-chunks",
 )
 @click.option(
     "--db-file",
@@ -182,11 +182,24 @@ def process_dataset(input_dir: str, db_file: str, num_samples_per_dataset: int):
     required=True,
     help="Sqlite3 file to save the database to",
 )
-def extract_json_chunks_command(db_file: str):
-    logger.info(f"Scraping json chunks from {db_file}")
+@click.option(
+    "--max-depth",
+    default=3,
+    type=int,
+    help="Maximum depth to generate chunks from",
+)
+def extract_json_chunks_command(db_file: str, max_depth: int):
+    logger.info(f"Extracting json chunks from {db_file}")
 
     with db_session_scope(f"sqlite:///{db_file}") as db_session:
-        pass
+        documents = get_json_documents(db_session)
+        chunks = extract_json_chunks(documents, max_depth=max_depth)
+        logger.info(f"Generated {len(chunks)} input chunks")
+
+        deduplicated_chunks = deduplicate_chunks(chunks)
+
+        db_session.add_all(deduplicated_chunks)
+        logger.info(f"After deduplication: adding {len(deduplicated_chunks)} chunks")
 
 
 # Step 3: Generate synthetic data from pandas
@@ -259,11 +272,64 @@ def generate_pandas_chunks(db_file: str, num_chunks: int, preview: bool):
     required=True,
     help="Sqlite3 file to save the database to",
 )
-def generate_schemas_command(db_file: str):
+@click.option(
+    "--num-chunks",
+    default=None,
+    type=int,
+    required=False,
+)
+@click.option(
+    "--model",
+    default="gemini-2.5-flash-lite",
+    type=str,
+    required=True,
+)
+@click.option(
+    "--enable-thinking",
+    default=True,
+    type=bool,
+    required=False,
+)
+@click.option(
+    "--max-retries",
+    default=3,
+    type=int,
+    required=False,
+)
+def generate_schemas_command(
+    db_file: str,
+    num_chunks: int | None,
+    model: str,
+    max_retries: int,
+    enable_thinking: bool,
+):
     logger.info(f"Generating synthetic schemas from {db_file}")
+    logger.warning(
+        "This command commits after every schema generation and is not easily reversible!"
+    )
+
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    assert api_key, "GEMINI_API_KEY is not set"
 
     with db_session_scope(f"sqlite:///{db_file}") as db_session:
-        pass
+        chunks = get_json_chunks_with_no_schema(db_session)
+        random.shuffle(chunks)
+
+        if num_chunks:
+            chunks = chunks[:num_chunks]
+
+        logger.info(f"Loaded {len(chunks)} JSON chunks with no schema for processing")
+
+        schema_agent = JSONSchemaValidationAgent(model, max_retries, enable_thinking)
+
+        schemas, chunks = generate_schemas_for_chunks(
+            db_session=db_session,
+            chunks=chunks,
+            schema_agent=schema_agent,
+        )
+
+        logger.info(f"Generated {len(schemas)} schemas for {len(chunks)} chunks")
 
 
 # Step 5: Generate synthetic schemas from existing schemas
@@ -291,13 +357,52 @@ def generate_schemas_command(db_file: str):
     type=int,
     required=False,
 )
+@click.option(
+    "--preview",
+    is_flag=True,
+    help="Preview the generated chunks, don't save to database",
+)
 def generate_synthetic_schemas_command(
-    db_file: str, num_variations_per_schema: int, num_generations: int | None
+    db_file: str,
+    num_variations_per_schema: int,
+    num_generations: int | None,
+    preview: bool,
 ):
     logger.info(f"Generating synthetic schemas from {db_file}")
 
     with db_session_scope(f"sqlite:///{db_file}") as db_session:
-        pass
+        chunks = get_json_chunks_with_schema(db_session)
+        random.shuffle(chunks)
+
+        new_schemas, new_chunks, new_schema_conversions = generate_synthetic_schemas(
+            chunks,
+            num_generations=num_generations,
+            num_variations_per_schema=num_variations_per_schema,
+        )
+        logger.info(f"Generated {len(new_schemas)} synthetic schemas")
+        logger.info(f"Generated {len(new_chunks)} synthetic chunks")
+
+        deduplicated_chunks = deduplicate_chunks(new_chunks)
+        deduplicated_schemas = [c.schema for c in deduplicated_chunks]
+
+        logger.info(f"Deduplicated {len(deduplicated_chunks)} synthetic chunks")
+        logger.info(f"Deduplicated {len(deduplicated_schemas)} synthetic schemas")
+
+        db_session.add_all(deduplicated_schemas)
+        db_session.add_all(deduplicated_chunks)
+        db_session.add_all(new_schema_conversions)
+
+        if preview:
+            for chunk in deduplicated_chunks:
+                print(f"{chunk.content=}")
+                print(f"{chunk.meta=}")
+                print()
+                print(f"{chunk.schema.content=}")
+                print()
+                print(f"{chunk.schema.meta=}")
+                print()
+                print()
+            raise Exception("Preview mode, not saving to database")
 
 
 # Step 6: Generate synthetic format conversions from JSON to other formats

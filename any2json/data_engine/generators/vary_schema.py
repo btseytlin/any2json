@@ -13,7 +13,7 @@ from faker import Faker
 from dataclasses import dataclass
 
 from any2json.data_engine.generators.base import SampleGenerator
-from any2json.utils import remove_list_types_from_schema
+from any2json.schema_utils import to_supported_json_schema
 
 
 class VaryJSONSchemaGenerator(SampleGenerator):
@@ -46,7 +46,11 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         new_schema = deepcopy(schema)
         changed_types = {}
         for key, value in new_schema["properties"].items():
-            if value["type"] in ["number", "integer"]:
+            if (
+                value.get("type") in ["number", "integer"]
+                or isinstance(value.get("type"), list)
+                and value.get("type")[0] in ["integer"]
+            ):
                 if random.random() <= self.stringify_number_proba:
                     value["type"] = "string"
                     changed_types[key] = "number_to_string"
@@ -138,6 +142,10 @@ class VaryJSONSchemaGenerator(SampleGenerator):
 
             fastjsonschema.validate(new_schema, transformed_data)
 
+            assert any(
+                [v is not None for v in transformed_data.values()]
+            ), "Transformed data has no non-null values"
+
             return transformed_data
         except ValidationError as e:
             raise ValueError(f"Input data could not be transformed to new schema: {e}")
@@ -186,7 +194,7 @@ class VaryJSONSchemaGenerator(SampleGenerator):
 
         new_data = self.get_new_data(source_data, new_schema, changes)
 
-        new_schema = remove_list_types_from_schema(new_schema)
+        new_schema = to_supported_json_schema(new_schema)
 
         return source_schema, source_data, new_schema, new_data, changes
 

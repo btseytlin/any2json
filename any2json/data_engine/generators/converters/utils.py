@@ -1,5 +1,5 @@
 import random
-from any2json.data_engine.utils import deduplicate_chunks
+from any2json.data_engine.helpers import deduplicate_chunks
 from any2json.database.models import Chunk, SchemaConversion
 from any2json.data_engine.generators.converters.converters import (
     ToYamlConverter,
@@ -7,7 +7,7 @@ from any2json.data_engine.generators.converters.converters import (
     ToMarkdownTableConverter,
     ToPythonStringConverter,
 )
-from any2json.database.utils import get_json_chunks_with_schema
+from any2json.data_engine.helpers import get_json_chunks_with_schema
 from any2json.utils import logger
 import json
 from sqlalchemy.orm import Session
@@ -31,7 +31,7 @@ def generate_format_converted_chunks(
         converters = [
             ToYamlConverter,
             ToTomlConverter,
-            ToMarkdownTableConverter,
+            # ToMarkdownTableConverter, # Broken it seems
             ToPythonStringConverter,
         ]
 
@@ -42,6 +42,8 @@ def generate_format_converted_chunks(
                 converter_state = converter.get_state()
 
                 new_chunk_string = converter.convert(json_content)
+
+                assert new_chunk_string.strip(), "New chunk string is empty"
 
                 meta = {
                     "converter": converter.__class__.__name__,

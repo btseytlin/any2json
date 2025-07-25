@@ -8,7 +8,7 @@ import httpx
 import re
 from tqdm import tqdm
 
-from any2json.data_engine.utils import deduplicate_chunks
+from any2json.data_engine.helpers import deduplicate_chunks
 from any2json.database.client import get_db_session
 from any2json.database.models import Chunk, JsonSchema, SchemaConversion, SourceDocument
 from any2json.enums import ContentType
