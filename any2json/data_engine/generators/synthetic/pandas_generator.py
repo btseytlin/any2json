@@ -213,10 +213,12 @@ class PandasGenerator(SampleGenerator):
         df = self.generate_synthetic_dataframe()
 
         inferred_schema = self.infer_schema_from_dataframe(df)
+        inferred_schema = to_supported_json_schema(inferred_schema)
+        validate = fastjsonschema.compile(inferred_schema)
 
-        if inferred_schema["type"] == "array":
+        if inferred_schema["type"][0] == "array":
             json_output_data = df.to_json(orient="records")
-        elif inferred_schema["type"] == "object":
+        elif inferred_schema["type"][0] == "object":
             json_output_data = df.iloc[0].to_json()
         else:
             raise ValueError(f"Unsupported schema type: {inferred_schema['type']}")
@@ -228,11 +230,6 @@ class PandasGenerator(SampleGenerator):
         )
         logger.debug(f"Generated schema: {json.dumps(inferred_schema, indent=1)}")
 
-        validate = fastjsonschema.compile(inferred_schema)
         validate(json.loads(json_output_data))
-
-        inferred_schema = to_supported_json_schema(inferred_schema)
-
-        logger.debug(f"Simplified schema: {json.dumps(inferred_schema, indent=1)}")
 
         return formatted_str, inferred_schema, json_output_data
