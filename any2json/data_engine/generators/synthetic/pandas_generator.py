@@ -6,6 +6,7 @@ import random
 from any2json.containers import FromOtherFormatSample, Sample
 from any2json.data_engine.generators.base import SampleGenerator
 from typing import Any, Callable, Dict, List, Literal, Union
+from sqlalchemy.orm import Session
 
 from any2json.utils import remove_list_types_from_schema
 

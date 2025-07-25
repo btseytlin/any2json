@@ -94,23 +94,33 @@ def extract_json_from_markdown(markdown_text: str, max_checks: int = 10) -> list
     return json_chunks
 
 
-def to_supported_type_dict(type_dict: dict) -> dict:
-    type_dict = deepcopy(type_dict)
+def to_supported_type(type_: str | dict | list) -> str:
+    type_replaces = {
+        "date": "string",
+    }
+    if isinstance(type_, str):
+        return type_replaces.get(type_, type_)
+
+    if isinstance(type_, list):
+        if len(type_) == 2 and type_[1] == "null":
+            return to_supported_type(type_[0])
+        else:
+            return [to_supported_type(item) for item in type_]
+
+    type_dict = deepcopy(type_)
     type_replaces = {
         "date": "string",
     }
     drop_type_keys = ["enum", "format"]
 
     type_dict = {k_: v_ for k_, v_ in type_dict.items() if k_ not in drop_type_keys}
-    type_dict["type"] = type_replaces.get(type_dict["type"], type_dict["type"])
+    type_dict["type"] = to_supported_type(type_dict["type"])
     return type_dict
 
 
 def to_supported_json_schema(schema: dict | list) -> dict | list:
     schema = deepcopy(schema)
-    type_replaces = {
-        "date": "string",
-    }
+
     drop_keys = [
         "minItems",
         "maxItems",
@@ -130,12 +140,7 @@ def to_supported_json_schema(schema: dict | list) -> dict | list:
 
         for k, v in schema.items():
             if k == "type":
-                if isinstance(v, str) and v in type_replaces:
-                    schema[k] = type_replaces[v]
-                elif isinstance(v, dict):
-                    schema[k] = to_supported_type_dict(v)
-                elif isinstance(v, list):
-                    schema[k] = [to_supported_type_dict(item) for item in v]
+                schema[k] = to_supported_type(v)
             elif k == "properties":
                 schema[k] = {k_: to_supported_json_schema(v_) for k_, v_ in v.items()}
             elif k == "items":
