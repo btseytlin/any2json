@@ -21,29 +21,6 @@ def configure_loggers(level: str = "WARNING", basic_level: str = "WARNING"):
     return logger
 
 
-def remove_list_types_from_schema(schema: dict) -> dict:
-    new_schema = deepcopy(schema)
-
-    if new_schema["type"] == "array":
-        new_schema["items"] = remove_list_types_from_schema(new_schema["items"])
-    else:
-        if "properties" not in new_schema:
-            return new_schema
-
-        for prop in new_schema["properties"].values():
-            if (
-                isinstance(prop["type"], list)
-                and len(prop["type"]) == 2
-                and prop["type"][1] == "null"
-            ):
-                prop["type"] = prop["type"][0]
-
-            if prop["type"] == "object":
-                prop["type"] = remove_list_types_from_schema(prop)
-
-    return new_schema
-
-
 def post_with_retry(
     client: httpx.Client,
     url: str,
@@ -92,59 +69,3 @@ def extract_json_from_markdown(markdown_text: str, max_checks: int = 10) -> list
             break
 
     return json_chunks
-
-
-def to_supported_type(type_: str | dict | list) -> str:
-    type_replaces = {
-        "date": "string",
-    }
-    if isinstance(type_, str):
-        return type_replaces.get(type_, type_)
-
-    if isinstance(type_, list):
-        if len(type_) == 2 and type_[1] == "null":
-            return to_supported_type(type_[0])
-        else:
-            return [to_supported_type(item) for item in type_]
-
-    type_dict = deepcopy(type_)
-    type_replaces = {
-        "date": "string",
-    }
-    drop_type_keys = ["enum", "format"]
-
-    type_dict = {k_: v_ for k_, v_ in type_dict.items() if k_ not in drop_type_keys}
-    type_dict["type"] = to_supported_type(type_dict["type"])
-    return type_dict
-
-
-def to_supported_json_schema(schema: dict | list) -> dict | list:
-    schema = deepcopy(schema)
-
-    drop_keys = [
-        "minItems",
-        "maxItems",
-        "minLength",
-        "maxLength",
-        "required",
-        "enum",
-        "format",
-        "additionalProperties",
-    ]
-
-    if isinstance(schema, list):
-        return [to_supported_json_schema(item) for item in schema]
-
-    if isinstance(schema, dict):
-        schema = {k: v for k, v in schema.items() if k not in drop_keys}
-
-        for k, v in schema.items():
-            if k == "type":
-                schema[k] = to_supported_type(v)
-            elif k == "properties":
-                schema[k] = {k_: to_supported_json_schema(v_) for k_, v_ in v.items()}
-            elif k == "items":
-                schema[k] = to_supported_json_schema(v)
-            elif isinstance(v, (dict, list)):
-                schema[k] = to_supported_json_schema(v)
-    return schema

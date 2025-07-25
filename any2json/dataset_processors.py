@@ -13,7 +13,8 @@ from any2json.containers import InputJSONChunk
 from any2json.database.client import create_tables, get_db_session
 from any2json.database.models import Chunk, JsonSchema, SourceDocument
 from any2json.enums import ContentType
-from any2json.utils import logger, to_supported_json_schema
+from any2json.utils import logger
+from any2json.schema_utils import to_supported_json_schema
 
 
 def dirname_to_dataset_id(dirname: str) -> str:

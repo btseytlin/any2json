@@ -1,8 +1,43 @@
 import fastjsonschema
-from any2json.utils import to_supported_json_schema
+from any2json.schema_utils import to_supported_json_schema
 
 
 class TestSupportedSchema:
+    def test_all_fields_become_nullable(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "flights": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "departureTime": {"type": "date"},
+                        },
+                    },
+                },
+                "queryTime": {"type": "date"},
+            },
+        }
+
+        expected = {
+            "type": ["object", "null"],
+            "properties": {
+                "flights": {
+                    "type": ["array", "null"],
+                    "items": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "departureTime": {"type": ["string", "null"]},
+                        },
+                    },
+                },
+                "queryTime": {"type": ["string", "null"]},
+            },
+        }
+
+        assert to_supported_json_schema(schema) == expected
+        assert fastjsonschema.compile(expected)
 
     def test_converts_date_types(self):
         schema = {
@@ -22,18 +57,18 @@ class TestSupportedSchema:
         }
 
         expected = {
-            "type": "object",
+            "type": ["object", "null"],
             "properties": {
                 "flights": {
-                    "type": "array",
+                    "type": ["array", "null"],
                     "items": {
-                        "type": "object",
+                        "type": ["object", "null"],
                         "properties": {
-                            "departureTime": {"type": "string"},
+                            "departureTime": {"type": ["string", "null"]},
                         },
                     },
                 },
-                "queryTime": {"type": "string"},
+                "queryTime": {"type": ["string", "null"]},
             },
         }
 
@@ -79,23 +114,25 @@ class TestSupportedSchema:
         }
 
         expected = {
-            "type": "object",
+            "type": ["object", "null"],
             "properties": {
                 "flights": {
-                    "type": "array",
+                    "type": ["array", "null"],
                     "items": {
-                        "type": "object",
+                        "type": ["object", "null"],
                         "properties": {
-                            "flightNumber": {"type": "string"},
-                            "departureAirport": {"type": "string"},
-                            "arrivalCity": {"type": "string"},
-                            "departureTime": {"type": "string"},
-                            "arrivalTime": {"type": "string"},
+                            "flightNumber": {"type": ["string", "null"]},
+                            "departureAirport": {"type": ["string", "null"]},
+                            "arrivalCity": {"type": ["string", "null"]},
+                            "departureTime": {"type": ["string", "null"]},
+                            "arrivalTime": {"type": ["string", "null"]},
                             "price": {
-                                "type": "object",
+                                "type": ["object", "null"],
                                 "properties": {
-                                    "currency": {"type": "string"},
-                                    "amount": {"type": "number"},
+                                    "currency": {"type": ["string", "null"]},
+                                    "amount": {
+                                        "type": ["number", "null"],
+                                    },
                                 },
                             },
                         },
@@ -105,6 +142,7 @@ class TestSupportedSchema:
         }
 
         assert to_supported_json_schema(schema) == expected
+        assert fastjsonschema.compile(expected)
 
         schema = {
             "type": "object",
@@ -158,37 +196,37 @@ class TestSupportedSchema:
         }
 
         expected = {
-            "type": "object",
+            "type": ["object", "null"],
             "properties": {
                 "tokamak": {
-                    "type": "object",
+                    "type": ["object", "null"],
                     "properties": {
-                        "name": {"type": "string"},
-                        "location": {"type": "string"},
+                        "name": {"type": ["string", "null"]},
+                        "location": {"type": ["string", "null"]},
                         "operation_schedule": {
-                            "type": "object",
+                            "type": ["object", "null"],
                             "properties": {
-                                "start_date": {"type": "string"},
-                                "end_date": {"type": "string"},
+                                "start_date": {"type": ["string", "null"]},
+                                "end_date": {"type": ["string", "null"]},
                             },
                         },
                         "key_features": {
-                            "type": "array",
+                            "type": ["array", "null"],
                             "items": {
-                                "type": "object",
+                                "type": ["object", "null"],
                                 "properties": {
-                                    "feature_name": {"type": "string"},
-                                    "description": {"type": "string"},
+                                    "feature_name": {"type": ["string", "null"]},
+                                    "description": {"type": ["string", "null"]},
                                 },
                             },
                         },
                         "research_findings": {
-                            "type": "array",
+                            "type": ["array", "null"],
                             "items": {
-                                "type": "object",
+                                "type": ["object", "null"],
                                 "properties": {
-                                    "finding_title": {"type": "string"},
-                                    "abstract": {"type": "string"},
+                                    "finding_title": {"type": ["string", "null"]},
+                                    "abstract": {"type": ["string", "null"]},
                                 },
                             },
                         },
@@ -223,18 +261,18 @@ class TestSupportedSchema:
 
         expected = {
             "$id": "https://example.com/spanish-flu",
-            "type": "object",
+            "type": ["object", "null"],
             "properties": {
                 "cities": {"$ref": "#/$defs/CityData"},
             },
             "$defs": {
                 "CityData": {
                     "$id": "https://example.com/city-data",
-                    "type": "object",
+                    "type": ["object", "null"],
                     "properties": {
-                        "city_name": {"type": "string"},
-                        "mortality_rate": {"type": "integer"},
-                        "population_size": {"type": "integer"},
+                        "city_name": {"type": ["string", "null"]},
+                        "mortality_rate": {"type": ["integer", "null"]},
+                        "population_size": {"type": ["integer", "null"]},
                     },
                 },
             },

@@ -8,7 +8,8 @@ from any2json.data_engine.generators.base import SampleGenerator
 from typing import Any, Callable, Dict, List, Literal, Union
 from sqlalchemy.orm import Session
 
-from any2json.utils import remove_list_types_from_schema
+from any2json.schema_utils import to_supported_json_schema
+from any2json.utils import logger
 
 
 class PandasGenerator(SampleGenerator):
@@ -222,9 +223,16 @@ class PandasGenerator(SampleGenerator):
 
         formatted_str = self.convert_dataframe_to_format(df, self.input_format)
 
+        logger.debug(
+            f"Generated data: {json.dumps(json.loads(json_output_data), indent=1)}"
+        )
+        logger.debug(f"Generated schema: {json.dumps(inferred_schema, indent=1)}")
+
         validate = fastjsonschema.compile(inferred_schema)
         validate(json.loads(json_output_data))
 
-        inferred_schema = remove_list_types_from_schema(inferred_schema)
+        inferred_schema = to_supported_json_schema(inferred_schema)
+
+        logger.debug(f"Simplified schema: {json.dumps(inferred_schema, indent=1)}")
 
         return formatted_str, inferred_schema, json_output_data

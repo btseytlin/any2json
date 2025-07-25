@@ -8,20 +8,24 @@ from any2json.data_engine.generators.base import SampleGenerator
 from typing import Any, Callable, Dict, List, Literal, Union
 from sqlalchemy.orm import Session
 
+from any2json.database.models import Chunk, JsonSchema, SchemaConversion
+from any2json.enums import ContentType
 from any2json.utils import logger
+from tqdm.auto import tqdm
 
 
 def generate_synthetic_chunks(
     db_session: Session,
     num_chunks: int,
-    generator: SampleGenerator,
+    generator_class: type[SampleGenerator],
+    **kwargs,
 ):
     input_chunks = []
     schemas = []
     output_chunks = []
     schema_conversions = []
     for i in tqdm(range(num_chunks)):
-        generator = PandasGenerator()
+        generator = generator_class(**kwargs)
         generator.setup()
         generator_state = generator.get_state()
         input_format = ContentType(generator.format_name.upper()).value
@@ -74,4 +78,5 @@ def generate_synthetic_chunks(
         db_session.add(output_chunk_entity)
         db_session.add(schema_conversion_entity)
 
-        logger.info(f"Generated {len(input_chunks)} input chunks")
+    logger.info(f"Generated {len(input_chunks)} input chunks")
+    return input_chunks, schemas, output_chunks, schema_conversions
