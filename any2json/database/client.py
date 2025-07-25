@@ -2,6 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from .models import Base
 from contextlib import contextmanager
+from any2json.utils import logger
 
 engine = None
 session_maker = None
@@ -29,8 +30,10 @@ def db_session_scope(db_url: str):
     try:
         yield session
         session.commit()
+        logger.info("Commited changes to the database")
     except Exception:
         session.rollback()
+        logger.warning("Database changes rollback")
         raise
     finally:
         session.close()
