@@ -245,6 +245,9 @@ def get_dataset_processor(input_dir: str) -> Callable:
         "wikimedia/structured-wikipedia": processor_wikimedia_structured_wikipedia,
         "christianazinn/json-training": processor_christian_azinn_json_training,
         "interstellarninja/json-mode-reasoning": processor_interstellarninja_json_mode_reasoning,
+        "interstellarninja/json-mode-verifiable": processor_interstellarninja_json_mode_reasoning,
+        "interstellarninja/json-mode-agentic-reasoning": processor_interstellarninja_json_mode_reasoning,
+        "interstellarninja/json-schema-store-reasoning": processor_interstellarninja_json_mode_reasoning,  # high error rate, todo debug
     }
 
     dataset_id = dirname_to_dataset_id(input_dir)

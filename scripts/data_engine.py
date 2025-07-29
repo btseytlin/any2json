@@ -77,39 +77,39 @@ def download_datasets(output_dir, max_records, overwrite):
             "args": (),
             "kwargs": {"split": "train"},
         },
-        # "interstellarninja/json-mode-verifiable": {
-        #     "args": (),
-        #     "kwargs": {"split": "train"},
-        # },
-        # "interstellarninja/json-mode-agentic-reasoning": {
-        #     "args": (),
-        #     "kwargs": {"split": "train"},
-        # },
-        # "interstellarninja/json-schema-store-reasoning": {
-        #     "args": (),
-        #     "kwargs": {"split": "train"},
-        # },
-        # "mdhasnainali/job-html-to-json": {
-        #     "args": (),
-        #     "kwargs": {"split": "train"},
-        # },
+        "interstellarninja/json-mode-verifiable": {
+            "args": (),
+            "kwargs": {"split": "train"},
+        },
+        "interstellarninja/json-mode-agentic-reasoning": {
+            "args": (),
+            "kwargs": {"split": "train"},
+        },
+        "interstellarninja/json-schema-store-reasoning": {
+            "args": (),
+            "kwargs": {"split": "train"},
+        },
+        "mdhasnainali/job-html-to-json": {
+            "args": (),
+            "kwargs": {"split": "train"},
+        },
+        "dataunitylab/json-schema": {
+            "args": (),
+            "kwargs": {"split": "train"},
+        },
+        "dataunitylab/json-schema-keywords": {
+            "args": (),
+            "kwargs": {"split": "train"},
+        },
+        "dataunitylab/json-schema-descriptions": {
+            "args": (),
+            "kwargs": {"split": "train"},
+        },
         # "shubh303/Invoice-to-Json": {
         #     "args": (),
         #     "kwargs": {"split": "train"},
         # },
         # "GokulRajaR/invoice-ocr-json": {
-        #     "args": (),
-        #     "kwargs": {"split": "train"},
-        # },
-        # "dataunitylab/json-schema": {
-        #     "args": (),
-        #     "kwargs": {"split": "train"},
-        # },
-        # "dataunitylab/json-schema-keywords": {
-        #     "args": (),
-        #     "kwargs": {"split": "train"},
-        # },
-        # "dataunitylab/json-schema-descriptions": {
         #     "args": (),
         #     "kwargs": {"split": "train"},
         # },
