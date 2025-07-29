@@ -3,10 +3,10 @@ import json
 import os
 from dotenv import load_dotenv
 import click
-from sqlalchemy import String, cast, create_engine, func, select
+from sqlalchemy import String, cast, create_engine, func, or_, select
 from sqlalchemy.orm import Session
 
-from any2json.database.client import create_tables, get_db_session
+from any2json.database.client import create_tables, db_session_scope, get_db_session
 from any2json.database.models import Chunk, JsonSchema, SourceDocument
 from any2json.utils import configure_loggers, logger
 
@@ -282,6 +282,49 @@ def drop_duplicate_chunks(db_file: str, preview: bool):
         logger.info("Committed changes to the database")
     else:
         logger.info("Preview mode, not deleting anything")
+
+
+@cli.command()
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Sqlite3 file to read the database from",
+)
+@click.option(
+    "--min-length",
+    default=5,
+    type=int,
+    help="Minimum length of chunk content to keep",
+)
+@click.option(
+    "--max-length",
+    default=4000,
+    type=int,
+    help="Maximum length of chunk content to keep",
+)
+@click.option(
+    "--preview",
+    is_flag=True,
+    help="If true doesnt save changes to the database",
+)
+def cull_chunks(db_file: str, min_length: int, max_length: int, preview: bool):
+    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+        # Select chunks that have very short content
+        query = select(Chunk).where(
+            or_(
+                func.length(Chunk.content) < min_length,
+                func.length(Chunk.content) > max_length,
+            )
+        )
+        chunks = db_session.execute(query).scalars().all()
+        logger.info(f"Found {len(chunks)} chunks to cull: {[c.id for c in chunks]}")
+        if not preview:
+            for chunk in chunks:
+                db_session.delete(chunk)
+        else:
+            raise Exception("Preview mode, not deleting anything")
 
 
 @cli.command()
