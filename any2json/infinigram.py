@@ -2,23 +2,28 @@ from datetime import datetime
 import asyncio
 import json
 import random
-from any2json.utils import extract_json_from_markdown, logger
+
+import xml
+from any2json.data_engine.utils import stringify_chunk_content
+from any2json.utils import extract_from_markdown, logger
 import httpx
 import time
 from tqdm.asyncio import tqdm_asyncio
 from tqdm import tqdm
 
 
-def process_document(doc_data: dict, rank: int) -> dict | None:
+def process_document(
+    doc_data: dict, rank: int, format: str
+) -> tuple[str, dict, list[dict]] | None:
     document_content = "\n".join(span[0] for span in doc_data["spans"])
 
-    # logger.debug(f"Extracting JSON chunks from document:\n{document_content}")
-    json_chunks = extract_json_from_markdown(document_content)
+    # logger.debug(f"Extracting {format} chunks from document:\n{document_content}")
+    chunks = extract_from_markdown(markdown_text=document_content, format=format)
 
-    logger.debug(f"Extracted {len(json_chunks)} JSON chunks from document {rank}")
+    logger.debug(f"Extracted {len(chunks)} {format} chunks from document {rank}")
 
-    if not json_chunks:
-        return None
+    if not chunks:
+        return None, None, None
 
     document_meta = {
         "doc_ix": doc_data.get("doc_ix"),
@@ -26,11 +31,7 @@ def process_document(doc_data: dict, rank: int) -> dict | None:
         "disp_len": doc_data.get("disp_len"),
         "rank": rank,
     }
-    return {
-        "document": document_content,
-        "json_chunks": json_chunks,
-        "document_meta": document_meta,
-    }
+    return document_content, document_meta, chunks
 
 
 class InfiniGramAPI:
@@ -135,7 +136,9 @@ class InfiniGramAPI:
         self,
         num_chunks: int,
         segment_by_shard: list[tuple[int, int]],
-    ) -> list[dict]:
+        format: str,
+        query: str,
+    ) -> tuple[str, list[dict], dict]:
         results = []
         collected_chunks = 0
 
@@ -145,7 +148,7 @@ class InfiniGramAPI:
                 payload = {
                     "index": self.index,
                     "query_type": "get_doc_by_rank",
-                    "query": "```json",
+                    "query": query,
                     "rank": rank,
                     "max_disp_len": 10000,
                     "s": shard_index,
@@ -164,6 +167,10 @@ class InfiniGramAPI:
         seen_documents = set()
         seen_chunks = set()
 
+        document_contents = []
+        document_metas = []
+        per_document_chunks = []
+
         for payload, doc_data in zip(query_payloads, doc_datas):
             rank = payload["rank"]
             doc_id = json.loads(doc_data.get("metadata")).get("metadata", {}).get("id")
@@ -171,15 +178,24 @@ class InfiniGramAPI:
                 continue
             seen_documents.add(doc_id)
 
-            processed_doc = process_document(doc_data, rank)
-            if processed_doc:
-                for chunk in processed_doc["json_chunks"]:
-                    chunk_str = json.dumps(chunk, ensure_ascii=False)
-                    if chunk_str in seen_chunks:
-                        continue  # if we saw this chunk before, skip the whole document
-                    seen_chunks.add(chunk_str)
-                results.append(processed_doc)
-                collected_chunks += len(processed_doc["json_chunks"])
+            document_content, document_meta, chunks = process_document(
+                doc_data, rank, format
+            )
+            if not document_content:
+                continue
+
+            for chunk in chunks:
+                chunk_str = stringify_chunk_content(chunk, format)
+                if chunk_str in seen_chunks:
+                    continue  # if we saw this chunk before, skip the whole document
+                seen_chunks.add(chunk_str)
+
+            document_contents.append(document_content)
+            document_metas.append(document_meta)
+            per_document_chunks.append(chunks)
+
+            collected_chunks += len(chunks)
+
             if collected_chunks >= num_chunks:
                 break
-        return results
+        return document_contents, document_metas, per_document_chunks

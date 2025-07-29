@@ -239,14 +239,21 @@ def extract_json_chunks_command(db_file: str, max_depth: int):
     default="v4_olmo-2-0325-32b-instruct_llama",
     type=str,
 )
+@click.option(
+    "--format",
+    default="json",
+    type=str,
+    help="Format of the chunks to retrieve",
+)
 def get_from_infinigram(
     db_file: str,
     num_chunks: int,
     preview: bool,
     infinigram_url: str,
     infinigram_index: str,
+    format: str,
 ):
-    logger.info(f"Getting json chunks from Infinigram")
+    logger.info(f"Getting chunks from Infinigram in {format} format")
 
     infinigram_api = InfiniGramAPI(
         index=infinigram_index,
@@ -257,8 +264,17 @@ def get_from_infinigram(
         max_concurrent_requests=25,
     )
 
+    queries = {
+        "json": "```json",
+        "xml": "```xml",
+        "csv": "```csv",
+        "yaml": "```yaml",
+        "toml": "```toml",
+        "html": "```html",
+    }
+
     with db_session_scope(f"sqlite:///{db_file}") as db_session:
-        query = "```json"
+        query = queries[format]
 
         find_results = asyncio.run(infinigram_api.find_documents(query))
 
@@ -266,12 +282,16 @@ def get_from_infinigram(
             logger.info("No documents found matching the query.")
             return
 
-        results = infinigram_api.fetch_and_process_documents(
-            num_chunks=num_chunks,
-            segment_by_shard=find_results["segment_by_shard"],
+        document_content, document_meta, per_document_chunks = (
+            infinigram_api.fetch_and_process_documents(
+                num_chunks=num_chunks,
+                segment_by_shard=find_results["segment_by_shard"],
+                format=format,
+                query=query,
+            )
         )
 
-        if not results:
+        if not document_content:
             logger.info("No results found")
             return
 
@@ -283,10 +303,17 @@ def get_from_infinigram(
             "infinigram_index": infinigram_index,
         }
         if preview:
-            preview_chunks(results)
+            preview_chunks(document_content, document_meta, per_document_chunks)
             raise Exception("Preview mode, not saving to database")
 
-        save_chunks_to_db(db_session, results, meta)
+        save_chunks_to_db(
+            db_session,
+            document_content=document_content,
+            document_meta=document_meta,
+            per_document_chunks=per_document_chunks,
+            meta=meta,
+            format=format,
+        )
 
 
 # Step 3: Generate synthetic data from pandas

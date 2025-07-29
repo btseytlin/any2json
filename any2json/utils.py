@@ -3,8 +3,10 @@ import json
 import logging
 import re
 import time
+from typing import Any
 
 import httpx
+import xml
 
 logger = logging.getLogger("any2json")
 
@@ -48,24 +50,37 @@ def remove_comments(text: str) -> str:
     return re.sub(r"//.*?\n", "", text, flags=re.DOTALL)
 
 
-def extract_json_from_markdown(markdown_text: str, max_checks: int = 10) -> list[dict]:
-    json_chunks = []
-    pattern = r"```json\s*([^(```)]+)\s*```"
+def parse_string(source_str: str, format: str) -> Any:
+    if format == "json":
+        return json.loads(source_str)
+    elif format == "xml":
+        return xml.etree.ElementTree.fromstring(source_str)
+    else:
+        raise ValueError(f"Unsupported format: {format}")
+
+
+def extract_from_markdown(
+    markdown_text: str, max_checks: int = 10, format: str = "json"
+) -> list[dict]:
+    chunks = []
+    pattern = f"```{format}" + r"\s*([^(```)]+)\s*```"
     markdown_text = markdown_text.strip().replace("“", '"').replace("”", '"')
     i = 0
     for match in re.finditer(pattern, markdown_text):
-        json_str = match.group(1).strip()
-        json_str = remove_comments(json_str)
-        logger.debug(f"{json_str=}")
+        source_str = match.group(1).strip()
+        source_str = remove_comments(source_str)
+        logger.debug(f"{source_str=}")
 
         try:
-            data = json.loads(json_str)
-            json_chunks.append(data)
-        except json.JSONDecodeError:
+            data = parse_string(source_str, format)
+        except Exception as e:
+            logger.warning(f"Error parsing {format} string: {e}")
             continue
+
+        chunks.append(data)
 
         i += 1
         if i >= max_checks:
             break
 
-    return json_chunks
+    return chunks
