@@ -244,6 +244,21 @@ def init_db(db_file: str):
 @click.option(
     "--db-file",
     default="data/database.db",
+    type=click.Path(exists=False, dir_okay=False),
+    required=True,
+    help="Sqlite3 file to read the database from",
+)
+def clear_document_content(db_file: str):
+    db_session = get_db_session(f"sqlite:///{db_file}")
+    db_session.query(SourceDocument).update({"content": ""})
+    db_session.commit()
+    db_session.close()
+
+
+@cli.command()
+@click.option(
+    "--db-file",
+    default="data/database.db",
     type=click.Path(exists=True, dir_okay=False),
     required=True,
     help="Sqlite3 file to read the database from",

@@ -73,10 +73,10 @@ def download_datasets(output_dir, max_records, overwrite):
             "args": ("20240916.en",),
             "kwargs": {"split": "train"},
         },
-        # "interstellarninja/json-mode-reasoning": {
-        #     "args": (),
-        #     "kwargs": {"split": "train"},
-        # },
+        "interstellarninja/json-mode-reasoning": {
+            "args": (),
+            "kwargs": {"split": "train"},
+        },
         # "interstellarninja/json-mode-verifiable": {
         #     "args": (),
         #     "kwargs": {"split": "train"},
