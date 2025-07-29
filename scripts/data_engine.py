@@ -32,9 +32,31 @@ from any2json.data_engine.generators.synthetic.pandas_generator import PandasGen
 from any2json.data_engine.utils import preview_chunks, save_chunks_to_db
 
 
+PREVIEW = False
+DB_FILE = "data/database.db"
+
+
 @click.group()
-def cli():
-    pass
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Sqlite3 file to read the database from",
+)
+@click.option(
+    "--preview",
+    is_flag=True,
+    help="Preview the changes, don't commit to database",
+)
+def cli(db_file: str, preview: bool):
+    global PREVIEW
+    PREVIEW = preview
+
+    global DB_FILE
+    DB_FILE = db_file
+
+    logger.info(f"Using database file: {DB_FILE}, preview mode: {PREVIEW}")
 
 
 # Step 0: Download datasets
@@ -154,20 +176,13 @@ def download_datasets(output_dir, max_records, overwrite):
 @cli.command()
 @click.argument("input_dir", type=click.Path(exists=True, dir_okay=True))
 @click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(exists=True, dir_okay=False, writable=True),
-    required=True,
-    help="Sqlite3 file to save the database to",
-)
-@click.option(
     "--num-samples-per-dataset",
     default=None,
     type=int,
     help="Number of documents to load from dataset",
 )
-def process_dataset(input_dir: str, db_file: str, num_samples_per_dataset: int):
-    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+def process_dataset(input_dir: str, num_samples_per_dataset: int):
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         logger.info(f"Processing {input_dir}")
         processor = get_dataset_processor(input_dir)
         processor(db_session, input_dir, num_samples_per_dataset)
@@ -180,22 +195,15 @@ def process_dataset(input_dir: str, db_file: str, num_samples_per_dataset: int):
     name="extract-json-chunks",
 )
 @click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(),
-    required=True,
-    help="Sqlite3 file to save the database to",
-)
-@click.option(
     "--max-depth",
     default=3,
     type=int,
     help="Maximum depth to generate chunks from",
 )
-def extract_json_chunks_command(db_file: str, max_depth: int):
-    logger.info(f"Extracting json chunks from {db_file}")
+def extract_json_chunks_command(max_depth: int):
+    logger.info(f"Extracting json chunks from {DB_FILE}")
 
-    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         documents = get_json_documents(db_session)
         chunks = extract_json_chunks(documents, max_depth=max_depth)
         logger.info(f"Generated {len(chunks)} input chunks")
@@ -211,22 +219,10 @@ def extract_json_chunks_command(db_file: str, max_depth: int):
 
 @cli.command()
 @click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(),
-    required=True,
-    help="Sqlite3 file to save the database to",
-)
-@click.option(
     "--num-chunks",
     default=10,
     type=int,
     help="Number of chunks to retrieve",
-)
-@click.option(
-    "--preview",
-    is_flag=True,
-    help="Preview the generated chunks, don't save to database",
 )
 @click.option(
     "--infinigram-url",
@@ -246,9 +242,7 @@ def extract_json_chunks_command(db_file: str, max_depth: int):
     help="Format of the chunks to retrieve",
 )
 def get_from_infinigram(
-    db_file: str,
     num_chunks: int,
-    preview: bool,
     infinigram_url: str,
     infinigram_index: str,
     format: str,
@@ -273,7 +267,7 @@ def get_from_infinigram(
         "html": "```html",
     }
 
-    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         query = queries[format]
 
         find_results = asyncio.run(infinigram_api.find_documents(query))
@@ -302,9 +296,8 @@ def get_from_infinigram(
             "infinigram_url": infinigram_url,
             "infinigram_index": infinigram_index,
         }
-        if preview:
+        if PREVIEW:
             preview_chunks(document_content, document_meta, per_document_chunks)
-            raise Exception("Preview mode, not saving to database")
 
         save_chunks_to_db(
             db_session,
@@ -321,27 +314,15 @@ def get_from_infinigram(
 
 @cli.command()
 @click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(),
-    required=True,
-    help="Sqlite3 file to save the database to",
-)
-@click.option(
     "--num-chunks",
     default=10,
     type=int,
     help="Number of chunks to generate",
 )
-@click.option(
-    "--preview",
-    is_flag=True,
-    help="Preview the generated chunks, don't save to database",
-)
-def generate_pandas_chunks(db_file: str, num_chunks: int, preview: bool):
-    logger.info(f"Generating input chunks from {db_file}")
+def generate_pandas_chunks(num_chunks: int):
+    logger.info(f"Generating input chunks from {DB_FILE}")
 
-    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         generator_class = PandasGenerator
 
         input_chunks, schemas, output_chunks, schema_conversions = (
@@ -352,7 +333,7 @@ def generate_pandas_chunks(db_file: str, num_chunks: int, preview: bool):
             )
         )
 
-        if preview:
+        if PREVIEW:
             for input_chunk, schema, output_chunk, schema_conversion in zip(
                 input_chunks,
                 schemas,
@@ -370,21 +351,12 @@ def generate_pandas_chunks(db_file: str, num_chunks: int, preview: bool):
                 print()
                 print()
 
-            raise Exception("Preview mode, not saving to database")
-
 
 # Step 4: Generate schemas for json chunks with no schema
 
 
 @cli.command(
     name="generate-schemas",
-)
-@click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(),
-    required=True,
-    help="Sqlite3 file to save the database to",
 )
 @click.option(
     "--num-chunks",
@@ -411,13 +383,11 @@ def generate_pandas_chunks(db_file: str, num_chunks: int, preview: bool):
     required=False,
 )
 def generate_schemas_command(
-    db_file: str,
     num_chunks: int | None,
     model: str,
     max_retries: int,
     enable_thinking: bool,
 ):
-    logger.info(f"Generating synthetic schemas from {db_file}")
     logger.warning(
         "This command commits after every schema generation and is not easily reversible!"
     )
@@ -426,7 +396,7 @@ def generate_schemas_command(
 
     assert api_key, "GEMINI_API_KEY is not set"
 
-    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         chunks = get_json_chunks_with_no_schema(db_session)
         random.shuffle(chunks)
 
@@ -453,13 +423,6 @@ def generate_schemas_command(
     name="generate-synthetic-schemas",
 )
 @click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(),
-    required=True,
-    help="Sqlite3 file to save the database to",
-)
-@click.option(
     "--num-variations-per-schema",
     default=1,
     type=int,
@@ -471,20 +434,13 @@ def generate_schemas_command(
     type=int,
     required=False,
 )
-@click.option(
-    "--preview",
-    is_flag=True,
-    help="Preview the generated chunks, don't save to database",
-)
 def generate_synthetic_schemas_command(
-    db_file: str,
     num_variations_per_schema: int,
     num_generations: int | None,
-    preview: bool,
 ):
-    logger.info(f"Generating synthetic schemas from {db_file}")
+    logger.info(f"Generating synthetic schemas from {DB_FILE}")
 
-    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         chunks = get_json_chunks_with_schema(db_session)
         random.shuffle(chunks)
 
@@ -506,7 +462,7 @@ def generate_synthetic_schemas_command(
         db_session.add_all(deduplicated_chunks)
         db_session.add_all(new_schema_conversions)
 
-        if preview:
+        if PREVIEW:
             for chunk in deduplicated_chunks:
                 print(f"{chunk.content=}")
                 print(f"{chunk.meta=}")
@@ -526,37 +482,23 @@ def generate_synthetic_schemas_command(
     name="generate-synthetic-format-conversions",
 )
 @click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(),
-    required=True,
-    help="Sqlite3 file to save the database to",
-)
-@click.option(
     "--num-generations",
     default=None,
     type=int,
     required=False,
 )
-@click.option(
-    "--preview",
-    is_flag=True,
-    help="Preview the generated chunks, don't save to database",
-)
 def generate_synthetic_format_conversions_command(
-    db_file: str,
     num_generations: int | None,
-    preview: bool,
 ):
-    logger.info(f"Generating synthetic format conversions from {db_file}")
+    logger.info(f"Generating synthetic format conversions from {DB_FILE}")
 
-    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         synthetic_chunks, schema_conversions = generate_synthetic_format_conversions(
             db_session,
             num_generations=num_generations,
         )
 
-        if preview:
+        if PREVIEW:
             for synthetic_chunk, schema_conversion in zip(
                 synthetic_chunks,
                 schema_conversions,
@@ -569,8 +511,6 @@ def generate_synthetic_format_conversions_command(
                 print(f"{schema_conversion.output_chunk.content=}")
                 print()
                 print()
-
-            raise Exception("Preview mode, not saving to database")
 
 
 if __name__ == "__main__":

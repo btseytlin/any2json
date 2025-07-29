@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from functools import partial
 import fastjsonschema
 from sqlalchemy.orm import Session
 
@@ -120,7 +121,7 @@ def processor_interstellarninja_json_mode_reasoning(
     db_session: Session,
     dataset_dir: str,
     num_samples_per_dataset: int | None = None,
-    max_length: int = 5000,
+    max_length: int = 10000,
 ) -> None:
     dataset = Dataset.load_from_disk(dataset_dir)
 
@@ -240,6 +241,105 @@ def processor_interstellarninja_json_mode_reasoning(
     db_session.add_all(source_documents)
 
 
+def processor_dataunitylab_json_schema(
+    db_session: Session,
+    dataset_dir: str,
+    num_samples_per_dataset: int | None = None,
+    max_length: int = 10000,
+    schema_key: str = "content",
+    description_key: str = "description",
+) -> None:
+    dataset = Dataset.load_from_disk(dataset_dir)
+
+    errors = 0
+    skips = 0
+    pbar = tqdm(enumerate(dataset), total=len(dataset))
+    seen_schemas = set()
+    json_schemas = []
+    source_documents = []
+    for i, record in pbar:
+        try:
+            schema_text = record[schema_key]
+            description = record.get(description_key)
+
+            if len(schema_text) > max_length:
+                logger.debug(
+                    f"Skipping record {i} because schema length is {len(schema_text)} > {max_length}"
+                )
+                skips += 1
+                continue
+
+            if hash(schema_text) in seen_schemas:
+                logger.debug(f"Skipping record {i} because schema is already seen")
+                skips += 1
+                continue
+
+            schema_original = json.loads(schema_text)
+            if description and "description" not in schema_original:
+                schema_original["description"] = description
+
+            schema_supported = to_supported_json_schema(schema_original)
+
+            fastjsonschema.compile(
+                schema_original,
+                detailed_exceptions=False,
+                use_formats=False,
+            )
+            fastjsonschema.compile(
+                schema_supported,
+                detailed_exceptions=False,
+                use_formats=False,
+            )
+
+            metadata = {
+                "source_dataset_index": i,
+            }
+
+            source_document = SourceDocument(
+                source=dirname_to_dataset_id(dataset_dir),
+                content="",
+                content_type=ContentType.JSON.value,
+                meta=metadata,
+            )
+
+            json_schema = JsonSchema(
+                content=schema_supported,
+                is_synthetic=True,
+                metadata={
+                    "source_dataset": dirname_to_dataset_id(dataset_dir),
+                    "source_dataset_index": i,
+                },
+            )
+
+            json_schemas.append(json_schema)
+            source_documents.append(source_document)
+
+            if num_samples_per_dataset and i >= num_samples_per_dataset:
+                break
+        except Exception as e:
+            logger.debug(f"Error processing record {i}: {e}")
+            # try:
+            #     logger.debug(
+            #         "Schema original: " + json.dumps(schema_original, indent=1)
+            #     )
+            #     logger.debug(
+            #         "Schema supported: " + json.dumps(schema_supported, indent=1)
+            #     )
+            #     logger.debug("Response: " + json.dumps(response, indent=1))
+            # except Exception:
+            #     pass
+            errors += 1
+
+        pbar.set_postfix(
+            {"error": errors, "skip": skips, "success": i - errors - skips}
+        )
+
+    logger.info(f"Processed {i} records, {errors} errors, {skips} skips")
+
+    db_session.add_all(json_schemas)
+    db_session.add_all(source_documents)
+
+
 def get_dataset_processor(input_dir: str) -> Callable:
     dataset_processors = {
         "wikimedia/structured-wikipedia": processor_wikimedia_structured_wikipedia,
@@ -248,6 +348,15 @@ def get_dataset_processor(input_dir: str) -> Callable:
         "interstellarninja/json-mode-verifiable": processor_interstellarninja_json_mode_reasoning,
         "interstellarninja/json-mode-agentic-reasoning": processor_interstellarninja_json_mode_reasoning,
         "interstellarninja/json-schema-store-reasoning": processor_interstellarninja_json_mode_reasoning,  # high error rate, todo debug
+        "dataunitylab/json-schema": partial(
+            processor_dataunitylab_json_schema, schema_key="content"
+        ),
+        "dataunitylab/json-schema-keywords": partial(
+            processor_dataunitylab_json_schema, schema_key="keywords"
+        ),
+        "dataunitylab/json-schema-descriptions": partial(
+            processor_dataunitylab_json_schema, schema_key="object"
+        ),
     }
 
     dataset_id = dirname_to_dataset_id(input_dir)

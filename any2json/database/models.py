@@ -16,10 +16,14 @@ class SourceDocument(Base):
     __tablename__ = "source_documents"
     id = Column(Integer, primary_key=True)
     source = Column(String, nullable=False)
-    content = Column(Text, nullable=False)
+    content = Column(Text, nullable=True)
     content_type = Column(String, nullable=False)
 
-    chunks = relationship("Chunk", back_populates="parent_document")
+    chunks = relationship(
+        "Chunk",
+        back_populates="parent_document",
+        cascade="all, delete-orphan",
+    )
 
     meta = Column(JSON, nullable=True)
 

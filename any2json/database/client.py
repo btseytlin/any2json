@@ -25,12 +25,15 @@ def get_db_session(database_uri: str) -> Session:
 
 
 @contextmanager
-def db_session_scope(db_url: str):
+def db_session_scope(db_url: str, preview: bool = False):
     session = get_db_session(db_url)
     try:
         yield session
-        session.commit()
-        logger.info("Commited changes to the database")
+        if not preview:
+            session.commit()
+            logger.info("Commited changes to the database")
+        else:
+            raise Exception("Preview mode, not committing changes to the database")
     except Exception:
         session.rollback()
         logger.warning("Database changes rollback")

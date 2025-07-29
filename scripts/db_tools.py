@@ -1,4 +1,5 @@
 from collections import defaultdict
+import copy
 import json
 import os
 from dotenv import load_dotenv
@@ -11,9 +12,31 @@ from any2json.database.models import Chunk, JsonSchema, SourceDocument
 from any2json.utils import configure_loggers, logger
 
 
+PREVIEW = False
+DB_FILE = "data/database.db"
+
+
 @click.group()
-def cli():
-    pass
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Sqlite3 file to read the database from",
+)
+@click.option(
+    "--preview",
+    is_flag=True,
+    help="Preview the changes, don't commit to database",
+)
+def cli(db_file: str, preview: bool):
+    global PREVIEW
+    PREVIEW = preview
+
+    global DB_FILE
+    DB_FILE = db_file
+
+    logger.info(f"Using database file: {DB_FILE}, preview mode: {PREVIEW}")
 
 
 def get_duplicated_documents_by_metadata(
@@ -34,7 +57,9 @@ def get_duplicated_documents_by_metadata(
     docs = db_session.execute(query).scalars().all()
     duplicates = defaultdict(list)
     for doc in docs:
-        metadata_fingerprint = json.dumps(doc.meta, sort_keys=True)
+        doc_metadata = copy.deepcopy(doc.meta or {})
+        doc_metadata["source"] = doc.source
+        metadata_fingerprint = json.dumps(doc_metadata, sort_keys=True)
         duplicates[metadata_fingerprint].append(doc)
     return duplicates
 
@@ -46,18 +71,20 @@ def get_duplicated_documents_by_content(
     duplicate_content_subquery = (
         select(SourceDocument.content)
         .where(SourceDocument.content != None)
+        .where(SourceDocument.content != "")
         .group_by(SourceDocument.content)
         .having(func.count(SourceDocument.content) > 1)
     )
     query = (
         select(SourceDocument)
         .where(SourceDocument.content != None)
+        .where(SourceDocument.content != "")
         .where(SourceDocument.content.in_(duplicate_content_subquery))
     )
     docs = db_session.execute(query).scalars().all()
     duplicates = defaultdict(list)
     for doc in docs:
-        content_fingerprint = doc.content.strip().lower()
+        content_fingerprint = doc.source + str(hash(doc.content.strip().lower()))
         duplicates[content_fingerprint].append(doc)
     return duplicates
 
@@ -74,21 +101,11 @@ def drop_duplicated_documents(
         for document in documents[1:]:
             documents_to_delete.add(document)
 
-    chunks_to_delete = set()
-    for doc in documents_to_delete:
-        for chunk in doc.chunks:
-            chunks_to_delete.add(chunk)
-
     logger.info(
         f"Found {len(documents_to_delete)} duplicate documents to delete: {[d.id for d in documents_to_delete]}"
     )
-    logger.info(
-        f"{len(chunks_to_delete)} child chunks will be deleted: {[c.id for c in chunks_to_delete]}"
-    )
 
     for doc in documents_to_delete:
-        for chunk in doc.chunks:
-            db_session.delete(chunk)
         db_session.delete(doc)
 
 
@@ -104,42 +121,37 @@ def get_duplicated_chunks(db_session: Session) -> dict[str, list[Chunk]]:
     return duplicates
 
 
+def get_dangling_schemas(db_session: Session) -> list[JsonSchema]:
+    """Return schemas that have no chunks."""
+    query = select(JsonSchema).where(
+        or_(
+            func.length(JsonSchema.chunks) == 0,
+            JsonSchema.chunks == None,
+        )
+    )
+    return db_session.execute(query).scalars().all()
+
+
 @cli.command()
-@click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(exists=True, dir_okay=False),
-    required=True,
-    help="Sqlite3 file to read the database from",
-)
-@click.option(
-    "--preview",
-    is_flag=True,
-    help="If true doesnt save changes to the database",
-)
-def drop_duplicate_documents(db_file: str, preview: bool):
-    db_session = get_db_session(f"sqlite:///{db_file}")
-    logger.info("Getting duplicate documents by metadata")
-    duplicate_documents_by_metadata = get_duplicated_documents_by_metadata(db_session)
-    if duplicate_documents_by_metadata:
-        logger.info("Dropping duplicate documents by metadata")
-        drop_duplicated_documents(db_session, duplicate_documents_by_metadata)
-    else:
-        logger.info("No duplicate documents by metadata found")
+def drop_duplicate_documents():
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        logger.info("Getting duplicate documents by metadata")
+        duplicate_documents_by_metadata = get_duplicated_documents_by_metadata(
+            db_session
+        )
+        if duplicate_documents_by_metadata:
+            logger.info("Dropping duplicate documents by metadata")
+            drop_duplicated_documents(db_session, duplicate_documents_by_metadata)
+        else:
+            logger.info("No duplicate documents by metadata found")
 
-    logger.info("Getting duplicate documents by content")
-    duplicate_documents_by_content = get_duplicated_documents_by_content(db_session)
-    if duplicate_documents_by_content:
-        logger.info("Dropping duplicate documents by content")
-        drop_duplicated_documents(db_session, duplicate_documents_by_content)
-    else:
-        logger.info("No duplicate documents by content found")
-
-    if not preview:
-        db_session.commit()
-        logger.info("Committed changes to the database")
-    else:
-        logger.info("Preview mode, not deleting anything")
+        logger.info("Getting duplicate documents by content")
+        duplicate_documents_by_content = get_duplicated_documents_by_content(db_session)
+        if duplicate_documents_by_content:
+            logger.info("Dropping duplicate documents by content")
+            drop_duplicated_documents(db_session, duplicate_documents_by_content)
+        else:
+            logger.info("No duplicate documents by content found")
 
 
 def get_duplicated_chunks_by_content(
@@ -249,7 +261,7 @@ def init_db(db_file: str):
     help="Sqlite3 file to read the database from",
 )
 def vacuum(db_file: str):
-    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+    with db_session_scope(f"sqlite:///{db_file}", preview=PREVIEW) as db_session:
         db_session.execute(text("VACUUM"))
 
 
@@ -276,13 +288,8 @@ def clear_document_content(db_file: str):
     required=True,
     help="Sqlite3 file to read the database from",
 )
-@click.option(
-    "--preview",
-    is_flag=True,
-    help="If true doesnt save changes to the database",
-)
 def drop_duplicate_chunks(db_file: str, preview: bool):
-    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+    with db_session_scope(f"sqlite:///{db_file}", preview=PREVIEW) as db_session:
         duplicate_chunks_by_content = get_duplicated_chunks_by_content(db_session)
         if duplicate_chunks_by_content:
             logger.info("Dropping duplicate chunks")
@@ -290,18 +297,8 @@ def drop_duplicate_chunks(db_file: str, preview: bool):
         else:
             logger.info("No duplicate chunks found")
 
-        if preview:
-            raise Exception("Preview mode, not deleting anything")
-
 
 @cli.command()
-@click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(exists=True, dir_okay=False),
-    required=True,
-    help="Sqlite3 file to read the database from",
-)
 @click.option(
     "--min-length",
     default=5,
@@ -360,6 +357,32 @@ def drop_duplicate_schemas(db_file: str, preview: bool):
 
         if preview:
             raise Exception("Preview mode, not deleting anything")
+
+
+@cli.command(
+    name="drop-dangling-schemas",
+)
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Sqlite3 file to read the database from",
+)
+@click.option(
+    "--preview",
+    is_flag=True,
+    help="If true doesnt save changes to the database",
+)
+def drop_dangling_schemas_command(db_file: str, preview: bool):
+    with db_session_scope(f"sqlite:///{db_file}", preview=preview) as db_session:
+        dangling_schemas = get_dangling_schemas(db_session)
+        if dangling_schemas:
+            logger.info(f"Dropping {len(dangling_schemas)} dangling schemas")
+            for schema in dangling_schemas:
+                db_session.delete(schema)
+        else:
+            logger.info("No dangling schemas found")
 
 
 if __name__ == "__main__":

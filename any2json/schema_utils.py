@@ -52,9 +52,8 @@ def to_supported_json_schema(
         "enum",
         "format",
         "additionalProperties",
-        "$comment",
-        "title",
-        "description",
+        "pattern",
+        "patternProperties",
     ]
 
     if isinstance(schema, list):
