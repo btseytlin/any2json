@@ -41,6 +41,8 @@ def to_supported_json_schema(
     drop_keys = [
         "minItems",
         "maxItems",
+        "minProperties",
+        "maxProperties",
         "minLength",
         "maxLength",
         "required",
@@ -54,6 +56,11 @@ def to_supported_json_schema(
         "additionalProperties",
         "pattern",
         "patternProperties",
+        "default",
+        "description",
+        "title",
+        "$comment",
+        "uniqueItems",
     ]
 
     if isinstance(schema, list):
@@ -66,6 +73,10 @@ def to_supported_json_schema(
             if k in error_on_keys:
                 raise ValueError(f"Schema contains {k} key, which is not supported")
 
+        if "definitions" in schema:
+            schema["$defs"] = schema["definitions"]
+            del schema["definitions"]
+
         for k, v in schema.items():
             if k == "type":
                 schema[k] = to_supported_type(v)
@@ -73,6 +84,10 @@ def to_supported_json_schema(
                 schema[k] = {k_: to_supported_json_schema(v_) for k_, v_ in v.items()}
             elif k == "items":
                 schema[k] = to_supported_json_schema(v)
+            elif k == "$defs":
+                schema["$defs"] = {
+                    k_: to_supported_json_schema(v_) for k_, v_ in v.items()
+                }
             elif isinstance(v, (dict, list)):
                 schema[k] = to_supported_json_schema(v)
     return schema

@@ -9,13 +9,17 @@ import time
 import click
 from datasets import Dataset, load_dataset
 from dotenv import load_dotenv
-from any2json.data_engine.agents import JSONSchemaValidationAgent
+from any2json.data_engine.agents import (
+    JSONChunkGeneratorAgent,
+    JSONSchemaValidationAgent,
+)
 from any2json.data_engine.generators.converters.utils import (
     generate_synthetic_format_conversions,
 )
 from any2json.data_engine.helpers import (
     deduplicate_chunks,
     extract_json_chunks,
+    generate_chunks_for_schemas,
     generate_schemas_for_chunks,
     get_json_chunks_with_no_schema,
     get_json_chunks_with_schema,
@@ -24,6 +28,8 @@ from any2json.data_engine.helpers import (
     generate_synthetic_schemas,
 )
 from any2json.database.client import db_session_scope
+from any2json.database.helpers import get_dangling_schema_ids
+from any2json.database.models import JsonSchema
 from any2json.infinigram import InfiniGramAPI
 from any2json.utils import logger, configure_loggers
 from any2json.dataset_processors import get_dataset_processor
@@ -49,14 +55,27 @@ DB_FILE = "data/database.db"
     is_flag=True,
     help="Preview the changes, don't commit to database",
 )
-def cli(db_file: str, preview: bool):
+@click.option(
+    "--seed",
+    default=42,
+    type=int,
+    help="Random seed",
+)
+def cli(db_file: str, preview: bool, seed: int):
     global PREVIEW
     PREVIEW = preview
 
     global DB_FILE
     DB_FILE = db_file
 
-    logger.info(f"Using database file: {DB_FILE}, preview mode: {PREVIEW}")
+    global SEED
+    SEED = seed
+
+    random.seed(SEED)
+
+    logger.info(
+        f"Using database file: {DB_FILE}, preview mode: {PREVIEW}, seed: {SEED}"
+    )
 
 
 # Step 0: Download datasets
@@ -111,15 +130,7 @@ def download_datasets(output_dir, max_records, overwrite):
             "args": (),
             "kwargs": {"split": "train"},
         },
-        "mdhasnainali/job-html-to-json": {
-            "args": (),
-            "kwargs": {"split": "train"},
-        },
         "dataunitylab/json-schema": {
-            "args": (),
-            "kwargs": {"split": "train"},
-        },
-        "dataunitylab/json-schema-keywords": {
             "args": (),
             "kwargs": {"split": "train"},
         },
@@ -127,6 +138,10 @@ def download_datasets(output_dir, max_records, overwrite):
             "args": (),
             "kwargs": {"split": "train"},
         },
+        # "mdhasnainali/job-html-to-json": {
+        #     "args": (),
+        #     "kwargs": {"split": "train"},
+        # },
         # "shubh303/Invoice-to-Json": {
         #     "args": (),
         #     "kwargs": {"split": "train"},
@@ -200,12 +215,20 @@ def process_dataset(input_dir: str, num_samples_per_dataset: int):
     type=int,
     help="Maximum depth to generate chunks from",
 )
-def extract_json_chunks_command(max_depth: int):
+@click.option(
+    "--frac-per-document",
+    default=0.2,
+    type=float,
+    help="Fraction of chunks to take from each document",
+)
+def extract_json_chunks_command(max_depth: int, frac_per_document: float):
     logger.info(f"Extracting json chunks from {DB_FILE}")
 
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         documents = get_json_documents(db_session)
-        chunks = extract_json_chunks(documents, max_depth=max_depth)
+        chunks = extract_json_chunks(
+            documents, max_depth=max_depth, frac_per_document=frac_per_document
+        )
         logger.info(f"Generated {len(chunks)} input chunks")
 
         deduplicated_chunks = deduplicate_chunks(chunks)
@@ -365,7 +388,7 @@ def generate_pandas_chunks(num_chunks: int):
     required=False,
 )
 @click.option(
-    "--model",
+    "--model-name",
     default="gemini-2.5-flash-lite",
     type=str,
     required=True,
@@ -384,9 +407,9 @@ def generate_pandas_chunks(num_chunks: int):
 )
 def generate_schemas_command(
     num_chunks: int | None,
-    model: str,
-    max_retries: int,
+    model_name: str,
     enable_thinking: bool,
+    max_retries: int,
 ):
     logger.warning(
         "This command commits after every schema generation and is not easily reversible!"
@@ -405,7 +428,9 @@ def generate_schemas_command(
 
         logger.info(f"Loaded {len(chunks)} JSON chunks with no schema for processing")
 
-        schema_agent = JSONSchemaValidationAgent(model, max_retries, enable_thinking)
+        schema_agent = JSONSchemaValidationAgent(
+            model_name, max_retries, enable_thinking
+        )
 
         schemas, chunks = generate_schemas_for_chunks(
             db_session=db_session,
@@ -414,6 +439,73 @@ def generate_schemas_command(
         )
 
         logger.info(f"Generated {len(schemas)} schemas for {len(chunks)} chunks")
+
+
+# Step 4.1: Generate chunks for schemas with no chunks
+
+
+@cli.command(
+    name="generate-chunks",
+)
+@click.option(
+    "--num-schemas",
+    default=None,
+    type=int,
+    required=False,
+)
+@click.option(
+    "--model-name",
+    default="gemini-2.5-flash-lite",
+    type=str,
+    required=True,
+)
+@click.option(
+    "--enable-thinking",
+    default=True,
+    type=bool,
+    required=False,
+)
+@click.option(
+    "--max-retries",
+    default=3,
+    type=int,
+    required=False,
+)
+def generate_chunks_command(
+    num_schemas: int | None,
+    model_name: str,
+    enable_thinking: bool,
+    max_retries: int,
+):
+    logger.warning(
+        "This command commits after every generation and is not easily reversible!"
+    )
+
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    assert api_key, "GEMINI_API_KEY is not set"
+
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        schema_ids = get_dangling_schema_ids(db_session)
+        schemas = (
+            db_session.query(JsonSchema).filter(JsonSchema.id.in_(schema_ids)).all()
+        )
+        random.shuffle(schemas)
+
+        if num_schemas:
+            schemas = schemas[:num_schemas]
+
+        logger.info(f"Loaded {len(schemas)} JSON schemas with no chunks for processing")
+
+        agent = JSONChunkGeneratorAgent(model_name, max_retries, enable_thinking)
+
+        chunks = generate_chunks_for_schemas(
+            db_session=db_session,
+            schemas=schemas,
+            agent=agent,
+        )
+
+        logger.info(f"Generated {len(chunks)} chunks")
 
 
 # Step 5: Generate synthetic schemas from existing schemas

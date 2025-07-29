@@ -20,6 +20,29 @@ from any2json.utils import logger
 from any2json.schema_utils import to_supported_json_schema
 
 
+def validate_schema_quality(schema: dict) -> bool:
+    if not schema:
+        return False
+
+    if not schema.get("type"):
+        return False
+
+    schema_type = schema.get("type")
+    if isinstance(schema_type, list):
+        if schema_type[0] not in ["object", "array"]:
+            return False
+    elif schema_type not in ["object", "array"]:
+        return False
+
+    if schema_type == "array" and not schema.get("items", {}).get("type"):
+        return False
+
+    if not schema.get("properties") and not schema.get("items"):
+        return False
+
+    return True
+
+
 def dirname_to_dataset_id(dirname: str) -> str:
     return "/".join(dirname.split("/")[-2:]).lower()
 
@@ -93,10 +116,16 @@ def processor_christian_azinn_json_training(
             )
             db_session.add(chunk)
 
+            assert validate_schema_quality(schema), f"Low quality schema: {schema}"
             json_schema = JsonSchema(
                 content=schema,
                 is_synthetic=True,
                 chunks=[chunk],
+                meta={
+                    "source_dataset": dirname_to_dataset_id(dataset_dir),
+                    "source_dataset_index": i,
+                    "description": record.get("description"),
+                },
             )
             db_session.add(json_schema)
 
@@ -114,7 +143,7 @@ def processor_christian_azinn_json_training(
             errors += 1
         pbar.set_postfix({"errors": errors})
 
-    logger.info(f"Processed {i} records, {errors} errors")
+    logger.info(f"Processed {i} records, {errors} errors, {i - errors} success")
 
 
 def processor_interstellarninja_json_mode_reasoning(
@@ -167,6 +196,11 @@ def processor_interstellarninja_json_mode_reasoning(
             schema_original = json.loads(record["schema"])
             schema_supported = to_supported_json_schema(schema_original)
 
+            if not validate_schema_quality(schema_supported):
+                logger.debug(f"Skipping record {i} because schema is low quality")
+                skips += 1
+                continue
+
             validator_original = fastjsonschema.compile(
                 schema_original,
                 detailed_exceptions=False,
@@ -203,6 +237,11 @@ def processor_interstellarninja_json_mode_reasoning(
                 content=schema_supported,
                 is_synthetic=True,
                 chunks=[chunk],
+                meta={
+                    "source_dataset": dirname_to_dataset_id(dataset_dir),
+                    "source_dataset_index": i,
+                    "description": record.get("description"),
+                },
             )
 
             seen_chunks.add(hash(response_text))
@@ -234,7 +273,9 @@ def processor_interstellarninja_json_mode_reasoning(
             {"error": errors, "skip": skips, "success": i - errors - skips}
         )
 
-    logger.info(f"Processed {i} records, {errors} errors, {skips} skips")
+    logger.info(
+        f"Processed {i} records, {errors} errors, {skips} skips, {i - errors - skips} success"
+    )
 
     db_session.add_all(chunks)
     db_session.add_all(json_schemas)
@@ -260,6 +301,7 @@ def processor_dataunitylab_json_schema(
     for i, record in pbar:
         try:
             schema_text = record[schema_key]
+
             description = record.get(description_key)
 
             if len(schema_text) > max_length:
@@ -275,10 +317,13 @@ def processor_dataunitylab_json_schema(
                 continue
 
             schema_original = json.loads(schema_text)
-            if description and "description" not in schema_original:
-                schema_original["description"] = description
 
             schema_supported = to_supported_json_schema(schema_original)
+
+            if not validate_schema_quality(schema_supported):
+                logger.debug(f"Skipping record {i} because schema is low quality")
+                skips += 1
+                continue
 
             fastjsonschema.compile(
                 schema_original,
@@ -305,9 +350,10 @@ def processor_dataunitylab_json_schema(
             json_schema = JsonSchema(
                 content=schema_supported,
                 is_synthetic=True,
-                metadata={
+                meta={
                     "source_dataset": dirname_to_dataset_id(dataset_dir),
                     "source_dataset_index": i,
+                    "description": description,
                 },
             )
 
@@ -334,7 +380,9 @@ def processor_dataunitylab_json_schema(
             {"error": errors, "skip": skips, "success": i - errors - skips}
         )
 
-    logger.info(f"Processed {i} records, {errors} errors, {skips} skips")
+    logger.info(
+        f"Processed {i} records, {errors} errors, {skips} skips, {i - errors - skips} success"
+    )
 
     db_session.add_all(json_schemas)
     db_session.add_all(source_documents)
@@ -350,9 +398,6 @@ def get_dataset_processor(input_dir: str) -> Callable:
         "interstellarninja/json-schema-store-reasoning": processor_interstellarninja_json_mode_reasoning,  # high error rate, todo debug
         "dataunitylab/json-schema": partial(
             processor_dataunitylab_json_schema, schema_key="content"
-        ),
-        "dataunitylab/json-schema-keywords": partial(
-            processor_dataunitylab_json_schema, schema_key="keywords"
         ),
         "dataunitylab/json-schema-descriptions": partial(
             processor_dataunitylab_json_schema, schema_key="object"

@@ -1,5 +1,6 @@
 import json
 import fastjsonschema
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 
@@ -110,12 +111,17 @@ def deduplicate_chunks(chunks: list[Chunk]) -> list[Chunk]:
 def extract_json_chunks(
     documents: list[SourceDocument],
     max_depth: int = 3,
+    frac_per_document: float = 0.2,
 ) -> list[Chunk]:
     chunks = []
     for document in documents:
         json_content = json.loads(document.content)
 
         chunk_jsons = get_chunks_from_record(json_content, max_depth=max_depth)
+
+        chunk_jsons = random.sample(
+            chunk_jsons, int(len(chunk_jsons) * frac_per_document)
+        )
 
         for chunk_json in chunk_jsons:
             chunks.append(
@@ -138,6 +144,8 @@ import os
 from tqdm.auto import tqdm
 import instructor
 from any2json.data_engine.agents import (
+    ChunkAgentInputSchema,
+    JSONChunkGeneratorAgent,
     JSONSchemaValidationAgent,
     SchemaAgentInputSchema,
 )
@@ -157,6 +165,11 @@ def get_json_chunks_with_no_schema(db_session: Session) -> list[Chunk]:
         .filter(Chunk.content_type == ContentType.JSON.value)
         .all()
     )
+
+
+def get_schemas_with_no_chunks(db_session: Session) -> list[JsonSchema]:
+    query = select(JsonSchema).where(JsonSchema.chunks.is_(None))
+    return db_session.execute(query).scalars().all()
 
 
 def generate_schema_for_json(
@@ -207,6 +220,9 @@ def generate_schemas_for_chunks(
             schema_entity = JsonSchema(
                 content=schema,
                 chunks=[chunk],
+                meta={
+                    "generator_state": schema_agent.get_state(),
+                },
             )
             schemas.append(schema_entity)
             chunk.schema = schema_entity
@@ -224,6 +240,40 @@ def generate_schemas_for_chunks(
                 raise e
 
     return schemas, updated_chunks
+
+
+def generate_chunks_for_schemas(
+    db_session: Session,
+    schemas: list[JsonSchema],
+    agent: JSONChunkGeneratorAgent,
+) -> list[Chunk]:
+    chunks = []
+    for schema in schemas:
+        try:
+            json_content = schema.content
+            json_chunk = agent.generate_and_validate_json(
+                input=ChunkAgentInputSchema(input_schema=json_content),
+            )
+            chunk = Chunk(
+                content=json.dumps(json_chunk),
+                content_type=ContentType.JSON.value,
+                schema=schema,
+                is_synthetic=True,
+                meta={
+                    "generator_state": agent.get_state(),
+                },
+            )
+            chunks.append(chunk)
+            db_session.add(chunk)
+            db_session.commit()
+        except Exception as e:
+            logger.error(
+                f"Error: {e}\nFailed to commit chunk for schema: {schema.id}",
+                exc_info=True,
+            )
+            raise e
+
+    return chunks
 
 
 def generate_synthetic_chunks(

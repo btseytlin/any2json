@@ -4,10 +4,21 @@ import json
 import os
 from dotenv import load_dotenv
 import click
-from sqlalchemy import String, cast, create_engine, func, or_, select, text
+from sqlalchemy import (
+    String,
+    cast,
+    create_engine,
+    delete,
+    distinct,
+    func,
+    or_,
+    select,
+    text,
+)
 from sqlalchemy.orm import Session
 
 from any2json.database.client import create_tables, db_session_scope, get_db_session
+from any2json.database.helpers import get_dangling_schema_ids
 from any2json.database.models import Chunk, JsonSchema, SourceDocument
 from any2json.utils import configure_loggers, logger
 
@@ -119,17 +130,6 @@ def get_duplicated_chunks(db_session: Session) -> dict[str, list[Chunk]]:
     for chunk in chunks:
         duplicates[chunk.content].append(chunk)
     return duplicates
-
-
-def get_dangling_schemas(db_session: Session) -> list[JsonSchema]:
-    """Return schemas that have no chunks."""
-    query = select(JsonSchema).where(
-        or_(
-            func.length(JsonSchema.chunks) == 0,
-            JsonSchema.chunks == None,
-        )
-    )
-    return db_session.execute(query).scalars().all()
 
 
 @cli.command()
@@ -281,15 +281,8 @@ def clear_document_content(db_file: str):
 
 
 @cli.command()
-@click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(exists=True, dir_okay=False),
-    required=True,
-    help="Sqlite3 file to read the database from",
-)
-def drop_duplicate_chunks(db_file: str, preview: bool):
-    with db_session_scope(f"sqlite:///{db_file}", preview=PREVIEW) as db_session:
+def drop_duplicate_chunks():
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         duplicate_chunks_by_content = get_duplicated_chunks_by_content(db_session)
         if duplicate_chunks_by_content:
             logger.info("Dropping duplicate chunks")
@@ -311,13 +304,8 @@ def drop_duplicate_chunks(db_file: str, preview: bool):
     type=int,
     help="Maximum length of chunk content to keep",
 )
-@click.option(
-    "--preview",
-    is_flag=True,
-    help="If true doesnt save changes to the database",
-)
-def cull_chunks(db_file: str, min_length: int, max_length: int, preview: bool):
-    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+def cull_chunks(min_length: int, max_length: int):
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         # Select chunks that have very short content
         query = select(Chunk).where(
             or_(
@@ -327,7 +315,7 @@ def cull_chunks(db_file: str, min_length: int, max_length: int, preview: bool):
         )
         chunks = db_session.execute(query).scalars().all()
         logger.info(f"Found {len(chunks)} chunks to cull: {[c.id for c in chunks]}")
-        if not preview:
+        if not PREVIEW:
             for chunk in chunks:
                 db_session.delete(chunk)
         else:
@@ -335,27 +323,15 @@ def cull_chunks(db_file: str, min_length: int, max_length: int, preview: bool):
 
 
 @cli.command()
-@click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(exists=True, dir_okay=False),
-    required=True,
-    help="Sqlite3 file to read the database from",
-)
-@click.option(
-    "--preview",
-    is_flag=True,
-    help="If true doesnt save changes to the database",
-)
-def drop_duplicate_schemas(db_file: str, preview: bool):
-    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+def drop_duplicate_schemas():
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         duplicate_schemas_by_content = get_duplicated_schemas_by_content(db_session)
         if duplicate_schemas_by_content:
             drop_duplicated_schemas(db_session, duplicate_schemas_by_content)
         else:
             logger.info("No duplicate schemas found")
 
-        if preview:
+        if PREVIEW:
             raise Exception("Preview mode, not deleting anything")
 
 
@@ -363,26 +339,22 @@ def drop_duplicate_schemas(db_file: str, preview: bool):
     name="drop-dangling-schemas",
 )
 @click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(exists=True, dir_okay=False),
-    required=True,
-    help="Sqlite3 file to read the database from",
+    "--limit",
+    default=10000,
+    type=int,
+    help="Maximum number of dangling schemas to drop",
 )
-@click.option(
-    "--preview",
-    is_flag=True,
-    help="If true doesnt save changes to the database",
-)
-def drop_dangling_schemas_command(db_file: str, preview: bool):
-    with db_session_scope(f"sqlite:///{db_file}", preview=preview) as db_session:
-        dangling_schemas = get_dangling_schemas(db_session)
-        if dangling_schemas:
-            logger.info(f"Dropping {len(dangling_schemas)} dangling schemas")
-            for schema in dangling_schemas:
-                db_session.delete(schema)
-        else:
+def drop_dangling_schemas_command(limit: int):
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        logger.info("Querying dangling schemas")
+        dangling_schema_ids = get_dangling_schema_ids(db_session, limit=limit)
+        if not dangling_schema_ids:
             logger.info("No dangling schemas found")
+            return
+        logger.info(f"Dropping {len(dangling_schema_ids)} dangling schemas")
+        db_session.execute(
+            delete(JsonSchema).where(JsonSchema.id.in_(dangling_schema_ids))
+        )
 
 
 if __name__ == "__main__":
