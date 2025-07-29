@@ -120,23 +120,24 @@ def processor_interstellarninja_json_mode_reasoning(
     db_session: Session,
     dataset_dir: str,
     num_samples_per_dataset: int | None = None,
+    max_length: int = 5000,
 ) -> None:
     dataset = Dataset.load_from_disk(dataset_dir)
 
-    max_length = 4000
     errors = 0
     skips = 0
     pbar = tqdm(enumerate(dataset), total=len(dataset))
     seen_chunks = set()
+    seen_schemas = set()
     chunks = []
     json_schemas = []
     source_documents = []
     for i, record in pbar:
         try:
-            response = record["conversations"][-1]["value"]
-            response = response.split("</think>")[-1].strip()
+            response_text = record["conversations"][-1]["value"]
+            response_text = response_text.split("</think>")[-1].strip()
 
-            if len(response) > max_length:
+            if len(response_text) > max_length:
                 logger.debug(
                     f"Skipping record {i} because response length is {len(response)} > {max_length}"
                 )
@@ -150,7 +151,17 @@ def processor_interstellarninja_json_mode_reasoning(
                 skips += 1
                 continue
 
-            response = json.loads(response)
+            if hash(response_text) in seen_chunks:
+                logger.debug(f"Skipping record {i} because response is already seen")
+                skips += 1
+                continue
+
+            if hash(record["schema"]) in seen_schemas:
+                logger.debug(f"Skipping record {i} because schema is already seen")
+                skips += 1
+                continue
+
+            response = json.loads(response_text)
 
             schema_original = json.loads(record["schema"])
             schema_supported = to_supported_json_schema(schema_original)
@@ -187,18 +198,14 @@ def processor_interstellarninja_json_mode_reasoning(
                 parent_document_id=source_document.id,
             )
 
-            if response in seen_chunks:
-                logger.debug(f"Skipping record {i} because response is already seen")
-                skips += 1
-                continue
-
-            seen_chunks.add(response)
-
             json_schema = JsonSchema(
                 content=schema_supported,
                 is_synthetic=True,
                 chunks=[chunk],
             )
+
+            seen_chunks.add(hash(response_text))
+            seen_schemas.add(hash(record["schema"]))
 
             chunks.append(chunk)
             json_schemas.append(json_schema)
@@ -219,6 +226,9 @@ def processor_interstellarninja_json_mode_reasoning(
             # except Exception:
             #     pass
             errors += 1
+            if errors > 1 / 2 * len(dataset):
+                raise
+
         pbar.set_postfix(
             {"error": errors, "skip": skips, "success": i - errors - skips}
         )
