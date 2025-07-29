@@ -123,7 +123,7 @@ def processor_interstellarninja_json_mode_reasoning(
 ) -> None:
     dataset = Dataset.load_from_disk(dataset_dir)
 
-    max_length = 3000
+    max_length = 4000
     errors = 0
     skips = 0
     pbar = tqdm(enumerate(dataset), total=len(dataset))
@@ -224,6 +224,10 @@ def processor_interstellarninja_json_mode_reasoning(
         )
 
     logger.info(f"Processed {i} records, {errors} errors, {skips} skips")
+
+    db_session.add_all(chunks)
+    db_session.add_all(json_schemas)
+    db_session.add_all(source_documents)
 
 
 def get_dataset_processor(input_dir: str) -> Callable:
