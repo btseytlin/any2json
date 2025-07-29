@@ -1,3 +1,5 @@
+import asyncio
+import json
 import os
 import random
 import click
@@ -22,10 +24,12 @@ from any2json.data_engine.helpers import (
     generate_synthetic_schemas,
 )
 from any2json.database.client import db_session_scope
+from any2json.infinigram import InfiniGramAPI
 from any2json.utils import logger, configure_loggers
 from any2json.dataset_processors import get_dataset_processor
 
 from any2json.data_engine.generators.synthetic.pandas_generator import PandasGenerator
+from any2json.data_engine.utils import preview_chunks, save_chunks_to_db
 
 
 @click.group()
@@ -200,6 +204,89 @@ def extract_json_chunks_command(db_file: str, max_depth: int):
 
         db_session.add_all(deduplicated_chunks)
         logger.info(f"After deduplication: adding {len(deduplicated_chunks)} chunks")
+
+
+# Step 2.5: Get json chunks from Infinigram
+
+
+@cli.command()
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(),
+    required=True,
+    help="Sqlite3 file to save the database to",
+)
+@click.option(
+    "--num-chunks",
+    default=10,
+    type=int,
+    help="Number of chunks to retrieve",
+)
+@click.option(
+    "--preview",
+    is_flag=True,
+    help="Preview the generated chunks, don't save to database",
+)
+@click.option(
+    "--infinigram-url",
+    default="https://api.infini-gram.io/",
+    type=str,
+    help="URL of the Infogram API",
+)
+@click.option(
+    "--infinigram-index",
+    default="v4_olmo-2-0325-32b-instruct_llama",
+    type=str,
+)
+def get_from_infinigram(
+    db_file: str,
+    num_chunks: int,
+    preview: bool,
+    infinigram_url: str,
+    infinigram_index: str,
+):
+    logger.info(f"Getting json chunks from Infinigram")
+
+    infinigram_api = InfiniGramAPI(
+        index=infinigram_index,
+        max_clause_freq=500000,
+        max_diff_tokens=1000,
+        timeout=5,
+        max_retries=3,
+        max_concurrent_requests=25,
+    )
+
+    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+        query = "```json"
+
+        find_results = asyncio.run(infinigram_api.find_documents(query))
+
+        if not find_results:
+            logger.info("No documents found matching the query.")
+            return
+
+        results = infinigram_api.fetch_and_process_documents(
+            num_chunks=num_chunks,
+            segment_by_shard=find_results["segment_by_shard"],
+        )
+
+        if not results:
+            logger.info("No results found")
+            return
+
+        logger.info(f"Processing API results and saving chunks to database")
+
+        meta = {
+            "source": "infinigram",
+            "infinigram_url": infinigram_url,
+            "infinigram_index": infinigram_index,
+        }
+        if preview:
+            preview_chunks(results)
+            raise Exception("Preview mode, not saving to database")
+
+        save_chunks_to_db(db_session, results, meta)
 
 
 # Step 3: Generate synthetic data from pandas
@@ -463,6 +550,6 @@ if __name__ == "__main__":
     load_dotenv(override=True)
     configure_loggers(
         level=os.getenv("LOG_LEVEL", "INFO"),
-        basic_level=os.getenv("LOG_LEVEL_BASIC", "INFO"),
+        basic_level=os.getenv("LOG_LEVEL_BASIC", "WARNING"),
     )
     cli()
