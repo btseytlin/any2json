@@ -5,19 +5,7 @@ import xml
 from any2json.data_engine.helpers import deduplicate_chunks
 from any2json.database.models import Chunk, SourceDocument
 from any2json.enums import ContentType
-from any2json.utils import logger
-
-
-def stringify_chunk_content(chunk: Any, format: str) -> str:
-    match format:
-        case "json":
-            return json.dumps(chunk, indent=1, ensure_ascii=False)
-        case "xml":
-            return xml.etree.ElementTree.tostring(chunk, encoding="utf-8").decode(
-                "utf-8"
-            )
-        case _:
-            raise ValueError(f"Unsupported format: {format}")
+from any2json.utils import logger, stringify_content
 
 
 def save_chunks_to_db(
@@ -48,7 +36,7 @@ def save_chunks_to_db(
         )
 
         for chunk in document_chunks:
-            content = stringify_chunk_content(chunk, format)
+            content = stringify_content(chunk, format)
 
             chunk_entity = Chunk(
                 content=content,

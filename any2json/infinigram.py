@@ -4,8 +4,7 @@ import json
 import random
 
 import xml
-from any2json.data_engine.utils import stringify_chunk_content
-from any2json.utils import extract_from_markdown, logger
+from any2json.utils import extract_from_markdown, logger, stringify_content
 import httpx
 import time
 from tqdm.asyncio import tqdm_asyncio
@@ -185,7 +184,7 @@ class InfiniGramAPI:
                 continue
 
             for chunk in chunks:
-                chunk_str = stringify_chunk_content(chunk, format)
+                chunk_str = stringify_content(chunk, format)
                 if chunk_str in seen_chunks:
                     continue  # if we saw this chunk before, skip the whole document
                 seen_chunks.add(chunk_str)
