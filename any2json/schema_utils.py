@@ -36,15 +36,25 @@ def to_supported_json_schema(
 ) -> dict | list:
     schema = deepcopy(schema)
 
+    error_on_keys = ["allOf", "oneOf", "anyOf", "not"]
+
     drop_keys = [
         "minItems",
         "maxItems",
         "minLength",
         "maxLength",
         "required",
+        "dependentRequired",
+        "dependentSchemas",
+        "if",
+        "then",
+        "else",
         "enum",
         "format",
         "additionalProperties",
+        "$comment",
+        "title",
+        "description",
     ]
 
     if isinstance(schema, list):
@@ -52,6 +62,10 @@ def to_supported_json_schema(
 
     if isinstance(schema, dict):
         schema = {k: v for k, v in schema.items() if k not in drop_keys}
+
+        for k, v in schema.items():
+            if k in error_on_keys:
+                raise ValueError(f"Schema contains {k} key, which is not supported")
 
         for k, v in schema.items():
             if k == "type":

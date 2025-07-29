@@ -282,19 +282,16 @@ def clear_document_content(db_file: str):
     help="If true doesnt save changes to the database",
 )
 def drop_duplicate_chunks(db_file: str, preview: bool):
-    db_session = get_db_session(f"sqlite:///{db_file}")
-    duplicate_chunks_by_content = get_duplicated_chunks_by_content(db_session)
-    if duplicate_chunks_by_content:
-        logger.info("Dropping duplicate chunks")
-        drop_duplicated_chunks(db_session, duplicate_chunks_by_content)
-    else:
-        logger.info("No duplicate chunks found")
+    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+        duplicate_chunks_by_content = get_duplicated_chunks_by_content(db_session)
+        if duplicate_chunks_by_content:
+            logger.info("Dropping duplicate chunks")
+            drop_duplicated_chunks(db_session, duplicate_chunks_by_content)
+        else:
+            logger.info("No duplicate chunks found")
 
-    if not preview:
-        db_session.commit()
-        logger.info("Committed changes to the database")
-    else:
-        logger.info("Preview mode, not deleting anything")
+        if preview:
+            raise Exception("Preview mode, not deleting anything")
 
 
 @cli.command()
@@ -354,19 +351,15 @@ def cull_chunks(db_file: str, min_length: int, max_length: int, preview: bool):
     help="If true doesnt save changes to the database",
 )
 def drop_duplicate_schemas(db_file: str, preview: bool):
-    db_session = get_db_session(f"sqlite:///{db_file}")
-    duplicate_schemas_by_content = get_duplicated_schemas_by_content(db_session)
-    if duplicate_schemas_by_content:
-        logger.info("Dropping duplicate schemas")
-        drop_duplicated_schemas(db_session, duplicate_schemas_by_content)
-    else:
-        logger.info("No duplicate schemas found")
+    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+        duplicate_schemas_by_content = get_duplicated_schemas_by_content(db_session)
+        if duplicate_schemas_by_content:
+            drop_duplicated_schemas(db_session, duplicate_schemas_by_content)
+        else:
+            logger.info("No duplicate schemas found")
 
-    if not preview:
-        db_session.commit()
-        logger.info("Committed changes to the database")
-    else:
-        logger.info("Preview mode, not deleting anything")
+        if preview:
+            raise Exception("Preview mode, not deleting anything")
 
 
 if __name__ == "__main__":
