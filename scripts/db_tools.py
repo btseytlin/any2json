@@ -3,7 +3,7 @@ import json
 import os
 from dotenv import load_dotenv
 import click
-from sqlalchemy import String, cast, create_engine, func, or_, select
+from sqlalchemy import String, cast, create_engine, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from any2json.database.client import create_tables, db_session_scope, get_db_session
@@ -238,6 +238,19 @@ def init_db(db_file: str):
     create_tables(db_session)
     db_session.commit()
     db_session.close()
+
+
+@cli.command()
+@click.option(
+    "--db-file",
+    default="data/database.db",
+    type=click.Path(exists=False, dir_okay=False),
+    required=True,
+    help="Sqlite3 file to read the database from",
+)
+def vacuum(db_file: str):
+    with db_session_scope(f"sqlite:///{db_file}") as db_session:
+        db_session.execute(text("VACUUM"))
 
 
 @cli.command()
