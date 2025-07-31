@@ -205,5 +205,5 @@ Please correct the json.
                 continue
 
         raise Exception(
-            f"Failed to generate valid schema after {self.max_retries} attempts. Last error: {error_message}"
+            f"Failed to generate after {self.max_retries} attempts. Last error: {error_message}"
         )

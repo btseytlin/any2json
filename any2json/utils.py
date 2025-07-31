@@ -20,6 +20,11 @@ logger = logging.getLogger("any2json")
 def configure_loggers(level: str = "WARNING", basic_level: str = "WARNING"):
     global logger
     logging.basicConfig(level=basic_level, force=True)
+
+    bm25s_logger = logging.getLogger("bm25s")
+    bm25s_logger.setLevel(basic_level)
+    bm25s_logger.propagate = True
+
     any2json_logger = logging.getLogger("any2json")
     any2json_logger.setLevel(level)
     any2json_logger.propagate = True

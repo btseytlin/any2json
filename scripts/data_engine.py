@@ -24,6 +24,7 @@ from any2json.data_engine.helpers import (
     get_json_documents,
     generate_synthetic_chunks,
     generate_synthetic_schemas,
+    map_chunks_to_existing_schemas,
 )
 from any2json.database.client import db_session_scope
 from any2json.database.helpers import get_dangling_schema_ids
@@ -373,6 +374,27 @@ def generate_pandas_chunks(num_chunks: int):
                 print()
 
 
+# Step 4.0 Map chunks to existing schemas via tfidf
+
+
+@cli.command(
+    name="map-chunks",
+)
+def map_chunks_command():
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        chunks = get_json_chunks_with_no_schema(db_session)
+        results = map_chunks_to_existing_schemas(db_session, chunks)
+
+        mapped = 0
+        for chunk, schema_id in zip(chunks, results, strict=True):
+            if schema_id:
+                chunk.schema_id = schema_id
+                mapped += 1
+        logger.info(f"Mapped {mapped} chunks to existing schemas")
+
+        db_session.add_all(chunks)
+
+
 # Step 4: Generate schemas for json chunks with no schema
 
 
@@ -387,7 +409,7 @@ def generate_pandas_chunks(num_chunks: int):
 )
 @click.option(
     "--model-name",
-    default="gemini-2.5-flash",
+    default="gemini-2.5-flash-lite",
     type=str,
     required=True,
 )
@@ -432,7 +454,7 @@ def generate_schemas_command(
             enable_thinking=enable_thinking,
         )
 
-        schemas, chunks = asyncio.run(
+        schemas_generated, updated_chunks = asyncio.run(
             generate_schemas_for_chunks(
                 db_session=db_session,
                 chunks=chunks,
@@ -440,7 +462,9 @@ def generate_schemas_command(
             )
         )
 
-        logger.info(f"Generated {len(schemas)} schemas for {len(chunks)} chunks")
+        logger.info(
+            f"Generated {schemas_generated} schemas, updated {updated_chunks} chunks"
+        )
 
 
 # Step 4.1: Generate chunks for schemas with no chunks

@@ -22,53 +22,88 @@ from tenacity import (
 )
 
 AGENT_MAX_RETRIES = 4
-AGENT_WAIT_MULTIPLIER = 3
-AGENT_WAIT_MIN = 5
-AGENT_WAIT_MAX = 180
+AGENT_WAIT_MULTIPLIER = 2
+AGENT_WAIT_MIN = 2
+AGENT_WAIT_MAX = 20
 
 SYSTEM_PROMPT = """
-You are a JSONSchema generation expert. Your task is to:
-1. Parse the provided JSON string
-2. Analyze the structure and data types
-3. Generate a comprehensive JSONSchema that describes the data
-4. Ensure the schema is valid and follows JSON Schema specification
-5. Use only the basic subset of JSON Schema. Only use the following types: string, number, boolean, array, object. No "format", "enum" or other attributes. 
-No references and $defs. No "required", "additionalProperties", "minItems" or similar keys.
-6. Make sure every type is nullable
+You are a JSON-Schema specialist.  
+Task: read the given JSON sample and output a JSON-Schema that:
 
-Never output a "{{}}" or "true" as the schema. While they are valid, they are not useful. You can expect every string you get to have a realistic JSON schema.
+1. Uses only these keywords: type, properties, items, $defs.  
+2. Uses only these primitive types: string, number, integer, boolean, array, object, null.  
+   • Every type MUST be expressed as an array that always includes "null".  
+3. Never include: required, additionalProperties, enum, format, pattern, default, description, title, allOf, oneOf, anyOf, not, min*/max*, uniqueItems, dependent*.  
+4. If a field is an object, describe its properties recursively with the same rules.  
+5. If a field is an array, describe its items with the same rules.  
+6. If the source has a "date" format, map it to type ["string","null"].  
+7. Do NOT collapse the schema to {} or true; always emit a meaningful structure.
+8. Make sure every type is nullable
 
-Here is an example of an object and a matching valid JSONSchema:
+Examples:
 
-Input:
-{
-    "name": "John Doe",
-    "age": 25,
-    "isStudent": true,
-    "courses": ["Math", "Science"]
-}
-
-Output:
-{
+Example 1 - Basic object:
+Input: {"name": "John", "age": 25, "isStudent": true, "courses": ["Math", "Science"]}
+Output: {
     "type": ["object", "null"],
     "properties": {
-        "name": {
-            "type": ["string", "null"],
-        },
-        "age": {
-            "type": ["integer", "null"],
-        },
-        "isStudent": {
-            "type": ["boolean", "null"],
-        },
+        "name": {"type": ["string", "null"]},
+        "age": {"type": ["integer", "null"]},
+        "isStudent": {"type": ["boolean", "null"]},
         "courses": {
             "type": ["array", "null"],
-            "items": {
-                "type": ["string", "null"],
-            },
+            "items": {"type": ["string", "null"]}
         }
-    },
+    }
 }
+
+Example 2 - Nested object:
+Input: {"user": {"id": 123, "profile": {"email": "test@example.com", "score": 95.5}}}
+Output: {
+    "type": ["object", "null"],
+    "properties": {
+        "user": {
+            "type": ["object", "null"],
+            "properties": {
+                "id": {"type": ["integer", "null"]},
+                "profile": {
+                    "type": ["object", "null"],
+                    "properties": {
+                        "email": {"type": ["string", "null"]},
+                        "score": {"type": ["number", "null"]}
+                    }
+                }
+            }
+        }
+    }
+}
+
+Example 3 - Array of objects:
+Input: [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
+Output: {
+    "type": ["array", "null"],
+    "items": {
+        "type": ["object", "null"],
+        "properties": {
+            "id": {"type": ["integer", "null"]},
+            "name": {"type": ["string", "null"]}
+        }
+    }
+}
+
+Example 4 - Mixed types array:
+Input: {"data": [42, "text", true, null]}
+Output: {
+    "type": ["object", "null"],
+    "properties": {
+        "data": {
+            "type": ["array", "null"],
+            "items": {"type": ["integer", "string", "boolean", "null"]}
+        }
+    }
+}
+
+Return only the JSON-Schema, nothing else.
 """
 
 
@@ -170,6 +205,7 @@ class JSONSchemaGeneratorAgent:
             system_prompt=self.system_prompt,
             deps_type=SchemaAgentInputSchema,
             output_type=SchemaAgentOutputSchema,
+            retries=AGENT_MAX_RETRIES,
         )
 
         @self.agent.system_prompt
@@ -203,7 +239,7 @@ class JSONSchemaGeneratorAgent:
             min=AGENT_WAIT_MIN,
             max=AGENT_WAIT_MAX,
         ),
-        before_sleep=before_sleep_log(logger, logging.WARNING, exc_info=True),
+        before_sleep=before_sleep_log(logger, logging.DEBUG, exc_info=False),
     )
     async def run_async(
         self,
@@ -211,18 +247,17 @@ class JSONSchemaGeneratorAgent:
         previous_schema: dict | str | None = None,
         error_message: str | None = None,
     ) -> SchemaAgentOutputSchema:
-        async with self.semaphore:
-            logger.debug(
-                f"Running schema generator agent for input_json: {input_json}, previous_schema: {previous_schema}, error_message: {error_message}"
-            )
+        logger.debug(
+            f"Running schema generator agent for input_json: {input_json}, previous_schema: {previous_schema}, error_message: {error_message}"
+        )
 
-            return await self.agent.run(
-                deps=SchemaAgentInputSchema(
-                    input_json=input_json,
-                    previous_schema=previous_schema,
-                    error_message=error_message,
-                ),
-            )
+        return await self.agent.run(
+            deps=SchemaAgentInputSchema(
+                input_json=input_json,
+                previous_schema=previous_schema,
+                error_message=error_message,
+            ),
+        )
 
     def validate_schema(
         self,
@@ -236,31 +271,24 @@ class JSONSchemaGeneratorAgent:
         validate(input_json)
 
     async def generate_and_validate_schema(self, input_json: dict) -> tuple[dict, str]:
-        retries_used = 0
         error_message = ""
         previous_schema = None
 
-        for _ in range(self.max_retries):
+        for i in range(self.max_retries):
             try:
-                result = await self.run_async(
-                    input_json=input_json,
-                    previous_schema=previous_schema,
-                    error_message=error_message,
-                )
+                async with self.semaphore:
+                    result = await self.run_async(
+                        input_json=input_json,
+                        previous_schema=previous_schema,
+                        error_message=error_message,
+                    )
                 logger.debug(
                     "All messages: "
                     + json.dumps(json.loads(result.all_messages_json()), indent=1)
                 )
+                logger.debug(f"Generated schema: {result.output.output_schema}")
                 previous_schema = result.output.output_schema
-                try:
-                    generated_schema = json.loads(result.output.output_schema)
-                    logger.debug(
-                        f"Generated schema: {json.dumps(generated_schema, indent=1)}"
-                    )
-                except json.JSONDecodeError:
-                    generated_schema = result.output.output_schema
-                    logger.debug(f"Generated schema: {generated_schema}")
-                    raise
+                generated_schema = json.loads(result.output.output_schema)
 
                 await asyncio.to_thread(
                     self.validate_schema,
@@ -272,15 +300,15 @@ class JSONSchemaGeneratorAgent:
                 model_used = result.all_messages()[-2].model_name
                 return generated_schema, model_used
             except Exception as e:
-                retries_used += 1
+                logger.debug(f"Schema generation attempt {i} failed")
+
                 exc_info = sys.exc_info()
 
                 error_message = "".join(
                     traceback.format_exception(exc_info[0], exc_info[1], exc_info[2])
                 )
-                logger.debug(f"Passing retry with error message: {error_message}")
                 continue
 
         raise Exception(
-            f"Failed to generate valid schema after {self.max_retries} attempts. Last error: {error_message}"
+            f"Failed to generate after {self.max_retries} attempts. Last error: {error_message}"
         )

@@ -31,6 +31,8 @@ dependencies = [
     "trl>=0.18.1",
     "warcio>=1.7.5",
     "tenacity>=8.5.0",
+    "bm25s>=0.2.13",
+    "pystemmer>=3.0.0",
 ]
 
 [tool.setuptools.packages.find]
