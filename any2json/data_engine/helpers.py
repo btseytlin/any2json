@@ -1,3 +1,4 @@
+import asyncio
 import json
 import fastjsonschema
 from sqlalchemy import select
@@ -16,6 +17,7 @@ from any2json.database.models import Chunk, JsonSchema, SchemaConversion
 from any2json.enums import ContentType
 from any2json.utils import logger
 from tqdm.auto import tqdm
+from tqdm.asyncio import tqdm as tqdm_asyncio
 
 
 def get_json_chunks_with_schema(db_session: Session) -> list[Chunk]:
@@ -143,12 +145,8 @@ import json
 import os
 from tqdm.auto import tqdm
 import instructor
-from any2json.data_engine.agents import (
-    ChunkAgentInputSchema,
-    JSONChunkGeneratorAgent,
-    JSONSchemaValidationAgent,
-    SchemaAgentInputSchema,
-)
+from any2json.agents.schema_generator import JSONSchemaGeneratorAgent
+from any2json.agents.chunk_generator import JSONChunkGeneratorAgent
 from any2json.database.client import get_db_session
 from any2json.database.models import Chunk, JsonSchema
 from any2json.enums import ContentType
@@ -172,17 +170,13 @@ def get_schemas_with_no_chunks(db_session: Session) -> list[JsonSchema]:
     return db_session.execute(query).scalars().all()
 
 
-def generate_schema_for_json(
+async def generate_schema_for_json(
     json_content: dict,
-    schema_agent: JSONSchemaValidationAgent,
-) -> dict:
-    original_data = json_content
-
-    input_string = json.dumps(original_data, indent=1)
-
+    schema_agent: JSONSchemaGeneratorAgent,
+) -> tuple[dict, dict]:
     try:
-        schema = schema_agent.generate_and_validate_schema(
-            SchemaAgentInputSchema(input_string=input_string)
+        schema, model_info = await schema_agent.generate_and_validate_schema(
+            input_json=json_content,
         )
         simplified_schema = to_supported_json_schema(schema)
         validate = fastjsonschema.compile(simplified_schema)
@@ -193,51 +187,50 @@ def generate_schema_for_json(
                 f"Simplified schema differs from original schema. Original: {schema}, Simplified: {simplified_schema}"
             )
         schema = simplified_schema
+        return schema, model_info
     except Exception as e:
         logger.error(e, exc_info=True)
-        return None
-
-    return schema
+        return None, None
 
 
-def generate_schemas_for_chunks(
+async def generate_schemas_for_chunks(
     db_session: Session,
     chunks: list[Chunk],
-    schema_agent: JSONSchemaValidationAgent,
+    schema_agent: JSONSchemaGeneratorAgent,
 ) -> tuple[list[JsonSchema], list[Chunk]]:
     schemas = []
     updated_chunks = []
-    for i, chunk in tqdm(
-        enumerate(chunks),
-        desc="Generating schemas for chunks",
-        total=len(chunks),
-    ):
-        schema = generate_schema_for_json(
-            json.loads(chunk.content),
-            schema_agent,
-        )
-        if schema:
-            schema_entity = JsonSchema(
-                content=schema,
-                chunks=[chunk],
-                meta={
-                    "generator_state": schema_agent.get_state(),
-                },
-            )
-            schemas.append(schema_entity)
-            chunk.schema = schema_entity
-            updated_chunks.append(chunk)
 
-            try:
-                db_session.add(schema_entity)
-                db_session.add(chunk)
-                db_session.commit()
-            except Exception as e:
-                logger.error(
-                    f"Error: {e}\nFailed to commit chunk {chunk.id} schema: {schema_entity.content}",
-                    exc_info=True,
-                )
-                raise e
+    tasks = []
+    for chunk in chunks:
+        tasks.append(
+            generate_schema_for_json(
+                json.loads(chunk.content),
+                schema_agent,
+            )
+        )
+
+    for result in tqdm_asyncio.as_completed(tasks):
+        schema, model_name = await result
+
+        if not schema:
+            continue
+
+        schema_entity = JsonSchema(
+            content=schema,
+            chunks=[chunk],
+            meta={
+                "generator_state": schema_agent.get_state(),
+                "model_name": model_name,
+            },
+        )
+        schemas.append(schema_entity)
+        chunk.schema = schema_entity
+        updated_chunks.append(chunk)
+
+        db_session.add(schema_entity)
+        db_session.add(chunk)
+        db_session.commit()
 
     return schemas, updated_chunks
 

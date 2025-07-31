@@ -9,10 +9,8 @@ import time
 import click
 from datasets import Dataset, load_dataset
 from dotenv import load_dotenv
-from any2json.data_engine.agents import (
-    JSONChunkGeneratorAgent,
-    JSONSchemaValidationAgent,
-)
+from any2json.agents.schema_generator import JSONSchemaGeneratorAgent
+from any2json.agents.chunk_generator import JSONChunkGeneratorAgent
 from any2json.data_engine.generators.converters.utils import (
     generate_synthetic_format_conversions,
 )
@@ -389,7 +387,7 @@ def generate_pandas_chunks(num_chunks: int):
 )
 @click.option(
     "--model-name",
-    default="gemini-2.5-flash-lite",
+    default="gemini-2.5-flash",
     type=str,
     required=True,
 )
@@ -428,14 +426,18 @@ def generate_schemas_command(
 
         logger.info(f"Loaded {len(chunks)} JSON chunks with no schema for processing")
 
-        schema_agent = JSONSchemaValidationAgent(
-            model_name, max_retries, enable_thinking
+        schema_agent = JSONSchemaGeneratorAgent(
+            model_name=model_name,
+            max_retries=max_retries,
+            enable_thinking=enable_thinking,
         )
 
-        schemas, chunks = generate_schemas_for_chunks(
-            db_session=db_session,
-            chunks=chunks,
-            schema_agent=schema_agent,
+        schemas, chunks = asyncio.run(
+            generate_schemas_for_chunks(
+                db_session=db_session,
+                chunks=chunks,
+                schema_agent=schema_agent,
+            )
         )
 
         logger.info(f"Generated {len(schemas)} schemas for {len(chunks)} chunks")
