@@ -232,15 +232,6 @@ class JSONSchemaGeneratorAgent:
 
             return prompt
 
-    @retry(
-        stop=stop_after_attempt(AGENT_MAX_RETRIES),
-        wait=wait_exponential(
-            multiplier=AGENT_WAIT_MULTIPLIER,
-            min=AGENT_WAIT_MIN,
-            max=AGENT_WAIT_MAX,
-        ),
-        before_sleep=before_sleep_log(logger, logging.DEBUG, exc_info=False),
-    )
     async def run_async(
         self,
         input_json: dict,
