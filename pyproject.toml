@@ -33,6 +33,7 @@ dependencies = [
     "tenacity>=8.5.0",
     "bm25s>=0.2.13",
     "pystemmer>=3.0.0",
+    "lxml>=6.0.0",
 ]
 
 [tool.setuptools.packages.find]

@@ -30,7 +30,7 @@ def save_chunks_to_db(
 
         document_entity = SourceDocument(
             source="infinigram",
-            content=document_content,
+            content="",
             content_type=ContentType.TEXT.value,
             meta=document_meta,
         )

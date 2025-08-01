@@ -243,9 +243,9 @@ def get_from_infinigram(
         index=infinigram_index,
         max_clause_freq=500000,
         max_diff_tokens=1000,
-        timeout=5,
+        timeout=20,
         max_retries=3,
-        max_concurrent_requests=25,
+        max_concurrent_requests=10,
     )
 
     queries = {
@@ -310,7 +310,7 @@ def get_from_infinigram(
 )
 @click.option(
     "--max-depth",
-    default=3,
+    default=10,
     type=int,
     help="Maximum depth to generate chunks from",
 )
@@ -320,13 +320,24 @@ def get_from_infinigram(
     type=float,
     help="Fraction of chunks to take from each document",
 )
-def extract_json_chunks_command(max_depth: int, frac_per_document: float):
+@click.option(
+    "--max-chunks",
+    default=None,
+    type=int,
+    help="Maximum number of chunks to generate",
+)
+def extract_json_chunks_command(
+    max_depth: int, frac_per_document: float, max_chunks: int | None
+):
     logger.info(f"Extracting json chunks from {DB_FILE}")
 
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         documents = get_json_documents(db_session)
         chunks = extract_json_chunks(
-            documents, max_depth=max_depth, frac_per_document=frac_per_document
+            documents,
+            max_depth=max_depth,
+            frac_per_document=frac_per_document,
+            max_chunks=max_chunks,
         )
         logger.info(f"Generated {len(chunks)} input chunks")
 
@@ -334,6 +345,15 @@ def extract_json_chunks_command(max_depth: int, frac_per_document: float):
 
         db_session.add_all(deduplicated_chunks)
         logger.info(f"After deduplication: adding {len(deduplicated_chunks)} chunks")
+
+        if PREVIEW:
+            print("Previewing last 10 chunks")
+            for chunk in deduplicated_chunks[-10:]:
+                print(f"{chunk.parent_document_id=}")
+                print(f"{chunk.content=}")
+                print()
+                print()
+                print()
 
 
 # Section 3: Generating synthetic data
@@ -371,14 +391,14 @@ def generate_pandas_chunks(num_chunks: int):
                 schema_conversions,
                 strict=True,
             ):
-                print(f"{input_chunk.content=}")
+                print(
+                    f"{schema_conversion.input_chunk.content_type} ({schema_conversion.meta['generator_state'].get('input_orient')}) -> {schema_conversion.output_chunk.content_type}"
+                )
+                print(f"Input chunk:\n{input_chunk.content}")
                 print()
-                print(f"{schema.content=}")
+                print(f"Schema:\n{schema.content}")
                 print()
-                print(f"{output_chunk.content=}")
-                print()
-                print(f"{schema_conversion=}")
-                print()
+                print(f"Output chunk:\n{output_chunk.content}")
                 print()
 
 

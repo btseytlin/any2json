@@ -106,3 +106,9 @@ class SchemaConversion(Base):
     )
 
     meta = Column(JSON, nullable=True)
+
+    def __str__(self):
+        return f"SchemaConversion(id={self.id}, input_chunk_id={self.input_chunk_id}, schema_id={self.schema_id}, output_chunk_id={self.output_chunk_id})"
+
+    def __repr__(self):
+        return str(self)

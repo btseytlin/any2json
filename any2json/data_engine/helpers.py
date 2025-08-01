@@ -44,6 +44,8 @@ def get_json_documents(db_session: Session) -> list[SourceDocument]:
     return (
         db_session.query(SourceDocument)
         .filter(SourceDocument.content_type == ContentType.JSON.value)
+        .filter(SourceDocument.content != "")
+        .filter(SourceDocument.content is not None)
         .all()
     )
 
@@ -84,7 +86,7 @@ def get_chunks_from_record(
 
         chunks.append(record)
 
-    if max_depth == 0:
+    if max_depth <= 0:
         return chunks
 
     if isinstance(record, dict):
@@ -113,8 +115,9 @@ def deduplicate_chunks(chunks: list[Chunk]) -> list[Chunk]:
 
 def extract_json_chunks(
     documents: list[SourceDocument],
-    max_depth: int = 3,
+    max_depth: int = 7,
     frac_per_document: float = 0.2,
+    max_chunks: int | None = None,
 ) -> list[Chunk]:
     chunks = []
     for document in documents:
@@ -122,8 +125,18 @@ def extract_json_chunks(
 
         chunk_jsons = get_chunks_from_record(json_content, max_depth=max_depth)
 
+        chunk_jsons_filtered = []
+        for chunk_json in chunk_jsons:
+            try:
+                chunk_str = json.dumps(chunk_json)
+                if len(chunk_str) >= 100:
+                    chunk_jsons_filtered.append(chunk_json)
+            except Exception as e:
+                continue
+
         chunk_jsons = random.sample(
-            chunk_jsons, int(len(chunk_jsons) * frac_per_document)
+            chunk_jsons_filtered,
+            max(int(len(chunk_jsons_filtered) * frac_per_document), 1),
         )
 
         for chunk_json in chunk_jsons:
@@ -135,6 +148,9 @@ def extract_json_chunks(
                     is_synthetic=False,
                 )
             )
+
+        if max_chunks and len(chunks) >= max_chunks:
+            break
 
     return chunks
 
@@ -338,58 +354,60 @@ def generate_synthetic_chunks(
     output_chunks = []
     schema_conversions = []
     for i in tqdm(range(num_chunks)):
-        generator = generator_class(**kwargs)
-        generator.setup()
-        generator_state = generator.get_state()
-        input_format = ContentType(generator.format_name.upper()).value
-        input_str, schema, output_json = generator.generate_triplet()
+        try:
+            generator = generator_class(**kwargs)
+            generator.setup()
+            generator_state = generator.get_state()
+            input_format = ContentType(generator.input_format.upper()).value
+            input_str, schema, output_json = generator.generate_triplet()
 
-        meta = {
-            "generator": generator.__class__.__name__,
-            "generator_state": generator_state,
-        }
-
-        schema_entity = JsonSchema(
-            content=schema,
-            is_synthetic=True,
-            meta=meta,
-        )
-
-        output_chunk_entity = Chunk(
-            content=output_json,
-            content_type=ContentType.JSON.value,
-            schema=schema_entity,
-            meta=meta,
-            is_synthetic=True,
-        )
-
-        input_chunk_entity = Chunk(
-            content=input_str,
-            content_type=input_format,
-            meta=meta,
-            is_synthetic=True,
-            parent_chunk_id=output_chunk_entity.id,
-            matches_parent_chunk=True,
-        )
-
-        schema_conversion_entity = SchemaConversion(
-            input_chunk=input_chunk_entity,
-            schema=schema_entity,
-            output_chunk=output_chunk_entity,
-            meta={
+            meta = {
                 "generator": generator.__class__.__name__,
-            },
-        )
+                "generator_state": generator_state,
+            }
 
-        input_chunks.append(input_chunk_entity)
-        schemas.append(schema_entity)
-        output_chunks.append(output_chunk_entity)
-        schema_conversions.append(schema_conversion_entity)
+            schema_entity = JsonSchema(
+                content=schema,
+                is_synthetic=True,
+                meta=meta,
+            )
 
-        db_session.add(schema_entity)
-        db_session.add(input_chunk_entity)
-        db_session.add(output_chunk_entity)
-        db_session.add(schema_conversion_entity)
+            output_chunk_entity = Chunk(
+                content=output_json,
+                content_type=ContentType.JSON.value,
+                schema=schema_entity,
+                meta=meta,
+                is_synthetic=True,
+            )
+
+            input_chunk_entity = Chunk(
+                content=input_str,
+                content_type=input_format,
+                meta=meta,
+                is_synthetic=True,
+                parent_chunk_id=output_chunk_entity.id,
+                matches_parent_chunk=True,
+            )
+
+            schema_conversion_entity = SchemaConversion(
+                input_chunk=input_chunk_entity,
+                schema=schema_entity,
+                output_chunk=output_chunk_entity,
+                meta=meta,
+            )
+
+            input_chunks.append(input_chunk_entity)
+            schemas.append(schema_entity)
+            output_chunks.append(output_chunk_entity)
+            schema_conversions.append(schema_conversion_entity)
+
+            db_session.add(schema_entity)
+            db_session.add(input_chunk_entity)
+            db_session.add(output_chunk_entity)
+            db_session.add(schema_conversion_entity)
+        except Exception as e:
+            logger.error(e, exc_info=True)
+            continue
 
     logger.info(f"Generated {len(input_chunks)} input chunks")
     return input_chunks, schemas, output_chunks, schema_conversions

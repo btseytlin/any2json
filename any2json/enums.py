@@ -13,3 +13,5 @@ class ContentType(Enum):
     YAML = "YAML"
     TOML = "TOML"
     PYTHON_STRING = "PYTHON_STRING"
+    SQL = "SQL"
+    LATEX = "LATEX"
