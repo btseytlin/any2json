@@ -439,7 +439,7 @@ def cull_chunks(min_length: int, max_length: int):
 @cli.command()
 @click.option(
     "--limit",
-    default=1000,
+    default=None,
     type=int,
     help="Maximum number of duplicate schemas to drop",
 )
@@ -478,6 +478,54 @@ def drop_dangling_schemas_command(limit: int):
         logger.info(f"Dropping {len(dangling_schema_ids)} dangling schemas")
         db_session.execute(
             delete(JsonSchema).where(JsonSchema.id.in_(dangling_schema_ids))
+        )
+
+
+@cli.command()
+def drop_xml():
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        xml_chunks = (
+            db_session.execute(
+                select(Chunk).where(Chunk.content_type == ContentType.XML.value)
+            )
+            .scalars()
+            .all()
+        )
+
+        xml_chunk_ids = [chunk.id for chunk in xml_chunks]
+        schema_conversions = (
+            db_session.execute(
+                select(SchemaConversion).where(
+                    SchemaConversion.input_chunk_id.in_(xml_chunk_ids)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        chunk_ids_to_delete = set()
+        schema_ids_to_delete = set()
+        schema_conversion_ids_to_delete = set()
+
+        for schema_conversion in schema_conversions:
+            chunk_ids_to_delete.add(schema_conversion.input_chunk_id)
+            chunk_ids_to_delete.add(schema_conversion.output_chunk_id)
+            schema_ids_to_delete.add(schema_conversion.schema_id)
+            schema_conversion_ids_to_delete.add(schema_conversion.id)
+
+        logger.info(f"Dropping {len(chunk_ids_to_delete)} chunks")
+        logger.info(f"Dropping {len(schema_ids_to_delete)} schemas")
+        logger.info(
+            f"Dropping {len(schema_conversion_ids_to_delete)} schema conversions"
+        )
+        db_session.execute(delete(Chunk).where(Chunk.id.in_(chunk_ids_to_delete)))
+        db_session.execute(
+            delete(JsonSchema).where(JsonSchema.id.in_(schema_ids_to_delete))
+        )
+        db_session.execute(
+            delete(SchemaConversion).where(
+                SchemaConversion.id.in_(schema_conversion_ids_to_delete)
+            )
         )
 
 

@@ -39,6 +39,7 @@ def to_supported_json_schema(
     error_on_keys = ["allOf", "oneOf", "anyOf", "not"]
 
     drop_keys = [
+        "extends",
         "minItems",
         "maxItems",
         "minProperties",

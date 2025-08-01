@@ -3,6 +3,7 @@ import asyncio
 import json
 import random
 
+from typing import Any
 import xml
 from any2json.utils import extract_from_markdown, logger, stringify_content
 import httpx
@@ -13,7 +14,7 @@ from tqdm import tqdm
 
 def process_document(
     doc_data: dict, rank: int, format: str
-) -> tuple[str, dict, list[dict]] | None:
+) -> tuple[str, dict, list[Any]] | tuple[None, None, None]:
     document_content = "\n".join(span[0] for span in doc_data["spans"])
 
     # logger.debug(f"Extracting {format} chunks from document:\n{document_content}")
@@ -137,8 +138,7 @@ class InfiniGramAPI:
         segment_by_shard: list[tuple[int, int]],
         format: str,
         query: str,
-    ) -> tuple[str, list[dict], dict]:
-        results = []
+    ) -> tuple[str, list[dict], list[list[Any]]]:
         collected_chunks = 0
 
         query_payloads = []

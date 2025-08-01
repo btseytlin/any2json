@@ -292,32 +292,52 @@ async def generate_schemas_for_chunks(
                 "model_name": model_name,
             },
         )
-        schemas_generated += 1
         db_session.add(schema_entity)
 
         chunk.schema = schema_entity
-        updated_chunks += 1
 
         db_session.add(chunk)
         db_session.commit()
 
-        db_session.refresh(schema_entity)
+        schemas_generated += 1
+        updated_chunks += 1
 
     return schemas_generated, updated_chunks
 
 
-def generate_chunks_for_schemas(
+async def generate_chunks_for_schemas(
     db_session: Session,
     schemas: list[JsonSchema],
     agent: JSONChunkGeneratorAgent,
-) -> list[Chunk]:
-    chunks = []
+) -> int:
+    chunks_generated = 0
+    updated_schemas = 0
+    errors = 0
+
+    async def generate_chunk_for_schema_wrapper(
+        input_schema: dict,
+        agent: JSONChunkGeneratorAgent,
+        schema_id: int,
+    ):
+        return schema_id, await agent.generate_and_validate_json(
+            input_schema=input_schema,
+        )
+
+    schemas_lookup = {schema.id: schema for schema in schemas}
+    tasks = []
     for schema in schemas:
-        try:
-            json_content = schema.content
-            json_chunk, model_name = agent.generate_and_validate_json(
-                input_schema=json_content
+        tasks.append(
+            generate_chunk_for_schema_wrapper(
+                input_schema=schema.content,
+                agent=agent,
+                schema_id=schema.id,
             )
+        )
+
+    for result in tqdm_asyncio.as_completed(tasks):
+        try:
+            schema_id, (json_chunk, model_name) = await result
+            schema = schemas_lookup[schema_id]
             if not json_chunk:
                 continue
             chunk = Chunk(
@@ -330,17 +350,20 @@ def generate_chunks_for_schemas(
                     "model_name": model_name,
                 },
             )
-            chunks.append(chunk)
             db_session.add(chunk)
+            schema.chunks.append(chunk)
+            db_session.add(schema)
             db_session.commit()
+
+            chunks_generated += 1
+            updated_schemas += 1
         except Exception as e:
             logger.error(
-                f"Error: {e}\nFailed to commit chunk for schema: {schema.id}",
-                exc_info=True,
+                f"Error generating chunk for schema {schema.id}: {e}", exc_info=True
             )
             continue
 
-    return chunks
+    return chunks_generated, updated_schemas, errors
 
 
 def generate_synthetic_chunks(

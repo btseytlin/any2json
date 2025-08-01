@@ -19,11 +19,13 @@ import re
 
 def df_to_xml(df: pd.DataFrame) -> str:
     attr_cols = list(df.columns)[: random.randint(0, len(df.columns) - 1)]
+    elem_cols = [c for c in df.columns if c not in attr_cols]
     root_name = Faker().word()
     index = random.choice([True, False])
     xml_declaration = random.choice([True, False])
     return df.to_xml(
         attr_cols=attr_cols,
+        elem_cols=elem_cols,
         root_name=root_name,
         index=index,
         xml_declaration=xml_declaration,

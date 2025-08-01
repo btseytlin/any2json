@@ -18,9 +18,11 @@ SYSTEM_PROMPT = """
 Given a JsonSchema object, your task is to:
 1. Inspect the provided JSON Schema.
 2. Generate a plausible and non-trivial json that matches the schema,
-3. In case of compilation errors, iteratively correct the json,
+3. In case of compilation errors, iteratively correct the json.
 
-Avoid making obviously example data, generate realistic data. Avoid things like "hello world", "example", "john doe", etc.
+Avoid making obviously example data, generate realistic data. Never output things like "hello world", "example", "john doe", "sample", etc.
+
+If schema has multiple fields of the same type, make sure the generated values are different an diverse.
 
 Here is an example of a valid JSONSchema and a matching valid JSON:
 
@@ -54,7 +56,6 @@ Output:
     "courses": ["Math", "Science"]
 }
 
-Return only the JSON, nothing else.
 """
 
 

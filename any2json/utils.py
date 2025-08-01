@@ -76,7 +76,7 @@ def parse_string(source_str: str, format: str) -> Any:
             ), "HTML string must start and end with < and >"
             return BeautifulSoup(source_str, "html.parser")
         case "yaml":
-            return yaml.safe_load(source_str)
+            return yaml.full_load(source_str)
         case "toml":
             return toml.loads(source_str)
         case _:

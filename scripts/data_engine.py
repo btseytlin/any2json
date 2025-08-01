@@ -30,7 +30,7 @@ from any2json.database.client import db_session_scope
 from any2json.database.helpers import get_dangling_schema_ids
 from any2json.database.models import JsonSchema
 from any2json.infinigram import InfiniGramAPI
-from any2json.utils import logger, configure_loggers
+from any2json.utils import logger, configure_loggers, stringify_content
 from any2json.dataset_processors import get_dataset_processor
 
 from any2json.data_engine.generators.synthetic.pandas_generator import PandasGenerator
@@ -275,6 +275,16 @@ def get_from_infinigram(
                 query=query,
             )
         )
+
+        new_per_document_chunks = []
+        for chunk_list in per_document_chunks:
+            chunk_list = [
+                chunk
+                for chunk in chunk_list
+                if len(stringify_content(chunk, format)) >= 100
+            ]
+            new_per_document_chunks.append(chunk_list)
+        per_document_chunks = new_per_document_chunks
 
         if not document_content:
             logger.info("No results found")
@@ -551,15 +561,23 @@ def generate_chunks_command(
 
         logger.info(f"Loaded {len(schemas)} JSON schemas with no chunks for processing")
 
-        agent = JSONChunkGeneratorAgent(model_name, max_retries, enable_thinking)
-
-        chunks = generate_chunks_for_schemas(
-            db_session=db_session,
-            schemas=schemas,
-            agent=agent,
+        agent = JSONChunkGeneratorAgent(
+            model_name=model_name,
+            max_retries=max_retries,
+            enable_thinking=enable_thinking,
         )
 
-        logger.info(f"Generated {len(chunks)} chunks")
+        chunks_generated, updated_schemas, errors = asyncio.run(
+            generate_chunks_for_schemas(
+                db_session=db_session,
+                schemas=schemas,
+                agent=agent,
+            )
+        )
+
+        logger.info(
+            f"Generated {chunks_generated} chunks, updated {updated_schemas} schemas, {errors} errors"
+        )
 
 
 # Step 3.5: Generate synthetic schemas from existing schemas
