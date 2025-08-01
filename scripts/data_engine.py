@@ -77,7 +77,9 @@ def cli(db_file: str, preview: bool, seed: int):
     )
 
 
-# Step 0: Download datasets
+# Section 1: Loading inputs
+
+# Step 1.1: Download datasets
 
 
 @cli.command()
@@ -184,7 +186,7 @@ def download_datasets(output_dir, max_records, overwrite):
         time.sleep(3)
 
 
-# Step 1: Process all source datasets, extract inputs from them
+# Step 1.2: Process all source datasets, extract inputs from them
 
 
 @cli.command()
@@ -202,41 +204,7 @@ def process_dataset(input_dir: str, num_samples_per_dataset: int):
         processor(db_session, input_dir, num_samples_per_dataset)
 
 
-# Step 2: Extract json chunks from source documents
-
-
-@cli.command(
-    name="extract-json-chunks",
-)
-@click.option(
-    "--max-depth",
-    default=3,
-    type=int,
-    help="Maximum depth to generate chunks from",
-)
-@click.option(
-    "--frac-per-document",
-    default=0.2,
-    type=float,
-    help="Fraction of chunks to take from each document",
-)
-def extract_json_chunks_command(max_depth: int, frac_per_document: float):
-    logger.info(f"Extracting json chunks from {DB_FILE}")
-
-    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
-        documents = get_json_documents(db_session)
-        chunks = extract_json_chunks(
-            documents, max_depth=max_depth, frac_per_document=frac_per_document
-        )
-        logger.info(f"Generated {len(chunks)} input chunks")
-
-        deduplicated_chunks = deduplicate_chunks(chunks)
-
-        db_session.add_all(deduplicated_chunks)
-        logger.info(f"After deduplication: adding {len(deduplicated_chunks)} chunks")
-
-
-# Step 2.5: Get json chunks from Infinigram
+# Step 1.3: Get json chunks from Infinigram
 
 
 @cli.command()
@@ -287,6 +255,7 @@ def get_from_infinigram(
         "yaml": "```yaml",
         "toml": "```toml",
         "html": "```html",
+        "html_table": "<table> AND </table>",
     }
 
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
@@ -331,7 +300,46 @@ def get_from_infinigram(
         )
 
 
-# Step 3: Generate synthetic data from pandas
+# Section 2: Processing inputs
+
+# Step 2.1: Extract json chunks from source documents
+
+
+@cli.command(
+    name="extract-json-chunks",
+)
+@click.option(
+    "--max-depth",
+    default=3,
+    type=int,
+    help="Maximum depth to generate chunks from",
+)
+@click.option(
+    "--frac-per-document",
+    default=0.2,
+    type=float,
+    help="Fraction of chunks to take from each document",
+)
+def extract_json_chunks_command(max_depth: int, frac_per_document: float):
+    logger.info(f"Extracting json chunks from {DB_FILE}")
+
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        documents = get_json_documents(db_session)
+        chunks = extract_json_chunks(
+            documents, max_depth=max_depth, frac_per_document=frac_per_document
+        )
+        logger.info(f"Generated {len(chunks)} input chunks")
+
+        deduplicated_chunks = deduplicate_chunks(chunks)
+
+        db_session.add_all(deduplicated_chunks)
+        logger.info(f"After deduplication: adding {len(deduplicated_chunks)} chunks")
+
+
+# Section 3: Generating synthetic data
+
+
+# Step 3.1: Generate synthetic data from pandas
 
 
 @cli.command()
@@ -374,7 +382,7 @@ def generate_pandas_chunks(num_chunks: int):
                 print()
 
 
-# Step 4.0 Map chunks to existing schemas via tfidf
+# Step 3.2 Map chunks to existing schemas via tfidf
 
 
 @cli.command(
@@ -395,7 +403,7 @@ def map_chunks_command():
         db_session.add_all(chunks)
 
 
-# Step 4: Generate schemas for json chunks with no schema
+# Step 3.3: Generate schemas for json chunks with no schema
 
 
 @cli.command(
@@ -467,7 +475,7 @@ def generate_schemas_command(
         )
 
 
-# Step 4.1: Generate chunks for schemas with no chunks
+# Step 3.4: Generate chunks for schemas with no chunks
 
 
 @cli.command(
@@ -534,7 +542,7 @@ def generate_chunks_command(
         logger.info(f"Generated {len(chunks)} chunks")
 
 
-# Step 5: Generate synthetic schemas from existing schemas
+# Step 3.5: Generate synthetic schemas from existing schemas
 
 
 @cli.command(
@@ -593,7 +601,7 @@ def generate_synthetic_schemas_command(
             raise Exception("Preview mode, not saving to database")
 
 
-# Step 6: Generate synthetic format conversions from JSON to other formats
+# Step 3.6: Generate synthetic format conversions from JSON to other formats
 
 
 @cli.command(

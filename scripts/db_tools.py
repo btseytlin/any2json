@@ -14,12 +14,14 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    update,
 )
 from sqlalchemy.orm import Session
 
 from any2json.database.client import create_tables, db_session_scope, get_db_session
 from any2json.database.helpers import get_dangling_schema_ids
-from any2json.database.models import Chunk, JsonSchema, SourceDocument
+from any2json.database.models import Chunk, JsonSchema, SchemaConversion, SourceDocument
+from any2json.enums import ContentType
 from any2json.utils import configure_loggers, logger
 
 
@@ -31,7 +33,7 @@ DB_FILE = "data/database.db"
 @click.option(
     "--db-file",
     default="data/database.db",
-    type=click.Path(exists=True, dir_okay=False),
+    type=click.Path(dir_okay=False, writable=True),
     required=True,
     help="Sqlite3 file to read the database from",
 )
@@ -107,17 +109,16 @@ def drop_duplicated_documents(
     if not duplicate_documents:
         return
 
-    documents_to_delete = set()
+    document_ids_to_delete = set()
     for _, documents in duplicate_documents.items():
         for document in documents[1:]:
-            documents_to_delete.add(document)
+            document_ids_to_delete.add(document.id)
 
-    logger.info(
-        f"Found {len(documents_to_delete)} duplicate documents to delete: {[d.id for d in documents_to_delete]}"
+    logger.info(f"Found {len(document_ids_to_delete)} duplicate documents to delete")
+
+    db_session.execute(
+        delete(SourceDocument).where(SourceDocument.id.in_(document_ids_to_delete))
     )
-
-    for doc in documents_to_delete:
-        db_session.delete(doc)
 
 
 def get_duplicated_chunks(db_session: Session) -> dict[str, list[Chunk]]:
@@ -179,17 +180,14 @@ def drop_duplicated_chunks(
     if not duplicate_chunks:
         return
 
-    chunks_to_delete = set()
+    chunk_ids_to_delete = set()
     for _, chunks in duplicate_chunks.items():
         for chunk in chunks[1:]:
-            chunks_to_delete.add(chunk)
+            chunk_ids_to_delete.add(chunk.id)
 
-    logger.info(
-        f"Found {len(chunks_to_delete)} duplicate chunks to delete: {[c.id for c in chunks_to_delete]}"
-    )
+    logger.info(f"Found {len(chunk_ids_to_delete)} duplicate chunks to delete")
 
-    for chunk in chunks_to_delete:
-        db_session.delete(chunk)
+    db_session.execute(delete(Chunk).where(Chunk.id.in_(chunk_ids_to_delete)))
 
 
 def get_duplicated_schemas_by_content(
@@ -213,11 +211,12 @@ def get_duplicated_schemas_by_content(
 def drop_duplicated_schemas(
     db_session: Session,
     duplicate_schemas: dict[str, list[JsonSchema]],
+    limit: int | None = None,
 ):
     if not duplicate_schemas:
         return
 
-    schemas_to_delete = set()
+    schema_ids_to_delete = set()
     for _, schemas in duplicate_schemas.items():
         original_schema = schemas[0]
         for schema in schemas[1:]:
@@ -227,57 +226,172 @@ def drop_duplicated_schemas(
                 )
                 chunk.schema = original_schema
                 db_session.add(chunk)
-            schemas_to_delete.add(schema)
+            schema_ids_to_delete.add(schema.id)
+            if limit and len(schema_ids_to_delete) >= limit:
+                break
+        if limit and len(schema_ids_to_delete) >= limit:
+            break
 
-    logger.info(
-        f"Found {len(schemas_to_delete)} duplicate schemas to delete: {[s.id for s in schemas_to_delete]}"
+    logger.info(f"Found {len(schema_ids_to_delete)} duplicate schemas to delete")
+
+    db_session.execute(
+        delete(JsonSchema).where(JsonSchema.id.in_(schema_ids_to_delete))
     )
-
-    for schema in schemas_to_delete:
-        db_session.delete(schema)
 
 
 @cli.command()
-@click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(exists=False, dir_okay=False),
-    required=True,
-    help="Sqlite3 file to read the database from",
-)
-def init_db(db_file: str):
-    db_session = get_db_session(f"sqlite:///{db_file}")
+def init():
+    db_session = get_db_session(f"sqlite:///{DB_FILE}")
     create_tables(db_session)
     db_session.commit()
     db_session.close()
 
 
 @cli.command()
-@click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(exists=False, dir_okay=False),
-    required=True,
-    help="Sqlite3 file to read the database from",
-)
-def vacuum(db_file: str):
-    with db_session_scope(f"sqlite:///{db_file}", preview=PREVIEW) as db_session:
+def stats():
+    """Calculate:
+    - Number of source documents,
+      - Number of documents with no chunks
+      - By source dataset
+    - Number of chunks
+      - By content type
+      - By synthetic/real
+      - Json has schema/no schema
+    - Number of schemas
+      - By source dataset
+      - By synthetic/real
+      - JsonSchema has chunks/no chunks
+    - Number of schema conversions
+      - By input type
+    """
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        total_docs = db_session.execute(select(func.count(SourceDocument.id))).scalar()
+
+        used_document_ids = (
+            db_session.execute(
+                select(Chunk.parent_document_id).group_by(Chunk.parent_document_id)
+            )
+            .scalars()
+            .all()
+        )
+
+        docs_no_chunks = db_session.execute(
+            select(func.count(SourceDocument.id)).where(
+                SourceDocument.id.not_in(used_document_ids)
+            )
+        ).scalar()
+
+        docs_by_source = db_session.execute(
+            select(SourceDocument.source, func.count(SourceDocument.id)).group_by(
+                SourceDocument.source
+            )
+        ).all()
+
+        total_chunks = db_session.execute(select(func.count(Chunk.id))).scalar()
+
+        chunks_by_type = db_session.execute(
+            select(Chunk.content_type, func.count(Chunk.id)).group_by(
+                Chunk.content_type
+            )
+        ).all()
+
+        chunks_by_synthetic = db_session.execute(
+            select(Chunk.is_synthetic, func.count(Chunk.id)).group_by(
+                Chunk.is_synthetic
+            )
+        ).all()
+
+        json_chunks_with_schema = db_session.execute(
+            select(func.count(Chunk.id))
+            .where(Chunk.content_type == ContentType.JSON.value)
+            .where(Chunk.schema_id.is_not(None))
+        ).scalar()
+
+        json_chunks_without_schema = db_session.execute(
+            select(func.count(Chunk.id))
+            .where(Chunk.content_type == ContentType.JSON.value)
+            .where(Chunk.schema_id.is_(None))
+        ).scalar()
+
+        total_schemas = db_session.execute(select(func.count(JsonSchema.id))).scalar()
+
+        schemas_by_synthetic = db_session.execute(
+            select(JsonSchema.is_synthetic, func.count(JsonSchema.id)).group_by(
+                JsonSchema.is_synthetic
+            )
+        ).all()
+
+        schemas_with_chunks = db_session.execute(
+            select(func.count(distinct(JsonSchema.id)))
+            .select_from(JsonSchema)
+            .join(Chunk, JsonSchema.id == Chunk.schema_id)
+        ).scalar()
+
+        schemas_without_chunks = total_schemas - schemas_with_chunks
+
+        total_conversions = db_session.execute(
+            select(func.count(SchemaConversion.id))
+        ).scalar()
+
+        conversions_by_input_type = db_session.execute(
+            select(Chunk.content_type, func.count(SchemaConversion.id))
+            .select_from(SchemaConversion)
+            .join(Chunk, SchemaConversion.input_chunk_id == Chunk.id)
+            .group_by(Chunk.content_type)
+        ).all()
+
+        print("=== DATABASE STATISTICS ===")
+        print(f"\nSOURCE DOCUMENTS:")
+        print(f"  Total: {total_docs}")
+        print(f"  Documents with no chunks: {docs_no_chunks}")
+        print("  By source dataset:")
+        for source, count in docs_by_source:
+            print(f"    {source}: {count}")
+
+        print(f"\nCHUNKS:")
+        print(f"  Total: {total_chunks}")
+        print("  By content type:")
+        for content_type, count in chunks_by_type:
+            print(f"    {content_type}: {count}")
+        print("  By synthetic/real:")
+        for is_synthetic, count in chunks_by_synthetic:
+            status = "synthetic" if is_synthetic else "real"
+            print(f"    {status}: {count}")
+        print("  JSON chunks:")
+        print(f"    With schema: {json_chunks_with_schema}")
+        print(f"    Without schema: {json_chunks_without_schema}")
+
+        print(f"\nSCHEMAS:")
+        print(f"  Total: {total_schemas}")
+        print("  By synthetic/real:")
+        for is_synthetic, count in schemas_by_synthetic:
+            status = "synthetic" if is_synthetic else "real"
+            print(f"    {status}: {count}")
+        print("  Usage:")
+        print(f"    With chunks: {schemas_with_chunks}")
+        print(f"    Without chunks: {schemas_without_chunks}")
+
+        print(f"\nSCHEMA CONVERSIONS:")
+        print(f"  Total: {total_conversions}")
+        print("  By input type:")
+        for input_type, count in conversions_by_input_type:
+            print(f"    {input_type}: {count}")
+
+
+@cli.command()
+def vacuum():
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         db_session.execute(text("VACUUM"))
 
 
 @cli.command()
-@click.option(
-    "--db-file",
-    default="data/database.db",
-    type=click.Path(exists=False, dir_okay=False),
-    required=True,
-    help="Sqlite3 file to read the database from",
-)
-def clear_document_content(db_file: str):
-    db_session = get_db_session(f"sqlite:///{db_file}")
-    db_session.query(SourceDocument).update({"content": ""})
-    db_session.commit()
-    db_session.close()
+def clear_document_content():
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        db_session.execute(
+            update(SourceDocument)
+            .where(SourceDocument.content != "")
+            .values({"content": ""})
+        )
 
 
 @cli.command()
@@ -323,11 +437,21 @@ def cull_chunks(min_length: int, max_length: int):
 
 
 @cli.command()
-def drop_duplicate_schemas():
+@click.option(
+    "--limit",
+    default=1000,
+    type=int,
+    help="Maximum number of duplicate schemas to drop",
+)
+def drop_duplicate_schemas(limit: int):
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         duplicate_schemas_by_content = get_duplicated_schemas_by_content(db_session)
         if duplicate_schemas_by_content:
-            drop_duplicated_schemas(db_session, duplicate_schemas_by_content)
+            drop_duplicated_schemas(
+                db_session,
+                duplicate_schemas_by_content,
+                limit=limit,
+            )
         else:
             logger.info("No duplicate schemas found")
 

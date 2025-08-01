@@ -22,9 +22,9 @@ from tenacity import (
 )
 
 AGENT_MAX_RETRIES = 4
-AGENT_WAIT_MULTIPLIER = 2
-AGENT_WAIT_MIN = 2
-AGENT_WAIT_MAX = 20
+# AGENT_WAIT_MULTIPLIER = 2
+# AGENT_WAIT_MIN = 2
+# AGENT_WAIT_MAX = 20
 
 SYSTEM_PROMPT = """
 You are a JSON-Schema specialist.  
@@ -183,7 +183,6 @@ class JSONSchemaGeneratorAgent:
         self.fallback_model = None
 
         if fallback_model_name != model_name:
-
             self.fallback_model = GoogleModel(
                 fallback_model_name,
                 settings=GoogleModelSettings(

@@ -1,52 +1,21 @@
+import asyncio
 import json
+import sys
 from typing import Any, Dict
-import instructor
-from pydantic import Field
+from pydantic import Field, field_validator
 import fastjsonschema
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+from pydantic_ai.models.fallback import FallbackModel
+import traceback
 
 from any2json.utils import logger
-from any2json.schema_utils import to_supported_json_schema
 
+AGENT_MAX_RETRIES = 4
 
-class ChunkAgentInputSchema(BaseModel):
-    """Input for JSON generation based on a JsonSchema."""
-
-    input_schema: dict = Field(
-        ...,
-        description="JsonSchema to generate a matching JSON for.",
-    )
-
-
-class ChunkAgentOutputSchema(BaseModel):
-    """Output of JSON generation."""
-
-    explanation: str = Field(
-        ...,
-        description="A short explanation of the json generation process.",
-    )
-    output_json: str = Field(
-        ...,
-        description="The generated JSON as a stringified json.",
-    )
-
-
-class JSONChunkGeneratorAgent:
-    def get_state(self) -> dict:
-        return {
-            "model_name": self.model_name,
-            "enable_thinking": self.enable_thinking,
-        }
-
-    def __init__(
-        self,
-        model_name: str = "gemini-2.5-flash-lite",
-        max_retries: int = 3,
-        enable_thinking: bool = True,
-    ):
-        self.system_prompt = """Given a JsonSchema object, your task is to:
+SYSTEM_PROMPT = """
+Given a JsonSchema object, your task is to:
 1. Inspect the provided JSON Schema.
 2. Generate a plausible and non-trivial json that matches the schema,
 3. In case of compilation errors, iteratively correct the json,
@@ -85,8 +54,66 @@ Output:
     "courses": ["Math", "Science"]
 }
 
+Return only the JSON, nothing else.
 """
+
+
+class ChunkAgentInputSchema(BaseModel):
+    """Input for JSON generation based on a JsonSchema."""
+
+    input_schema: dict = Field(
+        ...,
+        description="JsonSchema to generate a matching JSON for.",
+    )
+    previous_json: dict | str | None = Field(
+        None,
+        description="The previous JSON that was generated. If None, the first JSON will be generated.",
+    )
+    error_message: str | None = Field(
+        None,
+        description="The error message that was returned by the previous JSON validation. If None, the first JSON will be generated.",
+    )
+
+    @field_validator("input_schema")
+    def validate_input_schema(cls, v):
+        return json.dumps(v) if isinstance(v, dict) else v
+
+
+class ChunkAgentOutputSchema(BaseModel):
+    """Output of JSON generation."""
+
+    explanation: str = Field(
+        ...,
+        description="A short explanation of the json generation process.",
+    )
+    output_json: str = Field(
+        ...,
+        description="The generated JSON as a stringified json.",
+    )
+
+
+class JSONChunkGeneratorAgent:
+    system_prompt = SYSTEM_PROMPT
+
+    def get_state(self) -> dict:
+        return {
+            "model_name": self.model_name,
+            "enable_thinking": self.enable_thinking,
+        }
+
+    def __init__(
+        self,
+        model_name: str = "gemini-2.5-flash-lite",
+        fallback_model_name: str = "gemini-2.0-flash-lite",
+        enable_thinking: bool = True,
+        max_retries: int = 3,
+        max_concurrent_tasks: int = 100,
+    ):
+
+        self.max_retries = max_retries
+        self.enable_thinking = enable_thinking
         self.model_name = model_name
+        self.semaphore = asyncio.Semaphore(max_concurrent_tasks)
 
         self.model = GoogleModel(
             model_name,
@@ -104,57 +131,78 @@ Output:
             ),
         )
 
+        self.fallback_model = None
+
+        if fallback_model_name != model_name:
+            self.fallback_model = GoogleModel(
+                fallback_model_name,
+                settings=GoogleModelSettings(
+                    google_thinking_config=(
+                        {
+                            "thinking_budget": 1024,
+                            "include_thoughts": False,
+                        }
+                    ),
+                ),
+            )
+
         self.agent = Agent(
-            model=self.model,
+            model=(
+                FallbackModel(self.model, self.fallback_model)
+                if self.fallback_model
+                else self.model
+            ),
             system_prompt=self.system_prompt,
+            deps_type=ChunkAgentInputSchema,
             output_type=ChunkAgentOutputSchema,
-        )
-        self.max_retries = max_retries
-        self.enable_thinking = enable_thinking
-
-    def generate_json_prompt(
-        self,
-        input_schema: str,
-        error_message: str = "",
-        previous_json: dict[str, Any] | None = None,
-    ) -> str:
-
-        base_instruction = f"""Generate a JSON for this schema:
-{input_schema}
-
-The json must be valid and match the provided schema while not being trivial.
-"""
-        if previous_json:
-            base_instruction += f"""
-
-Previously you generated this json:
-{json.dumps(previous_json, indent=2)}
-
-But it failed validation with the following error:
-{error_message}
-
-Please correct the json.
-"""
-        return base_instruction
-
-    def generate_json(
-        self,
-        input_schema: str,
-        error_message: str = "",
-        previous_json: str | None = None,
-    ) -> str:
-        json_prompt = self.generate_json_prompt(
-            input_schema,
-            error_message=error_message,
-            previous_json=previous_json,
+            retries=AGENT_MAX_RETRIES,
         )
 
-        logger.debug(f"LLM prompt: {json_prompt}")
-        response = self.agent.run_sync(json_prompt)
+        @self.agent.system_prompt
+        async def add_input(
+            ctx: RunContext[ChunkAgentInputSchema],
+        ) -> str:
+            input_schema = ctx.deps.input_schema
+            input_schema_str = (
+                json.dumps(input_schema, indent=1)
+                if isinstance(input_schema, dict)
+                else input_schema
+            )
+            prompt = f"""
+            Generate a JSON for this schema:
+            {input_schema_str}
+            """
 
-        logger.debug(f"LLM response: {response}")
-        generated_json = json.loads(response.output.output_json)
-        return generated_json
+            if ctx.deps.previous_json and ctx.deps.error_message:
+                prompt += f"""
+                Previously you generated this json:
+                {json.dumps(ctx.deps.previous_json, indent=1)}
+
+                But it failed validation with the following error:
+                {ctx.deps.error_message}
+
+                Please correct the json and return a valid JSON.
+                """
+
+            return prompt
+
+    async def run_async(
+        self,
+        input_schema: dict,
+        previous_json: dict | str | None = None,
+        error_message: str | None = None,
+    ) -> ChunkAgentOutputSchema:
+        logger.debug(
+            f"Running chunk generator agent for input_schema: {input_schema}, previous_json: {previous_json}, error_message: {error_message}"
+        )
+
+        return await self.agent.run(
+            deps=ChunkAgentInputSchema(
+                input_schema=input_schema,
+                previous_json=previous_json,
+                error_message=error_message,
+            ),
+        )
 
     def validate_json(
         self,
@@ -162,45 +210,47 @@ Please correct the json.
         input_schema: dict,
     ) -> bool:
         assert generated_json, "Generated json cannot be empty"
-        logger.debug(
-            f"Validating generated {generated_json} against schema {input_schema}"
-        )
+        logger.debug(f"Validating {generated_json} against schema: {input_schema}")
+
         validate = fastjsonschema.compile(input_schema)
         validate(generated_json)
 
-    def generate_and_validate_json(self, input: ChunkAgentInputSchema) -> dict:
-        retries_used = 0
-        input_schema = input.input_schema
+    async def generate_and_validate_json(self, input_schema: dict) -> tuple[dict, str]:
         error_message = ""
         previous_json = None
 
-        for _ in range(self.max_retries):
+        for i in range(self.max_retries):
             try:
+                async with self.semaphore:
+                    result = await self.run_async(
+                        input_schema=input_schema,
+                        previous_json=previous_json,
+                        error_message=error_message,
+                    )
                 logger.debug(
-                    f"Generating json for input: {input_schema}, previous_json: {previous_json}, error_message: {error_message}"
+                    "All messages: "
+                    + json.dumps(json.loads(result.all_messages_json()), indent=1)
                 )
-                generated_json = self.generate_json(
-                    input_schema, error_message, previous_json
+                logger.debug(f"Generated json: {result.output.output_json}")
+                previous_json = result.output.output_json
+                generated_json = json.loads(result.output.output_json)
+
+                await asyncio.to_thread(
+                    self.validate_json,
+                    generated_json,
+                    input_schema,
                 )
-                if isinstance(generated_json, str):
-                    generated_json = json.loads(generated_json)
-                previous_json = generated_json
-                self.validate_json(generated_json, input_schema)
 
-                logger.debug(f"Successfully validated json: {generated_json}")
+                logger.debug(f"Successfully validated")
+                model_used = result.all_messages()[-2].model_name
+                return generated_json, model_used
+            except Exception as e:
+                logger.debug(f"JSON generation attempt {i} failed")
 
-                return generated_json
+                exc_info = sys.exc_info()
 
-            except (
-                json.JSONDecodeError,
-                json.decoder.JSONDecodeError,
-                fastjsonschema.JsonSchemaException,
-                AssertionError,
-            ) as e:
-                logger.debug(e, exc_info=True)
-                retries_used += 1
-                error_message = (
-                    f"repr(e): {repr(e)}, str(e): {str(e)}, type(e): {type(e)}"
+                error_message = "".join(
+                    traceback.format_exception(exc_info[0], exc_info[1], exc_info[2])
                 )
                 continue
 

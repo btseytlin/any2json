@@ -30,8 +30,9 @@ def db_session_scope(db_url: str, preview: bool = False):
     try:
         yield session
         if not preview:
+            logger.info(f"Committing changes to the database...")
             session.commit()
-            logger.info("Commited changes to the database")
+            logger.info("Committed changes to the database")
         else:
             raise Exception("Preview mode, not committing changes to the database")
     except Exception:

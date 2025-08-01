@@ -236,51 +236,31 @@ async def generate_schemas_for_chunks(
     db_session: Session,
     chunks: list[Chunk],
     schema_agent: JSONSchemaGeneratorAgent,
-    max_concurrent_tasks: int = 50,
-    update_index_buffer_size: int = 10,
 ) -> tuple[list[JsonSchema], list[Chunk]]:
-    existing_schemas = db_session.query(JsonSchema).all()
-    index = IndexedJsonSet([(e.content, e.id) for e in existing_schemas])
-
     schemas_generated = 0
     updated_chunks = 0
 
-    semaphore = asyncio.Semaphore(max_concurrent_tasks)
-
-    async def generate_schema_for_json_if_not_exists_in_db_wrapper(
+    async def generate_schema_for_json_wrapper(
         json_content: dict,
         agent: JSONSchemaGeneratorAgent,
         chunk_id: int,
     ):
-        async with semaphore:
-            try:
-                schema_id = await asyncio.to_thread(
-                    check_if_schema_for_json_exists_in_db,
-                    json_content,
-                    index,
-                )
-                if schema_id:
-                    return chunk_id, (schema_id, None)
-            except Exception as e:
-                pass
-
-            return chunk_id, await generate_schema_for_json(
-                json_content,
-                agent,
-            )
+        return chunk_id, await generate_schema_for_json(
+            json_content,
+            agent,
+        )
 
     chunks_lookup = {chunk.id: chunk for chunk in chunks}
     tasks = []
     for chunk in chunks:
         tasks.append(
-            generate_schema_for_json_if_not_exists_in_db_wrapper(
+            generate_schema_for_json_wrapper(
                 json.loads(chunk.content),
                 agent=schema_agent,
                 chunk_id=chunk.id,
             )
         )
 
-    add_to_index_buffer = []
     for result in tqdm_asyncio.as_completed(tasks):
         chunk_id, (schema, model_name) = await result
         chunk = chunks_lookup[chunk_id]
@@ -288,22 +268,16 @@ async def generate_schemas_for_chunks(
         if not schema:
             continue
 
-        if isinstance(schema, int):
-            schema_entity = db_session.query(JsonSchema).get(schema)
-            logger.info(
-                f"Found matching schema for chunk {chunk.id}: {schema_entity.id}"
-            )
-        else:
-            schema_entity = JsonSchema(
-                content=schema,
-                chunks=[chunk],
-                meta={
-                    "generator_state": schema_agent.get_state(),
-                    "model_name": model_name,
-                },
-            )
-            schemas_generated += 1
-            db_session.add(schema_entity)
+        schema_entity = JsonSchema(
+            content=schema,
+            chunks=[chunk],
+            meta={
+                "generator_state": schema_agent.get_state(),
+                "model_name": model_name,
+            },
+        )
+        schemas_generated += 1
+        db_session.add(schema_entity)
 
         chunk.schema = schema_entity
         updated_chunks += 1
@@ -311,14 +285,7 @@ async def generate_schemas_for_chunks(
         db_session.add(chunk)
         db_session.commit()
 
-        if not isinstance(schema, int):
-            db_session.refresh(schema_entity)
-            add_to_index_buffer.append((schema_entity.content, schema_entity.id))
-
-        if len(add_to_index_buffer) >= update_index_buffer_size:
-            await asyncio.to_thread(index.add_many, add_to_index_buffer)
-            logger.info(f"Added {len(add_to_index_buffer)} schemas to index")
-            add_to_index_buffer = []
+        db_session.refresh(schema_entity)
 
     return schemas_generated, updated_chunks
 
@@ -332,9 +299,11 @@ def generate_chunks_for_schemas(
     for schema in schemas:
         try:
             json_content = schema.content
-            json_chunk = agent.generate_and_validate_json(
-                input=ChunkAgentInputSchema(input_schema=json_content),
+            json_chunk, model_name = agent.generate_and_validate_json(
+                input_schema=json_content
             )
+            if not json_chunk:
+                continue
             chunk = Chunk(
                 content=json.dumps(json_chunk),
                 content_type=ContentType.JSON.value,
@@ -342,6 +311,7 @@ def generate_chunks_for_schemas(
                 is_synthetic=True,
                 meta={
                     "generator_state": agent.get_state(),
+                    "model_name": model_name,
                 },
             )
             chunks.append(chunk)
@@ -352,7 +322,7 @@ def generate_chunks_for_schemas(
                 f"Error: {e}\nFailed to commit chunk for schema: {schema.id}",
                 exc_info=True,
             )
-            raise e
+            continue
 
     return chunks
 

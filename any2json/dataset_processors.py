@@ -266,8 +266,6 @@ def processor_interstellarninja_json_mode_reasoning(
             # except Exception:
             #     pass
             errors += 1
-            if errors > 1 / 2 * len(dataset):
-                raise
 
         pbar.set_postfix(
             {"error": errors, "skip": skips, "success": i - errors - skips}

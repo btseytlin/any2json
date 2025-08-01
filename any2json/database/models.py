@@ -38,7 +38,7 @@ class JsonSchema(Base):
     parent_schema = relationship(
         "JsonSchema", remote_side=[id], backref="derived_schemas"
     )
-    chunks = relationship("Chunk", back_populates="schema")
+    chunks = relationship("Chunk", back_populates="schema", lazy="selectin")
 
     meta = Column(JSON, nullable=True)
 
