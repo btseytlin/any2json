@@ -1,6 +1,6 @@
 import pytest
 
-from any2json.utils import extract_json_from_markdown
+from any2json.utils import extract_from_markdown
 
 
 class TestExtractJsonFromMarkdown:
@@ -9,17 +9,17 @@ class TestExtractJsonFromMarkdown:
             "Some text before\n```html\n<p>Some text inside</p>\n```\nSome text after"
         )
         expected_json = []
-        assert extract_json_from_markdown(markdown_text) == expected_json
+        assert extract_from_markdown(markdown_text) == expected_json
 
     def test_extract_single_json(self):
         markdown_text = 'Some text before\n```json\n{"name": "John", "age": 30}\n```\nSome text after'
         expected_json = [{"name": "John", "age": 30}]
-        assert extract_json_from_markdown(markdown_text) == expected_json
+        assert extract_from_markdown(markdown_text) == expected_json
 
     def test_broken_code_block(self):
         markdown_text = 'Some text before\n```json\n{"name": "John", "age": 30}\n'
         expected_json = []
-        assert extract_json_from_markdown(markdown_text) == expected_json
+        assert extract_from_markdown(markdown_text) == expected_json
 
     def test_extract_multiple_json(self):
         blocks = [
@@ -31,7 +31,7 @@ class TestExtractJsonFromMarkdown:
         ]
         markdown_text = "\n".join(blocks)
         expected_json = [{"name": "John", "age": 30}, {"name": "Jane", "age": 25}]
-        assert extract_json_from_markdown(markdown_text) == expected_json
+        assert extract_from_markdown(markdown_text) == expected_json
 
     def test_invalid_json(self):
         blocks = [
@@ -43,7 +43,7 @@ class TestExtractJsonFromMarkdown:
         ]
         markdown_text = "\n".join(blocks)
         expected_json = [{"name": "John", "age": 30}]
-        assert extract_json_from_markdown(markdown_text) == expected_json
+        assert extract_from_markdown(markdown_text) == expected_json
 
     def test_real_world_example(self):
         text = """
@@ -151,7 +151,7 @@ In case you get a response looking like this:
                 }
             }
         ]
-        assert extract_json_from_markdown(text) == expected_json
+        assert extract_from_markdown(text) == expected_json
 
     def test_json_with_comments(self):
         text = """
@@ -170,4 +170,4 @@ In case you get a response looking like this:
                 }
             }
         ]
-        assert extract_json_from_markdown(text) == expected_json
+        assert extract_from_markdown(text) == expected_json

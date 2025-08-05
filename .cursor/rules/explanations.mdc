@@ -43,3 +43,4 @@ Core features:
 - Each function or method must be no more than 20 lines long.
 - Modular code.
 - Always put imports at the top of the file.
+- Use the virtualenv of this repo from `.venv` directory. 

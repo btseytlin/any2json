@@ -158,6 +158,8 @@ dependencies = [
     { name = "jsonref" },
     { name = "jsonschema-pydantic" },
     { name = "lxml" },
+    { name = "markdown" },
+    { name = "markdownify" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-ai" },
@@ -191,6 +193,8 @@ requires-dist = [
     { name = "jsonref", specifier = ">=1.1.0" },
     { name = "jsonschema-pydantic", specifier = ">=0.6" },
     { name = "lxml", specifier = ">=6.0.0" },
+    { name = "markdown", specifier = ">=3.8.2" },
+    { name = "markdownify", specifier = ">=1.1.0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.11.5" },
     { name = "pydantic-ai", specifier = ">=0.3.6" },
@@ -1050,6 +1054,15 @@ wheels = [
 ]
 
 [[package]]
+name = "markdown"
+version = "3.8.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/c2/4ab49206c17f75cb08d6311171f2d65798988db4360c4d1485bd0eedd67c/markdown-3.8.2.tar.gz", hash = "sha256:247b9a70dd12e27f67431ce62523e675b866d254f900c4fe75ce3dda62237c45", size = 362071 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/2b/34cc11786bc00d0f04d0f5fdc3a2b1ae0b6239eef72d3d345805f9ad92a1/markdown-3.8.2-py3-none-any.whl", hash = "sha256:5c83764dbd4e00bdd94d85a19b8d55ccca20fe35b2e678a1422b380324dd5f24", size = 106827 },
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "3.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1067,6 +1080,19 @@ linkify = [
 ]
 plugins = [
     { name = "mdit-py-plugins" },
+]
+
+[[package]]
+name = "markdownify"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2f/78/c48fed23c7aebc2c16049062e72de1da3220c274de59d28c942acdc9ffb2/markdownify-1.1.0.tar.gz", hash = "sha256:449c0bbbf1401c5112379619524f33b63490a8fa479456d41de9dc9e37560ebd", size = 17127 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/11/b751af7ad41b254a802cf52f7bc1fca7cabe2388132f2ce60a1a6b9b9622/markdownify-1.1.0-py3-none-any.whl", hash = "sha256:32a5a08e9af02c8a6528942224c91b933b4bd2c7d078f9012943776fc313eeef", size = 13901 },
 ]
 
 [[package]]
