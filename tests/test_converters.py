@@ -528,3 +528,4 @@ class TestToSQLInsertConverter:
 
         assert isinstance(result, str)
         assert result == expected
+
