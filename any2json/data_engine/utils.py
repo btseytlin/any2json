@@ -65,3 +65,12 @@ def preview_chunks(results: list[dict]):
             print()
         print()
         print()
+
+
+def remove_none_kv(data: dict | list) -> dict | list:
+    if isinstance(data, dict):
+        return {k: remove_none_kv(v) for k, v in data.items() if v is not None}
+    elif isinstance(data, list):
+        return [remove_none_kv(item) for item in data if item is not None]
+    else:
+        return data

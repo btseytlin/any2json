@@ -6,6 +6,7 @@ import toml
 import yaml
 from bs4 import BeautifulSoup
 
+from any2json.data_engine.utils import remove_none_kv
 from any2json.enums import ContentType
 from markdownify import markdownify as md
 import markdown
@@ -23,7 +24,22 @@ class Converter:
     def get_state(self) -> dict:
         return {}
 
+    def _convert(self, data: dict | list) -> str:
+        raise NotImplementedError
+
+    def check_conversion(self, data: dict | list, converted_data: str) -> bool:
+        loaded_data = self.load(converted_data)
+        assert (
+            loaded_data == data
+        ), f"Conversion failed, expected: {data}, got: {loaded_data}"
+
     def convert(self, data: dict | list) -> str:
+        assert data, "Empty data"
+        converted_data = self._convert(data)
+        self.check_conversion(data, converted_data)
+        return converted_data
+
+    def load(self, data: str) -> dict | list:
         raise NotImplementedError
 
 
@@ -44,50 +60,56 @@ class ToYamlConverter(Converter):
             "indent": self.indent,
         }
 
-    def convert(self, data: dict | list) -> str:
+    def _convert(self, data: dict | list) -> str:
         yaml_str = yaml.dump(data, sort_keys=self.sort_keys, indent=self.indent)
-        loaded_data = yaml.safe_load(yaml_str)
-        assert loaded_data == data, "YAML conversion failed"
         return yaml_str
+
+    def load(self, data: str) -> dict | list:
+        return yaml.safe_load(data)
 
 
 class ToTomlConverter(Converter):
     format = ContentType.TOML
 
-    def convert(self, data: dict | list) -> str:
-        original_data_is_list = isinstance(data, list)
+    def _convert(self, data: dict | list) -> str:
         if isinstance(data, list):
             data = {str(i): item for i, item in enumerate(data)}
 
         toml_str = toml.dumps(data)
-        loaded_data = toml.loads(toml_str)
-
-        if not original_data_is_list and isinstance(data, dict):
-            assert loaded_data == {
-                k: v for k, v in data.items() if v is not None
-            }, f"TOML conversion failed: {loaded_data} != {data}"
-        elif original_data_is_list:
-            for i, (k, item) in enumerate(data.items()):
-                assert (
-                    loaded_data[str(i)] == item
-                ), f"TOML conversion failed: {loaded_data[str(i)]} != {item}"
-        else:
-            assert loaded_data == data, "TOML conversion failed"
-
         return toml_str
+
+    def load(self, data: str) -> dict | list:
+        loaded_data = toml.loads(data)
+        all_keys_are_numbers = all(
+            all(c.isdigit() for c in k) for k in loaded_data.keys()
+        )
+        if all_keys_are_numbers:
+            loaded_data = [loaded_data[str(i)] for i in range(len(loaded_data))]
+        return loaded_data
+
+    def check_conversion(self, data: dict | list, converted_data: str) -> bool:
+        loaded_data = self.load(converted_data)
+        data_no_nulls = remove_none_kv(data)
+        assert (
+            loaded_data == data_no_nulls
+        ), f"Conversion failed, expected: {data_no_nulls}, got: {loaded_data}"
 
 
 class ToPythonStringConverter(Converter):
     format = ContentType.PYTHON_STRING
 
-    def convert(self, data: dict | list) -> str:
-        return str(data)
+    def _convert(self, data: dict | list) -> str:
+        string_data = str(data)
+        return string_data
+
+    def load(self, data: str) -> dict | list:
+        return eval(data)
 
 
 class ToHTMLTableConverter(Converter):
     format = ContentType.HTML
 
-    def convert(self, data: dict | list) -> str:
+    def _convert(self, data: dict | list) -> str:
         if isinstance(data, list):
             return self._convert_list_of_dicts(data)
         return self._convert_dict(data)
@@ -255,7 +277,6 @@ class ToHTMLTableConverter(Converter):
             table.append(tbody)
 
         table_str = str(table)
-        assert self.load(table_str) == data, "HTML table conversion failed"
         return table_str
 
     def load(self, data: str) -> dict | list[dict]:
@@ -416,11 +437,9 @@ class ToMarkdownTableConverter(Converter):
         self.markdownify_options = markdownify_options or {}
         self.html_converter = ToHTMLTableConverter()
 
-    def convert(self, data: dict | list) -> str:
-        assert data, "Empty data"
+    def _convert(self, data: dict | list) -> str:
         data_html = self.html_converter.convert(data)
         table_str = md(data_html)
-        assert self.load(table_str) == data, "Markdown table conversion failed"
         return table_str
 
     def load(self, data: str) -> dict | list[dict]:
@@ -434,7 +453,7 @@ class ToCSVConverter(Converter):
     def __init__(self, sep: str = ","):
         self.sep = sep
 
-    def convert(self, data: dict | list) -> str:
+    def _convert(self, data: dict | list) -> str:
         if isinstance(data, dict):
             flattened = self._flatten_dict(data)
             headers = list(flattened.keys())
@@ -445,7 +464,6 @@ class ToCSVConverter(Converter):
                 + self.sep.join(str(v) for v in values)
                 + "\n"
             )
-            assert self.load(data_str) == data, "CSV conversion failed"
             return data_str
 
         elif isinstance(data, list):
@@ -466,7 +484,6 @@ class ToCSVConverter(Converter):
                 rows.append(self.sep.join(values))
 
             data_str = "\n".join(rows) + "\n"
-            assert self.load(data_str) == data, "CSV conversion failed"
             return data_str
 
     def _flatten_dict(self, data: dict, prefix: str = "") -> dict:
@@ -546,9 +563,7 @@ class ToCSVConverter(Converter):
 class ToSQLInsertConverter(Converter):
     format = ContentType.SQL
 
-    def convert(self, data: dict | list) -> str:
-        original_data = data
-
+    def _convert(self, data: dict | list) -> str:
         if isinstance(data, dict):
             data = [data]
 
@@ -579,7 +594,6 @@ class ToSQLInsertConverter(Converter):
         values_clause = ", ".join(values_list)
 
         data_str = f"INSERT INTO users ({columns}) VALUES {values_clause};"
-        assert self.load(data_str) == original_data, "SQL insert conversion failed"
         return data_str
 
     def load(self, data: str) -> dict | list[dict]:
