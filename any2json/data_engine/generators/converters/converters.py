@@ -11,6 +11,9 @@ from any2json.enums import ContentType
 from markdownify import markdownify as md
 import markdown
 
+from dicttoxml import dicttoxml
+import xmltodict
+
 
 class Converter:
     format = None
@@ -678,3 +681,89 @@ class ToSQLInsertConverter(Converter):
             return False
         else:
             return value_str
+
+
+import xml.etree.ElementTree as ET
+
+from copy import copy
+
+
+def dictify(r, root=True):
+    if root:
+        return {r.tag: dictify(r, False)}
+    d = copy(r.attrib)
+    if r.text:
+        d["_text"] = r.text
+    for x in r.findall("./*"):
+        if x.tag not in d:
+            d[x.tag] = []
+        d[x.tag].append(dictify(x, False))
+    return d
+
+
+class ToXMLConverter(Converter):
+    format = ContentType.XML
+
+    def postprocess_parsed_data(self, parsed_data: dict | list) -> dict | list:
+        if isinstance(parsed_data, dict) and "@type" in parsed_data:
+            if "#text" in parsed_data and parsed_data["@type"] in [
+                "str",
+                "int",
+                "float",
+                "bool",
+            ]:
+                python_type = eval(parsed_data["@type"])
+                return python_type(parsed_data["#text"])
+            elif parsed_data["@type"] == "null":
+                return None
+            elif parsed_data["@type"] in ["dict", "list"]:
+                pass
+            else:
+                raise ValueError(f"Can't parse type: {parsed_data}")
+
+        if isinstance(parsed_data, list):
+            return [self.postprocess_parsed_data(item) for item in parsed_data]
+
+        if isinstance(parsed_data, dict):
+            for key, value in parsed_data.items():
+                parsed_data[key] = self.postprocess_parsed_data(value)
+
+        return parsed_data
+
+    def _convert(self, data: dict | list) -> str:
+        converted_data = dicttoxml(
+            data,
+            return_bytes=False,
+            attr_type=True,
+            root=True,
+            xml_declaration=False,
+        )
+        return converted_data
+
+    def load(self, data: str) -> dict | list:
+        root = ET.fromstring(data)
+        return dictify(root)
+
+    def check_conversion(self, data: dict | list, converted_data: str) -> bool:
+        """Ensure all original values and keys are present in the converted data"""
+        if isinstance(data, list):
+            for item in data:
+                self.check_conversion(item, converted_data)
+            return
+
+        for k, v in data.items():
+            assert (
+                k in converted_data
+            ), f"Conversion failed, expected to find key: {k} in {converted_data}"
+            if isinstance(v, bool):
+                assert (
+                    str(v).lower() in converted_data
+                ), f"Conversion failed, expected to find value: {v} in {converted_data}"
+            elif isinstance(v, type(None)):
+                assert (
+                    "null" in converted_data
+                ), f"Conversion failed, expected to find value: {v} in {converted_data}"
+            elif isinstance(v, (str, int, float)):
+                assert (
+                    str(v) in converted_data
+                ), f"Conversion failed, expected to find value: {v} in {converted_data}"

@@ -36,6 +36,8 @@ dependencies = [
     "lxml>=6.0.0",
     "markdownify>=1.1.0",
     "markdown>=3.8.2",
+    "dicttoxml>=1.7.16",
+    "xmltodict>=0.14.2",
 ]
 
 [tool.setuptools.packages.find]

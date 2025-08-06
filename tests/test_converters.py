@@ -10,6 +10,7 @@ from any2json.data_engine.generators.converters.converters import (
     ToYamlConverter,
     ToCSVConverter,
     ToSQLInsertConverter,
+    ToXMLConverter,
 )
 from any2json.enums import ContentType
 
@@ -445,5 +446,147 @@ class TestToSQLInsertConverter:
 
         expected = 'INSERT INTO users (name, details) VALUES (\'Alice\', \'[{"age":30,"city":"NYC"}]\'), (\'Bob\', \'[{"age":25,"city":"LA"}]\');'
 
+        assert isinstance(result, str)
+        assert result == expected
+
+
+class TestToCSVConverter:
+    converter = ToCSVConverter()
+
+    def test_format_is_csv(self):
+        assert self.converter.format == ContentType.CSV
+
+    def test_convert_simple_dict(self):
+        data = {"name": "Alice", "age": 30}
+        result = self.converter.convert(data)
+
+        assert isinstance(result, str)
+        assert result == "name,age\nAlice,30\n"
+
+    def test_convert_list_of_dicts(self):
+        data = [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]
+        result = self.converter.convert(data)
+
+        assert isinstance(result, str)
+        assert result == "name,age\nAlice,30\nBob,25\n"
+
+    def test_convert_nested_dict_values(self):
+        data = {"name": "Alice", "details": {"age": 30, "city": "NYC"}}
+        result = self.converter.convert(data)
+
+        assert isinstance(result, str)
+        assert result == "name,details.age,details.city\nAlice,30,NYC\n"
+
+    def test_convert_nested_dict_list(self):
+        data = [
+            {"name": "Alice", "details": {"age": 30, "city": "NYC"}},
+            {"name": "Bob", "details": {"age": 25, "city": "LA"}},
+        ]
+        result = self.converter.convert(data)
+
+        assert isinstance(result, str)
+        assert result == "name,details.age,details.city\nAlice,30,NYC\nBob,25,LA\n"
+
+    def test_convert_nested_dict_list_of_dicts(self):
+        data = [
+            {"name": "Alice", "details": [{"age": 30, "city": "NYC"}]},
+            {"name": "Bob", "details": [{"age": 25, "city": "LA"}]},
+        ]
+        with pytest.raises(AssertionError):
+            self.converter.convert(data)
+
+    def test_convert_mixed_types(self):
+        data = {
+            "name": "Alice",
+            "age": 30,
+            "score": 95.5,
+            "active": True,
+            "notes": None,
+        }
+        result = self.converter.convert(data)
+
+        assert isinstance(result, str)
+        loaded = self.converter.load(result)
+        assert loaded == data
+        assert type(loaded["name"]) == str
+        assert type(loaded["age"]) == int
+        assert type(loaded["score"]) == float
+        assert type(loaded["active"]) == bool
+        assert loaded["notes"] is None
+
+    def test_round_trip_conversion(self):
+        # Test simple dict round trip
+        data1 = {"name": "Alice", "age": 30}
+        csv1 = self.converter.convert(data1)
+        loaded1 = self.converter.load(csv1)
+        assert data1 == loaded1
+
+        # Test list of dicts round trip
+        data2 = [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]
+        csv2 = self.converter.convert(data2)
+        loaded2 = self.converter.load(csv2)
+        assert data2 == loaded2
+
+        # Test nested dict round trip
+        data3 = {"name": "Alice", "details": {"age": 30, "city": "NYC"}}
+        csv3 = self.converter.convert(data3)
+        loaded3 = self.converter.load(csv3)
+        assert data3 == loaded3
+
+
+class TestToXMLConverter:
+    converter = ToXMLConverter()
+
+    def test_format_is_xml(self):
+        assert self.converter.format == ContentType.XML
+
+    def test_convert_simple_dict(self):
+        data = {
+            "name": "Alice",
+            "age": 30,
+            "score": 95.5,
+            "active": True,
+            "notes": None,
+        }
+        result = self.converter.convert(data)
+
+        expected = '<root><name type="str">Alice</name><age type="int">30</age><score type="float">95.5</score><active type="bool">true</active><notes type="null"></notes></root>'
+        assert result == expected
+
+    def test_convert_list_of_dicts(self):
+        data = [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]
+        result = self.converter.convert(data)
+
+        expected = '<root><item type="dict"><name type="str">Alice</name><age type="int">30</age></item><item type="dict"><name type="str">Bob</name><age type="int">25</age></item></root>'
+
+        assert isinstance(result, str)
+        assert result == expected
+
+    def test_convert_nested_dict_values(self):
+        data = {"name": "Alice", "details": {"age": 30, "city": "NYC"}}
+        result = self.converter.convert(data)
+
+        expected = '<root><name type="str">Alice</name><details type="dict"><age type="int">30</age><city type="str">NYC</city></details></root>'
+
+        assert isinstance(result, str)
+        assert result == expected
+
+    def test_convert_nested_dict_list(self):
+        data = [
+            {"name": "Alice", "details": {"age": 30, "city": "NYC"}},
+            {"name": "Bob", "details": {"age": 25, "city": "LA"}},
+        ]
+        result = self.converter.convert(data)
+        expected = '<root><item type="dict"><name type="str">Alice</name><details type="dict"><age type="int">30</age><city type="str">NYC</city></details></item><item type="dict"><name type="str">Bob</name><details type="dict"><age type="int">25</age><city type="str">LA</city></details></item></root>'
+        assert isinstance(result, str)
+        assert result == expected
+
+    def test_convert_nested_dict_list_of_dicts(self):
+        data = [
+            {"name": "Alice", "details": [{"age": 30, "city": "NYC"}]},
+            {"name": "Bob", "details": [{"age": 25, "city": "LA"}]},
+        ]
+        result = self.converter.convert(data)
+        expected = '<root><item type="dict"><name type="str">Alice</name><details type="list"><item type="dict"><age type="int">30</age><city type="str">NYC</city></item></details></item><item type="dict"><name type="str">Bob</name><details type="list"><item type="dict"><age type="int">25</age><city type="str">LA</city></item></details></item></root>'
         assert isinstance(result, str)
         assert result == expected
