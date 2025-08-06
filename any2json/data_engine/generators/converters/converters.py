@@ -12,7 +12,8 @@ from markdownify import markdownify as md
 import markdown
 
 from dicttoxml import dicttoxml
-import xmltodict
+
+from any2json.utils import dictify_xml_string
 
 
 class Converter:
@@ -683,24 +684,6 @@ class ToSQLInsertConverter(Converter):
             return value_str
 
 
-import xml.etree.ElementTree as ET
-
-from copy import copy
-
-
-def dictify(r, root=True):
-    if root:
-        return {r.tag: dictify(r, False)}
-    d = copy(r.attrib)
-    if r.text:
-        d["_text"] = r.text
-    for x in r.findall("./*"):
-        if x.tag not in d:
-            d[x.tag] = []
-        d[x.tag].append(dictify(x, False))
-    return d
-
-
 class ToXMLConverter(Converter):
     format = ContentType.XML
 
@@ -741,8 +724,7 @@ class ToXMLConverter(Converter):
         return converted_data
 
     def load(self, data: str) -> dict | list:
-        root = ET.fromstring(data)
-        return dictify(root)
+        return dictify_xml_string(data)
 
     def check_conversion(self, data: dict | list, converted_data: str) -> bool:
         """Ensure all original values and keys are present in the converted data"""

@@ -10,9 +10,12 @@ import httpx
 import xml
 import pandas as pd
 from io import StringIO
-
+import xml.etree.ElementTree as ET
 import toml
 import yaml
+
+from copy import copy
+from dicttoxml import dicttoxml
 
 logger = logging.getLogger("any2json")
 
@@ -129,3 +132,21 @@ def extract_from_markdown(
             break
 
     return chunks
+
+
+def dictify_xml(r, root=True):
+    if root:
+        return {r.tag: dictify_xml(r, False)}
+    d = copy(r.attrib)
+    if r.text:
+        d["_text"] = r.text
+    for x in r.findall("./*"):
+        if x.tag not in d:
+            d[x.tag] = []
+        d[x.tag].append(dictify_xml(x, False))
+    return d
+
+
+def dictify_xml_string(xml_string: str) -> dict:
+    root = ET.fromstring(xml_string)
+    return dictify_xml(root)
