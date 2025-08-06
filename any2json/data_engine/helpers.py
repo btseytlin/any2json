@@ -1,7 +1,7 @@
 import asyncio
 import json
 import fastjsonschema
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 
@@ -38,6 +38,27 @@ def get_json_chunks_with_schema(db_session: Session) -> list[Chunk]:
         .filter(Chunk.content_type == ContentType.JSON.value)
         .all()
     )
+
+
+def get_chunk_existing_conversion_formats(
+    db_session: Session,
+) -> dict[int, list[ContentType]]:
+    query = (
+        select(
+            SchemaConversion.output_chunk_id,
+            func.json_group_array(Chunk.content_type).label("content_types"),
+        )
+        .join(Chunk, SchemaConversion.input_chunk)
+        .group_by(SchemaConversion.output_chunk_id)
+    )
+    result = db_session.execute(query).all()
+    result = {
+        output_chunk_id: [
+            ContentType(content_type) for content_type in json.loads(content_types)
+        ]
+        for output_chunk_id, content_types in result
+    }
+    return result
 
 
 def get_json_documents(db_session: Session) -> list[SourceDocument]:

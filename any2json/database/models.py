@@ -95,14 +95,17 @@ class SchemaConversion(Base):
     input_chunk = relationship(
         "Chunk",
         foreign_keys=[input_chunk_id],
+        lazy="selectin",
     )
     schema = relationship(
         "JsonSchema",
         foreign_keys=[schema_id],
+        lazy="selectin",
     )
     output_chunk = relationship(
         "Chunk",
         foreign_keys=[output_chunk_id],
+        lazy="selectin",
     )
 
     meta = Column(JSON, nullable=True)

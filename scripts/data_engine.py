@@ -654,8 +654,6 @@ def generate_synthetic_schemas_command(
 def generate_synthetic_format_conversions_command(
     num_generations: int | None,
 ):
-    logger.info(f"Generating synthetic format conversions from {DB_FILE}")
-
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         synthetic_chunks, schema_conversions = generate_synthetic_format_conversions(
             db_session,
@@ -668,11 +666,14 @@ def generate_synthetic_format_conversions_command(
                 schema_conversions,
                 strict=True,
             ):
-                print(f"{schema_conversion.input_chunk.content=}")
+                print(
+                    f"Conversion {schema_conversion.input_chunk.content_type} -> {schema_conversion.output_chunk.content_type}"
+                )
+                print(f"Input content:\n{schema_conversion.input_chunk.content}")
                 print()
-                print(f"{schema_conversion.schema.content=}")
+                print(f"Schema:\n{schema_conversion.schema.content}")
                 print()
-                print(f"{schema_conversion.output_chunk.content=}")
+                print(f"Output content:\n{schema_conversion.output_chunk.content}")
                 print()
                 print()
 

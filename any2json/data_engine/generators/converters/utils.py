@@ -1,13 +1,23 @@
 import random
-from any2json.data_engine.helpers import deduplicate_chunks
+
+from tqdm import tqdm
+from any2json.data_engine.helpers import (
+    deduplicate_chunks,
+    get_chunk_existing_conversion_formats,
+)
 from any2json.database.models import Chunk, SchemaConversion
 from any2json.data_engine.generators.converters.converters import (
+    ToXMLConverter,
     ToYamlConverter,
     ToTomlConverter,
     ToMarkdownTableConverter,
     ToPythonStringConverter,
+    ToCSVConverter,
+    ToHTMLTableConverter,
+    ToSQLInsertConverter,
 )
 from any2json.data_engine.helpers import get_json_chunks_with_schema
+from any2json.enums import ContentType
 from any2json.utils import logger
 import json
 from sqlalchemy.orm import Session
@@ -15,13 +25,18 @@ from sqlalchemy.orm import Session
 
 def generate_format_converted_chunks(
     chunks: list[Chunk],
+    chunk_already_covered_formats: dict[int, list[ContentType]],
     num_generations: int | None = None,
 ) -> list[Chunk]:
     new_chunks = []
     schema_conversions = []
 
-    for chunk in chunks:
+    for chunk in tqdm(chunks, desc="Generating format conversions"):
         schema = chunk.schema
+        if not schema:
+            logger.warning(f"Skipping chunk {chunk.id} because it has no schema")
+            continue
+
         json_content = (
             json.loads(chunk.content)
             if isinstance(chunk.content, str)
@@ -29,13 +44,23 @@ def generate_format_converted_chunks(
         )
 
         converters = [
+            ToXMLConverter,
             ToYamlConverter,
             ToTomlConverter,
-            # ToMarkdownTableConverter, # Broken it seems
+            ToMarkdownTableConverter,
             ToPythonStringConverter,
+            ToCSVConverter,
+            ToHTMLTableConverter,
+            ToSQLInsertConverter,
         ]
 
         for converter in converters:
+            logger.debug(f"Trying converter {converter.format} for chunk {chunk.id}")
+            if converter.format in chunk_already_covered_formats.get(chunk.id, set()):
+                logger.debug(
+                    f"Skipping {converter.format} conversion for chunk {chunk.id} because a conversion to this format already exists"
+                )
+                continue
             try:
                 converter = converter()
                 converter.setup()
@@ -68,11 +93,12 @@ def generate_format_converted_chunks(
                 )
 
             except Exception as e:
-                logger.warning(
+                logger.debug(
                     f"Error converting chunk {chunk.id} to {converter.format}: {e}",
                     exc_info=True,
                 )
                 continue
+
             new_chunks.append(new_chunk_entity)
             schema_conversions.append(schema_conversion_entity)
 
@@ -85,12 +111,26 @@ def generate_format_converted_chunks(
 def generate_synthetic_format_conversions(
     db_session: Session,
     num_generations: int | None = None,
-) -> list[Chunk]:
+) -> tuple[list[Chunk], list[SchemaConversion]]:
     chunks = get_json_chunks_with_schema(db_session)
+    chunk_ids = set([chunk.id for chunk in chunks])
     random.shuffle(chunks)
+    logger.info(f"Found {len(chunks)} JSON chunks with schemas")
+
+    chunk_already_covered_formats = get_chunk_existing_conversion_formats(
+        db_session,
+    )
+    logger.info(f"Obtained which formats are already covered for each chunk")
+
+    chunk_already_covered_formats = {
+        k: v for k, v in chunk_already_covered_formats.items() if k in chunk_ids
+    }
+
+    logger.info(f"Generating synthetic format conversions for {len(chunks)} chunks")
 
     new_chunks, schema_conversions = generate_format_converted_chunks(
         chunks,
+        chunk_already_covered_formats,
         num_generations=num_generations,
     )
     logger.info(f"Generated {len(new_chunks)} synthetic chunks")
