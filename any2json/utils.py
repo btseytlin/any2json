@@ -109,6 +109,18 @@ def stringify_content(content: Any, format: ContentType | str) -> str:
             return toml.dumps(content)
         case ContentType.TEXT:
             return content
+        case ContentType.MARKDOWN:
+            return content
+        case ContentType.LATEX:
+            return content
+        case ContentType.SQL:
+            return content
+        case ContentType.PYTHON_STRING:
+            return content
+        case ContentType.OTHER:
+            return content
+        case ContentType.STRING:
+            return content
         case _:
             raise ValueError(f"Unsupported format: {format}")
 

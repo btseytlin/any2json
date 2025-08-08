@@ -530,7 +530,7 @@ def drop_xml():
 
 
 if __name__ == "__main__":
-    load_dotenv(override=True)
+    load_dotenv(override=False)
     configure_loggers(
         level=os.getenv("LOG_LEVEL", "INFO"),
         basic_level=os.getenv("LOG_LEVEL_BASIC", "WARNING"),

@@ -1,3 +1,4 @@
+from collections import Counter
 import json
 import hashlib
 from sqlalchemy import select
@@ -6,11 +7,13 @@ from any2json.database.models import Chunk, SchemaConversion
 from any2json.enums import ContentType
 from any2json.utils import logger, stringify_content
 from sqlalchemy.orm import Session
+from tqdm.auto import tqdm
 
 
 def stringify_for_hash(value: object, format: ContentType | str) -> str:
-    stringified = stringify_content(value, format)
-    signature = "".join(sorted(stringified.lower()))
+    if not isinstance(value, str):
+        value = stringify_content(value, format)
+    signature = "".join(sorted(value.lower()))
     return signature
 
 
@@ -34,19 +37,16 @@ def dataset_signature_from_conversion(
     if input_doc and input_doc.meta and "source_dataset_index" in input_doc.meta:
         idx = input_doc.meta["source_dataset_index"]
         sig = f"{input_doc.source}:{idx}"
-        logger.debug(f"Dataset signature from input_doc: {sig}")
         return sig
     if output_doc and output_doc.meta and "source_dataset_index" in output_doc.meta:
         idx = output_doc.meta["source_dataset_index"]
         sig = f"{output_doc.source}:{idx}"
-        logger.debug(f"Dataset signature from output_doc: {sig}")
         return sig
     schema_meta = schema_conversion.schema.meta if schema_conversion.schema else None
     if schema_meta and "source_dataset_index" in schema_meta:
         ds = schema_meta.get("source_dataset") or ""
         idx = schema_meta["source_dataset_index"]
         sig = f"{ds}:{idx}"
-        logger.debug(f"Dataset signature from schema meta: {sig}")
         return sig
     return None
 
@@ -77,7 +77,6 @@ def build_signatures(schema_conversion: SchemaConversion) -> set[str]:
     ds = dataset_signature_from_conversion(schema_conversion)
     if ds is not None:
         sigs.add(f"dataset:{ds}")
-    logger.debug(f"Conversion {schema_conversion.id} signatures: {sorted(list(sigs))}")
     return sigs
 
 
@@ -102,7 +101,7 @@ def connected_component_groups(signature_map: dict[int, set[str]]) -> dict[int, 
     ids = list(signature_map.keys())
     parents: dict[int, int] = {i: i for i in ids}
     seen: dict[str, int] = {}
-    for i in ids:
+    for i in tqdm(ids, desc="Processing entities"):
         for sig in signature_map[i]:
             if sig in seen:
                 union_ids(parents, i, seen[sig])
@@ -111,7 +110,7 @@ def connected_component_groups(signature_map: dict[int, set[str]]) -> dict[int, 
     roots: dict[int, int] = {}
     groups: dict[int, int] = {}
     next_group = 0
-    for i in ids:
+    for i in tqdm(ids, desc="Assigning groups"):
         r = find_parent_id(parents, i)
         if r not in roots:
             roots[r] = next_group
@@ -123,7 +122,9 @@ def connected_component_groups(signature_map: dict[int, set[str]]) -> dict[int, 
 def group_conversions(
     conversions: list[SchemaConversion],
 ) -> dict[int, int] | None:
+    logger.info(f"Building signatures for {len(conversions)} conversions")
     signature_map = {int(c.id): build_signatures(c) for c in conversions}
+    logger.info(f"Finding connected components")
     groups = connected_component_groups(signature_map)
     return groups
 
@@ -149,7 +150,8 @@ def assign_groups(
     sizes: dict[int, int] = {}
     for g in groups_map.values():
         sizes[g] = sizes.get(g, 0) + 1
-    logger.info(f"Group sizes: {sizes}")
+
+    logger.info(f"Group sizes: {Counter(sizes.values())}")
 
     for schema_conversion in conversions:
         group_id = int(groups_map[int(schema_conversion.id)])

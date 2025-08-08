@@ -760,11 +760,11 @@ def export_samples_command(output_file: str, num_samples: int | None):
 def assign_groups_command(num_groups: int | None):
     logger.info("Assigning groups to schema conversions")
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
-        assign_groups(db_session, num_groups=num_groups)
+        assign_groups(db_session)
 
 
 if __name__ == "__main__":
-    load_dotenv(override=True)
+    load_dotenv(override=False)
     configure_loggers(
         level=os.getenv("LOG_LEVEL", "INFO"),
         basic_level=os.getenv("LOG_LEVEL_BASIC", "WARNING"),
