@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import random
+import hashlib
 import click
 from dotenv import load_dotenv
 import os
@@ -9,6 +10,8 @@ import time
 import click
 from datasets import Dataset, load_dataset
 from dotenv import load_dotenv
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from any2json.agents.schema_generator import JSONSchemaGeneratorAgent
 from any2json.agents.chunk_generator import JSONChunkGeneratorAgent
 from any2json.data_engine.generators.converters.utils import (
@@ -28,7 +31,9 @@ from any2json.data_engine.helpers import (
 )
 from any2json.database.client import db_session_scope
 from any2json.database.helpers import get_dangling_schema_ids
-from any2json.database.models import JsonSchema
+from any2json.database.models import Chunk, JsonSchema, SchemaConversion
+from any2json.enums import ContentType
+from any2json.grouping import assign_groups
 from any2json.infinigram import InfiniGramAPI
 from any2json.utils import logger, configure_loggers, stringify_content
 from any2json.dataset_processors import get_dataset_processor
@@ -676,6 +681,86 @@ def generate_synthetic_format_conversions_command(
                 print(f"Output content:\n{schema_conversion.output_chunk.content}")
                 print()
                 print()
+
+
+# Step 4: Export samples
+
+
+@cli.command(
+    name="export-samples",
+)
+@click.option(
+    "--output-file",
+    default="data/samples.json",
+    type=click.Path(dir_okay=False, writable=True),
+    required=True,
+)
+@click.option(
+    "--num-samples",
+    default=None,
+    type=int,
+    required=False,
+)
+def export_samples_command(output_file: str, num_samples: int | None):
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        schema_conversions_query = (
+            select(SchemaConversion)
+            .where(SchemaConversion.schema_id.isnot(None))
+            .where(SchemaConversion.input_chunk_id.isnot(None))
+            .where(SchemaConversion.output_chunk_id.isnot(None))
+            .where(
+                SchemaConversion.output_chunk.has(
+                    Chunk.content_type == ContentType.JSON.value
+                )
+            )
+        )
+        if num_samples:
+            schema_conversions_query = schema_conversions_query.limit(num_samples)
+
+        schema_conversions = (
+            db_session.execute(schema_conversions_query).scalars().all()
+        )
+
+        def vars_except_content(obj):
+            return {k: v for k, v in vars(obj).items() if k != "content"}
+
+        samples = []
+        for schema_conversion in schema_conversions:
+            input_chunk = schema_conversion.input_chunk
+            output_chunk = schema_conversion.output_chunk
+            schema = schema_conversion.schema
+
+            if not input_chunk or not output_chunk or not schema:
+                logger.warning(
+                    f"Skipping schema conversion {schema_conversion.id} because it has no input chunk, output chunk, or schema"
+                )
+                continue
+
+            samples.append(
+                {
+                    "input_data": input_chunk.content,
+                    "schema": schema.content,
+                    "output": json.loads(output_chunk.content),
+                    "meta": {
+                        "input_chunk_id": input_chunk.id,
+                        "input_chunk_content_type": input_chunk.content_type,
+                        "output_chunk_id": output_chunk.id,
+                        "schema_id": schema.id,
+                        "schema_conversion_id": schema_conversion.id,
+                    },
+                }
+            )
+
+        with open(output_file, "w") as f:
+            json.dump(samples, f, indent=2)
+
+
+@cli.command(name="assign-groups")
+@click.option("--num-groups", default=None, type=int, required=False)
+def assign_groups_command(num_groups: int | None):
+    logger.info("Assigning groups to schema conversions")
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        assign_groups(db_session, num_groups=num_groups)
 
 
 if __name__ == "__main__":

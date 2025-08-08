@@ -17,6 +17,8 @@ import yaml
 from copy import copy
 from dicttoxml import dicttoxml
 
+from any2json.enums import ContentType
+
 logger = logging.getLogger("any2json")
 
 
@@ -86,23 +88,27 @@ def parse_string(source_str: str, format: str) -> Any:
             raise ValueError(f"Unsupported format: {format}")
 
 
-def stringify_content(content: Any, format: str) -> str:
+def stringify_content(content: Any, format: ContentType) -> str:
+    if isinstance(format, str):
+        format = ContentType(format)
     match format:
-        case "json":
+        case ContentType.JSON:
             return json.dumps(content, indent=1, ensure_ascii=False)
-        case "xml":
+        case ContentType.XML:
             return xml.etree.ElementTree.tostring(content, encoding="utf-8").decode(
                 "utf-8"
             )
-        case "csv":
+        case ContentType.CSV:
             return content.to_csv(index=False)
-        case "html":
+        case ContentType.HTML:
             # beautifulsoup to string
             return str(content)
-        case "yaml":
+        case ContentType.YAML:
             return yaml.dump(content)
-        case "toml":
+        case ContentType.TOML:
             return toml.dumps(content)
+        case ContentType.TEXT:
+            return content
         case _:
             raise ValueError(f"Unsupported format: {format}")
 
