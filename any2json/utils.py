@@ -88,7 +88,7 @@ def parse_string(source_str: str, format: str) -> Any:
             raise ValueError(f"Unsupported format: {format}")
 
 
-def stringify_content(content: Any, format: ContentType) -> str:
+def stringify_content(content: Any, format: ContentType | str) -> str:
     if isinstance(format, str):
         format = ContentType(format)
     match format:

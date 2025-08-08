@@ -8,8 +8,10 @@ from any2json.utils import logger, stringify_content
 from sqlalchemy.orm import Session
 
 
-def stringify_for_hash(value: object, format: str | None = None) -> str:
-    return stringify_content(value, format)
+def stringify_for_hash(value: object, format: ContentType | str) -> str:
+    stringified = stringify_content(value, format)
+    signature = "".join(sorted(stringified.lower()))
+    return signature
 
 
 def digest_string(value: str) -> str:

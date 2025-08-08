@@ -13,11 +13,15 @@ def make_conversion(
     dataset: tuple[str, int] | None = None,
     dataset_on_schema: tuple[str, int] | None = None,
 ) -> SchemaConversion:
+    input_format = input_format or ContentType.TEXT
+    output_format = output_format or ContentType.JSON
     input_chunk = Chunk(
-        content=input_text or "", content_type=input_format or ContentType.TEXT.value
+        content=input_text or "",
+        content_type=input_format.value,
     )
     output_chunk = Chunk(
-        content=output_text or "", content_type=output_format or ContentType.JSON.value
+        content=output_text or "",
+        content_type=output_format.value,
     )
     schema = JsonSchema(content=schema_content or {"type": "object"})
     if dataset is not None:
@@ -176,70 +180,120 @@ class TestGroupAssignment:
         groups = group_conversions([c1, c2])
         assert groups is not None and groups[1] == groups[2]
 
+    def test_output_variations_recognized_as_same(self):
+        c1 = make_conversion(
+            id=1,
+            input_text="x = 1, y = 2",
+            input_format=ContentType.TEXT,
+            schema_content={
+                "type": "object",
+                "properties": {"x": {"type": "number"}, "y": {"type": "number"}},
+            },
+            output_text='{"x": 1, "y": 2}',
+            output_format=ContentType.JSON,
+        )
+        c2 = make_conversion(
+            id=2,
+            input_text="x = 2, y = 3",
+            input_format=ContentType.TEXT,
+            schema_content={
+                "type": "object",
+                "properties": {"x": {"type": "number"}},
+            },
+            output_text='{"y": 2, "x": 1}',
+            output_format=ContentType.JSON,
+        )
+        groups = group_conversions([c1, c2])
+        assert groups is not None and groups[1] == groups[2]
+
     def test_transitive_same_group(self):
-        c1 = make_conversion(input_text="A", schema_content={"s": 1}, output_text="X")
-        c2 = make_conversion(input_text="B", schema_content={"s": 1}, output_text="Y")
-        c3 = make_conversion(input_text="A", schema_content={"s": 3}, output_text="Z")
-        c1.id, c2.id, c3.id = 1, 2, 3
-        sigs = {
-            1: build_signatures(c1),
-            2: build_signatures(c2),
-            3: build_signatures(c3),
-        }
-        groups = try_assign_groups(sigs, 1)
+        c1 = make_conversion(
+            id=1,
+            input_text="A",
+            input_format=ContentType.TEXT,
+            schema_content={"s": 1},
+            output_text="X",
+            output_format=ContentType.TEXT,
+        )
+        c2 = make_conversion(
+            id=2,
+            input_text="B",
+            input_format=ContentType.TEXT,
+            schema_content={"s": 1},
+            output_text="Y",
+            output_format=ContentType.TEXT,
+        )
+        c3 = make_conversion(
+            id=3,
+            input_text="A",
+            input_format=ContentType.TEXT,
+            schema_content={"s": 3},
+            output_text="Z",
+            output_format=ContentType.TEXT,
+        )
+        groups = group_conversions([c1, c2, c3])
         assert groups is not None and len(set(groups.values())) == 1
 
     def test_dataset_signature_from_schema_meta_same_group(self):
         c1 = make_conversion(
+            id=1,
             input_text="A1",
             schema_content={"k": 1},
             output_text="O1",
             dataset_on_schema=("dsX", 7),
         )
         c2 = make_conversion(
+            id=2,
             input_text="A2",
             schema_content={"k": 2},
             output_text="O2",
             dataset_on_schema=("dsX", 7),
         )
-        c1.id, c2.id = 1, 2
-        sigs = {1: build_signatures(c1), 2: build_signatures(c2)}
-        groups = try_assign_groups(sigs, 1)
+        groups = group_conversions([c1, c2])
         assert groups is not None and groups[1] == groups[2]
 
     def test_different_samples_different_groups(self):
         c1 = make_conversion(
-            input_text="input 1", schema_content={"key1": 1}, output_text="Output 1"
+            id=1,
+            input_text="input 1",
+            input_format=ContentType.TEXT,
+            schema_content={"key1": 1},
+            output_text="Output 1",
+            output_format=ContentType.TEXT,
         )
         c2 = make_conversion(
-            input_text="input 2", schema_content={"key2": 2}, output_text="Output 2"
+            id=2,
+            input_text="input 2",
+            input_format=ContentType.TEXT,
+            schema_content={"key2": 2},
+            output_text="Output 2",
+            output_format=ContentType.TEXT,
         )
-        c1.id, c2.id = 1, 2
-        sigs = {1: build_signatures(c1), 2: build_signatures(c2)}
-        groups = try_assign_groups(sigs, 1)
-        assert groups is None
-        groups = try_assign_groups(sigs, 2)
+        groups = group_conversions([c1, c2])
+        assert groups is not None
+        assert groups[1] != groups[2]
         assert groups is not None and groups[1] != groups[2]
 
     def test_some_samples_same_group(self):
         c1 = make_conversion(
-            input_text="input 1", schema_content={"key1": 1}, output_text="Output 1"
+            id=1,
+            input_text="input 1",
+            schema_content={"key1": 1},
+            output_text="Output 1",
         )
         c2 = make_conversion(
-            input_text="input 2", schema_content={"key2": 2}, output_text="Output 2"
+            id=2,
+            input_text="input 2",
+            schema_content={"key2": 2},
+            output_text="Output 2",
         )
         c3 = make_conversion(  # Same schema as c1
-            input_text="input 3", schema_content={"key1": 1}, output_text="Output 3"
+            id=3,
+            input_text="input 3",
+            schema_content={"key1": 1},
+            output_text="Output 3",
         )
-        c1.id, c2.id, c3.id = 1, 2, 3
-        sigs = {
-            1: build_signatures(c1),
-            2: build_signatures(c2),
-            3: build_signatures(c3),
-        }
-        groups = try_assign_groups(sigs, 1)
-        assert groups is None
-        groups = try_assign_groups(sigs, 2)
+        groups = group_conversions([c1, c2, c3])
         assert groups is not None
+        assert groups[1] != groups[2]
         assert groups[1] == groups[3]
-        assert groups[2] != groups[1]
