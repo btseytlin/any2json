@@ -15,6 +15,12 @@ class GeminiModel:
         self.model_name = model_name
         self.model = self.client.models.get(model=self.model_name)
 
+    def get_state(self) -> dict:
+        return {
+            "model_name": self.model_name,
+            "class_name": str(self.__class__.__name__),
+        }
+
     def convert_to_json(self, input_text: str, schema: str) -> tuple[str, str]:
         prompt = f"""
         ## Input data:

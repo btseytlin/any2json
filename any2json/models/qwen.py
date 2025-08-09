@@ -23,6 +23,12 @@ class QwenModel:
             model_name, torch_dtype="auto", device_map="auto"
         )
 
+    def get_state(self) -> dict:
+        return {
+            "model_name": self.model_name,
+            "class_name": str(self.__class__.__name__),
+        }
+
     @classmethod
     def make_prompt(cls, input_text: str, schema: dict) -> str:
         return f"""

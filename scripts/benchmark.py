@@ -146,7 +146,7 @@ def run(hf_dataset_dir, split, model_type, model_name, output_dir, limit):
     )
 
     model_type = model_types[model_type]
-    model = model_type()
+    model = model_type(model_name=model_name)
 
     dataset_dict = DatasetDict.load_from_disk(hf_dataset_dir)
 
@@ -162,6 +162,21 @@ def run(hf_dataset_dir, split, model_type, model_name, output_dir, limit):
     logger.info(f"Metrics: {metrics}")
 
     os.makedirs(output_dir, exist_ok=True)
+
+    config = {
+        "hf_dataset_dir": hf_dataset_dir,
+        "split": split,
+        "model_state": model.get_state(),
+        "limit": limit,
+        "actual_samples": len(samples),
+    }
+    with open(os.path.join(output_dir, "config.json"), "w") as f:
+        json.dump(
+            config,
+            f,
+            indent=2,
+        )
+
     with open(os.path.join(output_dir, "results.json"), "w") as f:
         json.dump(results, f, indent=2)
 
