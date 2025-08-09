@@ -30,7 +30,7 @@ class QwenModel:
         {input_text}
 
         ## JSONSchema:
-        {json.dumps(schema, indent=2)}
+        {schema}
         """
 
     def convert_to_json(self, input_text: str, schema: dict) -> tuple[str, str]:

@@ -1,14 +1,18 @@
 import json
 import os
 import logging
+import sys
+import traceback
 import click
-from datasets import Dataset, load_dataset
+from datasets import Dataset, DatasetDict, load_dataset
+from dotenv import load_dotenv
 from any2json.models.gemini import GeminiModel
 from any2json.models.qwen import QwenModel
 from tqdm.auto import tqdm
 import fastjsonschema
 
-logger = logging.getLogger(__name__)
+from any2json.utils import configure_loggers, logger
+
 
 model_types = {
     "qwen": QwenModel,
@@ -18,8 +22,9 @@ model_types = {
 
 def run_benchmark(model, samples: list[dict]) -> list[dict]:
     results = []
-    for sample in tqdm(
-        samples,
+    errors = []
+    for i, sample in tqdm(
+        enumerate(samples),
         total=len(samples),
         desc="Benchmarking",
     ):
@@ -31,19 +36,38 @@ def run_benchmark(model, samples: list[dict]) -> list[dict]:
         schema: dict = sample["schema"]
         correct_answer: dict = sample["output"]
 
-        answer, meta = model.convert_to_json(input_data, schema)
+        try:
+            answer, meta = model.convert_to_json(input_data, schema)
 
-        results.append(
-            {
-                "input_data": input_data,
-                "schema": schema,
-                "correct_answer": correct_answer,
-                "answer": answer,
-                "meta": meta,
-            }
-        )
+            results.append(
+                {
+                    "id": i,
+                    "input_data": input_data,
+                    "schema": schema,
+                    "correct_answer": correct_answer,
+                    "answer": answer,
+                    "meta": meta,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error processing sample {i}: {e}")
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            errors.append(
+                {
+                    "id": i,
+                    "input_data": input_data,
+                    "schema": schema,
+                    "correct_answer": correct_answer,
+                    "error": str(e),
+                    "traceback": "".join(
+                        traceback.format_exception(exc_type, exc_value, exc_traceback)
+                    ),
+                }
+            )
+        except KeyboardInterrupt:
+            break
 
-    return results
+    return results, errors
 
 
 def calculate_metrics(results):
@@ -51,6 +75,9 @@ def calculate_metrics(results):
     correct = []
     schema_error = []
     for i, result in enumerate(results):
+        if isinstance(result["schema"], str):
+            result["schema"] = json.loads(result["schema"])
+
         schema = fastjsonschema.compile(result["schema"])
         try:
             answer = json.loads(result["answer"])
@@ -58,6 +85,9 @@ def calculate_metrics(results):
             schema(answer)
 
             correct_answer = result["correct_answer"]
+
+            if isinstance(correct_answer, str):
+                correct_answer = json.loads(correct_answer)
 
             if answer == correct_answer:
                 correct.append(i)
@@ -75,15 +105,21 @@ def calculate_metrics(results):
 
 @click.command()
 @click.option(
-    "--input-file",
-    default="data/intermediate/samples.json",
-    type=click.Path(exists=True),
+    "--hf-dataset-dir",
+    default="data/hf_dataset",
+    type=click.Path(exists=True, dir_okay=True, file_okay=False),
     required=True,
-    help="Input file to benchmark",
+    help="HF dataset directory to benchmark",
+)
+@click.option(
+    "--split",
+    default="test",
+    type=str,
+    help="Split to benchmark",
 )
 @click.option(
     "--model-type",
-    default="qwen",
+    default="gemini",
     type=str,
     help="Model type to benchmark",
 )
@@ -104,16 +140,22 @@ def calculate_metrics(results):
     type=int,
     help="Limit the number of prompts to benchmark",
 )
-def run(input_file, model_type, model_name, output_dir, limit):
-    logger.info(f"Benchmarking {input_file} with {model_type} {model_name}")
+def run(hf_dataset_dir, split, model_type, model_name, output_dir, limit):
+    logger.info(
+        f"Benchmarking {hf_dataset_dir} split {split} with {model_type} {model_name}"
+    )
 
     model_type = model_types[model_type]
     model = model_type()
 
-    with open(input_file, "r") as f:
-        samples = json.load(f)[:limit]
+    dataset_dict = DatasetDict.load_from_disk(hf_dataset_dir)
 
-    results = run_benchmark(model, samples)
+    samples = dataset_dict[split].to_list()
+
+    if limit:
+        samples = samples[:limit]
+
+    results, errors = run_benchmark(model, samples)
 
     metrics = calculate_metrics(results)
 
@@ -123,9 +165,17 @@ def run(input_file, model_type, model_name, output_dir, limit):
     with open(os.path.join(output_dir, "results.json"), "w") as f:
         json.dump(results, f, indent=2)
 
+    with open(os.path.join(output_dir, "errors.json"), "w") as f:
+        json.dump(errors, f, indent=2)
+
     with open(os.path.join(output_dir, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
 
 
 if __name__ == "__main__":
+    load_dotenv(override=False)
+    configure_loggers(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        basic_level=os.getenv("LOG_LEVEL_BASIC", "WARNING"),
+    )
     run()

@@ -2,7 +2,7 @@ import json
 import os
 from google import genai
 
-from any2json.utils import remove_list_types_from_schema
+from any2json.schema_utils import to_supported_json_schema
 
 
 class GeminiModel:
@@ -10,18 +10,18 @@ class GeminiModel:
     You are a helpful assistant that can convert structured data to JSON according to the provided JSONSchema.
     """
 
-    def __init__(self, model_name: str = "gemini-2.0-flash"):
+    def __init__(self, model_name: str = "gemini-2.5-flash"):
         self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
         self.model_name = model_name
         self.model = self.client.models.get(model=self.model_name)
 
-    def convert_to_json(self, input_text: str, schema: dict) -> tuple[str, str]:
+    def convert_to_json(self, input_text: str, schema: str) -> tuple[str, str]:
         prompt = f"""
         ## Input data:
         {input_text}
 
         ## JSONSchema:
-        {json.dumps(schema, indent=2)}
+        {schema}
 
         ## Task:
         Convert the input data to JSON according to the JSONSchema.
@@ -32,15 +32,18 @@ class GeminiModel:
         thinking_content, content = self.generate(prompt, schema)
         return thinking_content, content
 
-    def generate(self, prompt: str, schema: dict | None = None) -> tuple[str, None | dict]:
+    def generate(
+        self, prompt: str, schema: dict | None = None
+    ) -> tuple[str, None | dict]:
         full_prompt = f"{self.system_prompt}\n{prompt}"
 
         config = {
             "response_mime_type": "application/json",
         }
 
-        if schema:
-            config["response_schema"] = remove_list_types_from_schema(schema)
+        # if schema:
+        #     print(to_supported_json_schema(schema))
+        #     config["response_schema"] = to_supported_json_schema(schema)
 
         response = self.client.models.generate_content(
             model=self.model.name,
