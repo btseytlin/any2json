@@ -8,6 +8,7 @@ from datasets import Dataset, DatasetDict, load_dataset
 from dotenv import load_dotenv
 from any2json.models.gemini import GeminiModel
 from any2json.models.qwen import QwenModel
+from any2json.models.gemma3n import Gemma3nModel
 from tqdm.auto import tqdm
 import fastjsonschema
 
@@ -17,6 +18,7 @@ from any2json.utils import configure_loggers, logger
 model_types = {
     "qwen": QwenModel,
     "gemini": GeminiModel,
+    "gemma3n": Gemma3nModel,
 }
 
 
@@ -70,6 +72,14 @@ def run_benchmark(model, samples: list[dict]) -> list[dict]:
     return results, errors
 
 
+def postprocess_answer(answer: str) -> dict | str | list | int | float | bool | None:
+    if answer.startswith("```json"):
+        answer = answer[7:]
+    if answer.endswith("```"):
+        answer = answer[:-3]
+    return json.loads(answer)
+
+
 def calculate_metrics(results):
     error = []
     correct = []
@@ -80,24 +90,27 @@ def calculate_metrics(results):
 
         schema = fastjsonschema.compile(result["schema"])
         try:
-            answer = json.loads(result["answer"])
-
+            answer = postprocess_answer(result["answer"])
             schema(answer)
-
-            correct_answer = result["correct_answer"]
-
-            if isinstance(correct_answer, str):
-                correct_answer = json.loads(correct_answer)
-
-            if answer == correct_answer:
-                correct.append(i)
         except json.JSONDecodeError as e:
             error.append(i)
+            logger.error(e, exc_info=True)
+            continue
         except fastjsonschema.JsonSchemaException as e:
             schema_error.append(i)
+            logger.error(e, exc_info=True)
+            continue
+
+        correct_answer = result["correct_answer"]
+
+        if isinstance(correct_answer, str):
+            correct_answer = json.loads(correct_answer)
+
+        if answer == correct_answer:
+            correct.append(i)
 
     return {
-        "percentage_errors": len(error) / len(results),
+        "percentage_json_errors": len(error) / len(results),
         "percentage_correct": len(correct) / len(results),
         "percentage_schema_errors": len(schema_error) / len(results),
     }
@@ -124,10 +137,10 @@ def calculate_metrics(results):
     help="Model type to benchmark",
 )
 @click.option(
-    "--model-name",
+    "--model-kwargs",
     default=None,
     type=str,
-    help="Model name to benchmark",
+    help="Model kwargs in JSON format",
 )
 @click.option(
     "--output-dir",
@@ -140,13 +153,14 @@ def calculate_metrics(results):
     type=int,
     help="Limit the number of prompts to benchmark",
 )
-def run(hf_dataset_dir, split, model_type, model_name, output_dir, limit):
-    logger.info(
-        f"Benchmarking {hf_dataset_dir} split {split} with {model_type} {model_name}"
-    )
+def run(hf_dataset_dir, split, model_type, model_kwargs, output_dir, limit):
+    model_kwargs = json.loads(model_kwargs) if model_kwargs else {}
 
+    logger.info(
+        f"Benchmarking {hf_dataset_dir} split {split} with {model_type} {model_kwargs}"
+    )
     model_type = model_types[model_type]
-    model = model_type(model_name=model_name)
+    model = model_type(**model_kwargs)
 
     dataset_dict = DatasetDict.load_from_disk(hf_dataset_dir)
 
