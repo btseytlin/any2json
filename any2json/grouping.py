@@ -1,4 +1,5 @@
 from collections import Counter
+import copy
 import json
 import hashlib
 from sqlalchemy import select
@@ -123,7 +124,7 @@ def group_conversions(
     conversions: list[SchemaConversion],
 ) -> dict[int, int] | None:
     logger.info(f"Building signatures for {len(conversions)} conversions")
-    signature_map = {int(c.id): build_signatures(c) for c in conversions}
+    signature_map = {int(c.id): build_signatures(c) for c in tqdm(conversions)}
     logger.info(f"Finding connected components")
     groups = connected_component_groups(signature_map)
     return groups
@@ -143,18 +144,28 @@ def assign_groups(
     )
     conversions = db_session.execute(query).scalars().all()
     logger.info(f"Loaded {len(conversions)} schema conversions")
-    groups_map = group_conversions(conversions)
+    conversion_to_group_map = group_conversions(conversions)
     logger.info(
-        f"Computed {len(set(groups_map.values()))} groups from connected components"
+        f"Computed {len(set(conversion_to_group_map.values()))} groups from connected components"
     )
-    sizes: dict[int, int] = {}
-    for g in groups_map.values():
-        sizes[g] = sizes.get(g, 0) + 1
+    per_group_size = Counter(conversion_to_group_map.values())
+    logger.info(f"10 largest groups: {per_group_size.most_common(10)}")
+    size_distribution = Counter(per_group_size.values())
+    logger.info(f"20 most common group sizes: {size_distribution.most_common(20)}")
 
-    logger.info(f"Group sizes: {Counter(sizes.values())}")
+    # Rename group such that the largest group is 0, the second largest is 1, etc.
+    group_rename_map = {}
+    for rank, (group_id, _) in enumerate(
+        sorted(per_group_size.items(), key=lambda x: x[1], reverse=True)
+    ):
+        group_rename_map[group_id] = rank
+    logger.info(f"Created group rename map")
 
     for schema_conversion in conversions:
-        group_id = int(groups_map[int(schema_conversion.id)])
-        schema_conversion.meta["group"] = group_id
-
-    db_session.add_all(conversions)
+        group_id = conversion_to_group_map[schema_conversion.id]
+        group_id = group_rename_map[group_id]
+        logger.debug(f"Assigning {schema_conversion.id} to group {group_id}")
+        new_meta = copy.deepcopy(schema_conversion.meta or {})
+        new_meta["group"] = group_id
+        schema_conversion.meta = new_meta
+        db_session.add(schema_conversion)
