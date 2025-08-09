@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 import os
 import time
 import click
-from datasets import Dataset, load_dataset
+from datasets import Dataset, DatasetDict, load_dataset
 from dotenv import load_dotenv
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -33,7 +33,7 @@ from any2json.database.client import db_session_scope
 from any2json.database.helpers import get_dangling_schema_ids
 from any2json.database.models import Chunk, JsonSchema, SchemaConversion
 from any2json.enums import ContentType
-from any2json.grouping import assign_groups
+from any2json.grouping import assign_groups, train_test_split_groups
 from any2json.infinigram import InfiniGramAPI
 from any2json.utils import logger, configure_loggers, stringify_content
 from any2json.dataset_processors import get_dataset_processor
@@ -686,6 +686,20 @@ def generate_synthetic_format_conversions_command(
 # Step 4: Export samples
 
 
+# Step 4.1: Assign groups to schema conversions
+
+
+@cli.command(name="assign-groups")
+@click.option("--num-groups", default=None, type=int, required=False)
+def assign_groups_command(num_groups: int | None):
+    logger.info("Assigning groups to schema conversions")
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        assign_groups(db_session)
+
+
+# Step 4.2: Export HF dataset dict
+
+
 @cli.command(
     name="export-samples",
 )
@@ -701,13 +715,20 @@ def generate_synthetic_format_conversions_command(
     type=int,
     required=False,
 )
-def export_samples_command(output_file: str, num_samples: int | None):
+@click.option(
+    "--test-size",
+    default=0.1,
+    type=float,
+    required=False,
+)
+def export_samples_command(output_file: str, num_samples: int | None, test_size: float):
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         schema_conversions_query = (
             select(SchemaConversion)
             .where(SchemaConversion.schema_id.isnot(None))
             .where(SchemaConversion.input_chunk_id.isnot(None))
             .where(SchemaConversion.output_chunk_id.isnot(None))
+            .where(SchemaConversion.meta["group"].isnot(None))
             .where(
                 SchemaConversion.output_chunk.has(
                     Chunk.content_type == ContentType.JSON.value
@@ -720,18 +741,32 @@ def export_samples_command(output_file: str, num_samples: int | None):
         schema_conversions = (
             db_session.execute(schema_conversions_query).scalars().all()
         )
+        groups = [
+            schema_conversion.meta["group"] for schema_conversion in schema_conversions
+        ]
 
-        def vars_except_content(obj):
-            return {k: v for k, v in vars(obj).items() if k != "content"}
+        train_indices, test_indices, train_groups, test_groups = (
+            train_test_split_groups(
+                list(range(len(schema_conversions))),
+                groups,
+                test_size=test_size,
+                random_state=SEED,
+            )
+        )
+
+        logger.info(f"Train size: {len(train_indices)}, Test size: {len(test_indices)}")
+        logger.info(f"Test groups: {set(test_groups)}")
 
         samples = []
-        for schema_conversion in schema_conversions:
+        for i, schema_conversion in enumerate(schema_conversions):
             input_chunk = schema_conversion.input_chunk
             output_chunk = schema_conversion.output_chunk
             schema = schema_conversion.schema
 
+            is_test = i in test_indices
+
             if not input_chunk or not output_chunk or not schema:
-                logger.warning(
+                logger.debug(
                     f"Skipping schema conversion {schema_conversion.id} because it has no input chunk, output chunk, or schema"
                 )
                 continue
@@ -747,6 +782,7 @@ def export_samples_command(output_file: str, num_samples: int | None):
                         "output_chunk_id": output_chunk.id,
                         "schema_id": schema.id,
                         "schema_conversion_id": schema_conversion.id,
+                        "is_test": is_test,
                     },
                 }
             )
@@ -755,12 +791,44 @@ def export_samples_command(output_file: str, num_samples: int | None):
             json.dump(samples, f, indent=2)
 
 
-@cli.command(name="assign-groups")
-@click.option("--num-groups", default=None, type=int, required=False)
-def assign_groups_command(num_groups: int | None):
-    logger.info("Assigning groups to schema conversions")
-    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
-        assign_groups(db_session)
+# Step 4.3: Export HF dataset dict
+
+
+@cli.command(
+    name="export-hf-dataset",
+)
+@click.option(
+    "--input-file",
+    default="data/samples.json",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+)
+@click.option(
+    "--output-dir",
+    default="data/hf_dataset",
+    type=click.Path(dir_okay=True, file_okay=False),
+    required=True,
+)
+def export_hf_dataset_command(input_file: str, output_dir: str):
+    with open(input_file, "r") as f:
+        samples = json.load(f)
+
+    train_items = [s for s in samples if not s["meta"]["is_test"]]
+    for s in train_items:
+        s["schema"] = json.dumps(s["schema"])
+        s["output"] = json.dumps(s["output"])
+
+    test_items = [s for s in samples if s["meta"]["is_test"]]
+    for s in test_items:
+        s["schema"] = json.dumps(s["schema"])
+        s["output"] = json.dumps(s["output"])
+
+    train_ds = Dataset.from_list(train_items)
+    test_ds = Dataset.from_list(test_items)
+    ds_dict = DatasetDict({"train": train_ds, "test": test_ds})
+
+    os.makedirs(output_dir, exist_ok=True)
+    ds_dict.save_to_disk(output_dir)
 
 
 if __name__ == "__main__":

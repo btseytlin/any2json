@@ -1,7 +1,9 @@
 from collections import Counter
+import random
 import copy
 import json
 import hashlib
+from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from any2json.database.models import Chunk, SchemaConversion
@@ -169,3 +171,68 @@ def assign_groups(
         new_meta["group"] = group_id
         schema_conversion.meta = new_meta
         db_session.add(schema_conversion)
+
+
+def train_test_split_groups(
+    items: list[Any],
+    groups: list[Any],
+    test_size: float,
+    random_state: int,
+    exclude_top_k_groups: int = 2,
+    selection_slack: int = 50,
+) -> tuple[list[Any], list[Any], list[Any], list[Any]]:
+    """A function to assemble a train/test split of items where items are grouped in uneven sizes.
+
+    Args:
+        items: list of items to split
+        groups: list of groups for each item
+        test_size: desired approximate size of the test set
+        random_state: random state for the split
+
+    Returns:
+        train_items: list of items in the train set
+        test_items: list of items in the test set
+        train_groups: list of groups in the train set
+        test_groups: list of groups in the test set
+    """
+    assert len(items) == len(groups) and 0 < test_size < 1
+    group_to_idx: dict[Any, list[int]] = {}
+    for i, g in enumerate(groups):
+        group_to_idx.setdefault(g, []).append(i)
+    rng = random.Random(random_state)
+    sizes = {g: len(v) for g, v in group_to_idx.items()}
+    sorted_groups = sorted(sizes, key=sizes.get, reverse=True)
+    k = max(0, min(exclude_top_k_groups, len(sorted_groups)))
+    excluded = set(sorted_groups[:k])
+    order = [g for g in group_to_idx.keys() if g not in excluded]
+    rng.shuffle(order)
+    target = round(len(items) * test_size)
+    test_idx: set[int] = set()
+    test_count = 0
+    for _, g in enumerate(order):
+        size = len(group_to_idx[g])
+        new_count = test_count + size
+        current_dist = abs(target - test_count)
+        candidate_dist = abs(target - new_count)
+        if candidate_dist < current_dist:
+            test_idx.update(group_to_idx[g])
+            test_count = new_count
+        elif (
+            candidate_dist <= current_dist + max(0, selection_slack)
+            and rng.random() < 0.5
+        ):
+            test_idx.update(group_to_idx[g])
+            test_count = new_count
+    train_idx = [i for i in range(len(items)) if i not in test_idx]
+    test_idx_list = sorted(test_idx)
+    train_items = [items[i] for i in train_idx]
+    test_items = [items[i] for i in test_idx_list]
+    train_groups = [groups[i] for i in train_idx]
+    test_groups = [groups[i] for i in test_idx_list]
+
+    train_group_sizes = Counter(train_groups)
+    logger.info(f"Train group sizes (top 10): {train_group_sizes.most_common(10)}")
+    test_group_sizes = Counter(test_groups)
+    logger.info(f"Test group sizes (top 10): {test_group_sizes.most_common(10)}")
+
+    return train_items, test_items, train_groups, test_groups
