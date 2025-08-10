@@ -399,6 +399,11 @@ class QwenVLLMServer(BaseQwen):
 
     def build_server_command(self) -> list[str]:
         host, port = self.parse_host_port()
+
+        args = []
+        if self.enable_thinking:
+            args.append("--enable-thinking")
+            args += ["--reasoning-parser", "deepseek_r1"]
         return [
             sys.executable,
             "-m",
@@ -409,6 +414,7 @@ class QwenVLLMServer(BaseQwen):
             host,
             "--port",
             str(port),
+            *args,
         ]
 
     def spawn_server(self, cmd: list[str]) -> None:
