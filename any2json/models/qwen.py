@@ -423,7 +423,6 @@ class QwenVLLMServer(BaseQwen):
 
         args = []
         if self.enable_thinking:
-            args.append("--enable-reasoning")
             args += ["--reasoning-parser", "deepseek_r1"]
         if self.max_tokens:
             args += ["--max-model-len", str(self.max_tokens)]
@@ -469,7 +468,7 @@ class QwenVLLMServer(BaseQwen):
             logger.warning("VLLM server is already running")
             raise RuntimeError("VLLM server is already running")
         cmd = self.build_server_command()
-        logger.info(f"Starting server with command: {cmd}")
+        logger.info(f"Starting server with command: {' '.join(cmd)}")
         self.spawn_server(cmd)
         logger.info("Waiting for server to be ready")
         self.wait_for_server_ready()
@@ -505,6 +504,7 @@ class QwenVLLMServer(BaseQwen):
         resp = self.client.chat.completions.create(
             model=self.resolved_model_name,
             messages=messages(prompt),
+            enable_reasoning=self.enable_thinking,
             **params,
         )
         m = resp.choices[0].message
