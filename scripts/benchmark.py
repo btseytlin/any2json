@@ -121,8 +121,15 @@ def calculate_metrics(results):
     "--hf-dataset-dir",
     default="data/hf_dataset",
     type=click.Path(exists=True, dir_okay=True, file_okay=False),
-    required=True,
+    required=False,
     help="HF dataset directory to benchmark",
+)
+@click.option(
+    "--hf-dataset",
+    default="data/hf_dataset",
+    type=click.Path(exists=True, dir_okay=True, file_okay=False),
+    required=False,
+    help="HF dataset to benchmark",
 )
 @click.option(
     "--split",
@@ -153,7 +160,7 @@ def calculate_metrics(results):
     type=int,
     help="Limit the number of prompts to benchmark",
 )
-def run(hf_dataset_dir, split, model_type, model_kwargs, output_dir, limit):
+def run(hf_dataset_dir, hf_dataset, split, model_type, model_kwargs, output_dir, limit):
     model_kwargs = json.loads(model_kwargs) if model_kwargs else {}
 
     logger.info(
@@ -162,9 +169,14 @@ def run(hf_dataset_dir, split, model_type, model_kwargs, output_dir, limit):
     model_type = model_types[model_type]
     model = model_type(**model_kwargs)
 
-    dataset_dict = DatasetDict.load_from_disk(hf_dataset_dir)
-
-    samples = dataset_dict[split].to_list()
+    if hf_dataset_dir:
+        dataset_dict = DatasetDict.load_from_disk(hf_dataset_dir)
+        samples = dataset_dict[split].to_list()
+    elif hf_dataset:
+        dataset = load_dataset(hf_dataset, split=split)
+        samples = dataset.to_list()
+    else:
+        raise ValueError("Either hf_dataset_dir or hf_dataset must be provided")
 
     if limit:
         samples = samples[:limit]
