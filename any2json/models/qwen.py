@@ -60,12 +60,25 @@ def hf_decode_batch(
     return decoded
 
 
-def vllm_sampling_params(enable_thinking: bool, max_tokens: int):
-    from vllm import SamplingParams
+def get_sampling_params(enable_thinking: bool, max_tokens: int) -> dict:
+    if enable_thinking:
+        temperature = 0.6
+        top_p = 0.95
+        top_k = 20
+        min_p = 0.0
+    else:
+        temperature = 0.7
+        top_p = 0.8
+        top_k = 20
+        min_p = 0.0
 
-    temperature = 0.6 if enable_thinking else 0.7
-    top_p = 0.95 if enable_thinking else 0.8
-    return SamplingParams(temperature=temperature, top_p=top_p, max_tokens=max_tokens)
+    return dict(
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        min_p=min_p,
+        max_tokens=max_tokens,
+    )
 
 
 def parallel_map(
@@ -267,6 +280,7 @@ class QwenHF(BaseQwen):
         return super().get_state()
 
     def generate(self, prompt: str) -> tuple[str, dict]:
+        params = get_sampling_params(self.enable_thinking, self.max_tokens)
         text = self.tokenizer.apply_chat_template(
             messages(prompt),
             tokenize=False,
@@ -333,25 +347,15 @@ class QwenVLLMBatch(BaseQwen):
     def convert_to_json(self, input_text: str, schema: dict) -> tuple[str, dict]:
         return super().convert_to_json(input_text, schema)
 
-    def generate(self, prompt: str) -> tuple[str, dict]:
-        text = self.tokenizer.apply_chat_template(
-            messages(prompt),
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=self.enable_thinking,
-        )
-        params = vllm_sampling_params(self.enable_thinking, self.max_tokens)
-        outputs = self.vllm_llm.generate([text], params)
-        full_text = outputs[0].outputs[0].text
-        content, reasoning = parse_think(full_text)
-        content = normalize_output_text(content)
-        return content, {"thinking_content": reasoning}
-
     def get_predictions(
         self, samples: list[dict], batch_size: int | None = None
     ) -> tuple[list[dict], list[dict]]:
+        from vllm import SamplingParams
+
         batch_size = batch_size or self.batch_size
-        params = vllm_sampling_params(self.enable_thinking, self.max_tokens)
+        params = SamplingParams(
+            **get_sampling_params(self.enable_thinking, self.max_tokens)
+        )
 
         def run_batch_fn(batch: list[dict]) -> tuple[list[object], None]:
             texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)
@@ -478,14 +482,11 @@ class QwenVLLMServer(BaseQwen):
         return self.generate(prompt)
 
     def generate(self, prompt: str) -> tuple[str, dict]:
-        temperature = 0.6 if self.enable_thinking else 0.7
-        top_p = 0.95 if self.enable_thinking else 0.8
+        params = get_sampling_params(self.enable_thinking, self.max_tokens)
         resp = self.client.chat.completions.create(
             model=self.resolved_model_name,
             messages=messages(prompt),
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=self.max_tokens,
+            **params,
         )
         m = resp.choices[0].message
         content = m.content or ""
