@@ -548,6 +548,8 @@ class QwenVLLMServer(BaseQwen):
         for i, e in err:
             errors.append({"id": i, "error": str(e)})
         results.sort(key=lambda x: x["id"])
+        errors.sort(key=lambda x: x["id"])
+        logger.info(f"Obtained {len(results)} results and {len(errors)} errors")
         return results, errors
 
 
