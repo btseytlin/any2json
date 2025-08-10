@@ -525,7 +525,6 @@ class QwenVLLMServer(BaseQwen):
         resp = self.client.chat.completions.create(
             model=self.resolved_model_name,
             messages=messages(prompt),
-            reasoning=self.enable_thinking,
             **params,
         )
         m = resp.choices[0].message
