@@ -3,7 +3,7 @@ from tqdm import tqdm
 import json
 import torch
 from dataclasses import dataclass, field
-from typing import Iterator, Callable, Any
+from typing import Iterator, Callable, Any, TextIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -397,6 +397,8 @@ class QwenVLLMServer(BaseQwen):
     batch_size: int = 16
     server_process: subprocess.Popen | None = field(default=None, init=False)
     server_startup_timeout: float = 120.0
+    server_log_path: str | None = None
+    server_log_handle: TextIO | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         name = self.resolved_model_name
@@ -429,6 +431,7 @@ class QwenVLLMServer(BaseQwen):
 
         return [
             sys.executable,
+            "-u",
             "-m",
             "vllm.entrypoints.openai.api_server",
             "--model",
@@ -440,11 +443,28 @@ class QwenVLLMServer(BaseQwen):
             *args,
         ]
 
+    def open_log_file(self) -> None:
+        if self.server_log_path:
+            self.server_log_handle = open(self.server_log_path, "ab", buffering=0)
+
+    def close_log_file(self) -> None:
+        if self.server_log_handle:
+            try:
+                self.server_log_handle.flush()
+            except Exception:
+                pass
+            try:
+                self.server_log_handle.close()
+            except Exception:
+                pass
+            self.server_log_handle = None
+
     def spawn_server(self, cmd: list[str]) -> None:
         try:
-            self.server_process = subprocess.Popen(
-                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
+            self.open_log_file()
+            out = self.server_log_handle or subprocess.DEVNULL
+            err = self.server_log_handle or subprocess.DEVNULL
+            self.server_process = subprocess.Popen(cmd, stdout=out, stderr=err)
         except Exception as e:
             raise RuntimeError(f"Failed to start vLLM server: {e}")
 
@@ -489,6 +509,7 @@ class QwenVLLMServer(BaseQwen):
         finally:
             self.server_process = None
         logger.info("Server stopped")
+        self.close_log_file()
 
     def get_state(self) -> dict:
         s = super().get_state()
@@ -504,7 +525,7 @@ class QwenVLLMServer(BaseQwen):
         resp = self.client.chat.completions.create(
             model=self.resolved_model_name,
             messages=messages(prompt),
-            enable_reasoning=self.enable_thinking,
+            reasoning=self.enable_thinking,
             **params,
         )
         m = resp.choices[0].message
@@ -563,6 +584,7 @@ class QwenModel:
     max_tokens: int = 8000
     impl: object = field(init=False)
     batch_size: int = 16
+    server_log_path: str | None = None
 
     def __post_init__(self) -> None:
         if self.backend == "vllm_server":
@@ -573,6 +595,7 @@ class QwenModel:
                 base_url=self.base_url,
                 api_key=self.api_key,
                 batch_size=self.batch_size,
+                server_log_path=self.server_log_path,
             )
         elif self.backend == "vllm_offline":
             self.impl = QwenVLLMBatch(
