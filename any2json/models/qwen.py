@@ -454,8 +454,12 @@ class QwenVLLMServer(BaseQwen):
         while time.time() < deadline:
             if self.is_server_alive():
                 return
-            if self.server_process and self.server_process.poll() is not None:
-                raise RuntimeError("vLLM server exited early")
+            if self.server_process:
+                process_status = self.server_process.poll()
+                if process_status is not None:
+                    raise RuntimeError(
+                        f"vLLM server exited early with status {process_status}"
+                    )
             time.sleep(0.5)
         raise TimeoutError("Timed out waiting for vLLM server to start")
 
