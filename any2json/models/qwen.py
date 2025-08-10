@@ -426,8 +426,9 @@ class QwenVLLMServer(BaseQwen):
         args = []
         if self.enable_thinking:
             args += ["--reasoning-parser", "deepseek_r1"]
-        if self.max_tokens:
-            args += ["--max-model-len", str(self.max_tokens)]
+
+        # if self.max_tokens:
+        #     args += ["--max-model-len", str(self.max_tokens)]
 
         return [
             sys.executable,
