@@ -454,6 +454,7 @@ class QwenVLLMServer(BaseQwen):
         return True
 
     def stop_server(self) -> None:
+        logger.info("Stopping server")
         if self.server_process is None:
             return
         try:
@@ -461,9 +462,11 @@ class QwenVLLMServer(BaseQwen):
             try:
                 self.server_process.wait(timeout=10)
             except subprocess.TimeoutExpired:
+                logger.info("Server process timed out, killing it")
                 self.server_process.kill()
         finally:
             self.server_process = None
+        logger.info("Server stopped")
 
     def get_state(self) -> dict:
         s = super().get_state()
