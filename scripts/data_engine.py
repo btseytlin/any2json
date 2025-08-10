@@ -783,6 +783,7 @@ def export_samples_command(output_file: str, num_samples: int | None, test_size:
                         "schema_id": schema.id,
                         "schema_conversion_id": schema_conversion.id,
                         "is_test": is_test,
+                        "group": schema_conversion.meta["group"],
                     },
                 }
             )
@@ -791,7 +792,7 @@ def export_samples_command(output_file: str, num_samples: int | None, test_size:
             json.dump(samples, f, indent=2)
 
 
-# Step 4.3: Export HF dataset dict
+# Step 4.3: Export HF dataset dict and upload to Hugging Face
 
 
 @cli.command(
@@ -809,7 +810,13 @@ def export_samples_command(output_file: str, num_samples: int | None, test_size:
     type=click.Path(dir_okay=True, file_okay=False),
     required=True,
 )
-def export_hf_dataset_command(input_file: str, output_dir: str):
+@click.option(
+    "--repo-id",
+    default="btseytlin/any2json",
+    type=str,
+    required=False,
+)
+def export_hf_dataset_command(input_file: str, output_dir: str, repo_id: str):
     with open(input_file, "r") as f:
         samples = json.load(f)
 
@@ -829,6 +836,9 @@ def export_hf_dataset_command(input_file: str, output_dir: str):
 
     os.makedirs(output_dir, exist_ok=True)
     ds_dict.save_to_disk(output_dir)
+
+    if repo_id:
+        ds_dict.push_to_hub(repo_id=repo_id, private=True)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ name = "any2json"
 version = "0.1.0"
 description = "Convert anything to JSON"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "accelerate>=1.7.0",
     "atomic-agents>=1.0.19",
