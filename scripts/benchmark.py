@@ -139,6 +139,13 @@ def calculate_metrics(results):
         if answer == correct_answer:
             correct.append(i)
 
+    if len(results) == 0:
+        return {
+            "percentage_json_errors": 0,
+            "percentage_correct": 0,
+            "percentage_schema_errors": 0,
+        }
+
     return {
         "percentage_json_errors": len(error) / len(results),
         "percentage_correct": len(correct) / len(results),
