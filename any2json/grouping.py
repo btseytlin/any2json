@@ -176,7 +176,7 @@ def assign_groups(
 def train_test_split_groups(
     items: list[Any],
     groups: list[Any],
-    test_size: float,
+    test_size: int,
     random_state: int,
     exclude_top_k_groups: int = 2,
     selection_slack: int = 50,
@@ -195,7 +195,7 @@ def train_test_split_groups(
         train_groups: list of groups in the train set
         test_groups: list of groups in the test set
     """
-    assert len(items) == len(groups) and 0 < test_size < 1
+    assert len(items) == len(groups) and 0 < test_size < len(items)
     group_to_idx: dict[Any, list[int]] = {}
     for i, g in enumerate(groups):
         group_to_idx.setdefault(g, []).append(i)
@@ -206,23 +206,31 @@ def train_test_split_groups(
     excluded = set(sorted_groups[:k])
     order = [g for g in group_to_idx.keys() if g not in excluded]
     rng.shuffle(order)
-    target = round(len(items) * test_size)
+    target = test_size
     test_idx: set[int] = set()
     test_count = 0
+    logger.info(f"Target test size: {target}")
     for _, g in enumerate(order):
         size = len(group_to_idx[g])
-        new_count = test_count + size
+        logger.debug(f"Group {g} size: {size}")
         current_dist = abs(target - test_count)
+        logger.debug(f"Current test size: {test_count}")
+        logger.debug(f"Current distance: {current_dist}")
+
+        if size > current_dist:
+            logger.debug(f"Skipping group {g} because it is too large")
+            continue
+
+        new_count = test_count + size
         candidate_dist = abs(target - new_count)
-        if candidate_dist < current_dist:
+        if candidate_dist <= current_dist + max(0, selection_slack):
+            if rng.random() < 0.5:
+                logger.debug(f"Skipping group {g} randomly")
+                continue
+            logger.debug(f"Adding group {g} to test set")
             test_idx.update(group_to_idx[g])
             test_count = new_count
-        elif (
-            candidate_dist <= current_dist + max(0, selection_slack)
-            and rng.random() < 0.5
-        ):
-            test_idx.update(group_to_idx[g])
-            test_count = new_count
+
     train_idx = [i for i in range(len(items)) if i not in test_idx]
     test_idx_list = sorted(test_idx)
     train_items = [items[i] for i in train_idx]

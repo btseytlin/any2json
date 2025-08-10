@@ -717,11 +717,11 @@ def assign_groups_command(num_groups: int | None):
 )
 @click.option(
     "--test-size",
-    default=0.1,
-    type=float,
+    default=5000,
+    type=int,
     required=False,
 )
-def export_samples_command(output_file: str, num_samples: int | None, test_size: float):
+def export_samples_command(output_file: str, num_samples: int | None, test_size: int):
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         schema_conversions_query = (
             select(SchemaConversion)
@@ -755,7 +755,6 @@ def export_samples_command(output_file: str, num_samples: int | None, test_size:
         )
 
         logger.info(f"Train size: {len(train_indices)}, Test size: {len(test_indices)}")
-        logger.info(f"Test groups: {set(test_groups)}")
 
         samples = []
         for i, schema_conversion in enumerate(schema_conversions):

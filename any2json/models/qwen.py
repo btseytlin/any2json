@@ -591,9 +591,9 @@ class QwenModel:
     backend: str = "torch"  # vllm_offline, vllm_server, torch
     base_url: str = "http://localhost:8000/v1"
     api_key: str = "EMPTY"
-    max_tokens: int = 8000
+    max_tokens: int = 1000
     impl: object = field(init=False)
-    batch_size: int = 16
+    batch_size: int = 32
     server_log_path: str | None = None
 
     def __post_init__(self) -> None:
