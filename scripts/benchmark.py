@@ -119,15 +119,14 @@ def calculate_metrics(results):
 @click.command()
 @click.option(
     "--hf-dataset-dir",
-    default="data/hf_dataset",
     type=click.Path(exists=True, dir_okay=True, file_okay=False),
     required=False,
     help="HF dataset directory to benchmark",
 )
 @click.option(
     "--hf-dataset",
-    default="data/hf_dataset",
-    type=click.Path(exists=True, dir_okay=True, file_okay=False),
+    default="btseytlin/any2json",
+    type=str,
     required=False,
     help="HF dataset to benchmark",
 )
@@ -151,7 +150,7 @@ def calculate_metrics(results):
 )
 @click.option(
     "--output-dir",
-    default="data/final/benchmark_results",
+    default="./benchmark_results",
     type=click.Path(),
     help="Output directory to save the results",
 )
