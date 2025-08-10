@@ -38,6 +38,7 @@ dependencies = [
     "markdown>=3.8.2",
     "dicttoxml>=1.7.16",
     "xmltodict>=0.14.2",
+    "torchvision>=0.22.0",
 ]
 
 [tool.setuptools.packages.find]

@@ -216,15 +216,14 @@ class QwenVLLMServer:
 class QwenModel:
     model_name: str | None = None
     enable_thinking: bool = False
-    use_vllm: bool = True
-    backend: str = "offline"
+    backend: str = "torch"  # vllm_offline, vllm_server, torch
     base_url: str = "http://localhost:8000/v1"
     api_key: str = "EMPTY"
     max_tokens: int = 8000
     impl: object = field(init=False)
 
     def __post_init__(self) -> None:
-        if self.use_vllm and self.backend == "server":
+        if self.backend == "vllm_server":
             self.impl = QwenVLLMServer(
                 model_name=self.model_name,
                 enable_thinking=self.enable_thinking,
@@ -232,7 +231,7 @@ class QwenModel:
                 base_url=self.base_url,
                 api_key=self.api_key,
             )
-        elif self.use_vllm:
+        elif self.backend == "vllm_offline":
             self.impl = QwenVLLMBatch(
                 model_name=self.model_name,
                 enable_thinking=self.enable_thinking,
@@ -250,7 +249,6 @@ class QwenModel:
         state.update(
             {
                 "wrapper": "QwenModel",
-                "use_vllm": self.use_vllm,
                 "backend": self.backend,
             }
         )
