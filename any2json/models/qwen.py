@@ -1,10 +1,83 @@
 from __future__ import annotations
 
+import json
 import torch
 from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from any2json.utils import logger
+
+
+def to_text(x: str | dict) -> str:
+    return json.dumps(x) if isinstance(x, dict) else str(x)
+
+
+def build_chat_text(
+    tokenizer: AutoTokenizer, enable_thinking: bool, input_text: str, schema: dict
+) -> str:
+    return tokenizer.apply_chat_template(
+        messages(make_prompt(input_text, schema)),
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=enable_thinking,
+    )
+
+
+def build_chat_texts(
+    tokenizer: AutoTokenizer, enable_thinking: bool, batch_samples: list[dict]
+) -> list[str]:
+    return [
+        build_chat_text(
+            tokenizer, enable_thinking, to_text(s["input_data"]), s["schema"]
+        )
+        for s in batch_samples
+    ]
+
+
+def hf_tokenize_to_device(
+    tokenizer: AutoTokenizer, texts: list[str], device_obj: torch.device
+) -> object:
+    enc = tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
+    return enc.to(device_obj)
+
+
+def hf_decode_batch(
+    tokenizer: AutoTokenizer, outputs: object, input_lengths: list[int]
+) -> list[str]:
+    decoded: list[str] = []
+    for i in range(len(input_lengths)):
+        t = tokenizer.decode(
+            outputs[i][int(input_lengths[i]) :], skip_special_tokens=True
+        ).strip()
+        decoded.append(t)
+    return decoded
+
+
+def vllm_sampling_params(enable_thinking: bool, max_tokens: int):
+    from vllm import SamplingParams
+
+    temperature = 0.6 if enable_thinking else 0.7
+    top_p = 0.95 if enable_thinking else 0.8
+    return SamplingParams(temperature=temperature, top_p=top_p, max_tokens=max_tokens)
+
+
+def parallel_map(
+    fn, items: list, max_workers: int
+) -> tuple[list[tuple[int, object]], list[tuple[int, Exception]]]:
+    results: list[tuple[int, object]] = []
+    errors: list[tuple[int, Exception]] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = {ex.submit(fn, i, item): i for i, item in items}
+        for f in as_completed(futs):
+            i = futs[f]
+            try:
+                results.append((i, f.result()))
+            except Exception as e:
+                errors.append((i, e))
+    results.sort(key=lambda x: x[0])
+    return results, errors
+
 
 device = "mps" if torch.backends.mps.is_available() else "cpu"
 device = "cuda" if torch.cuda.is_available() else device
@@ -108,6 +181,33 @@ class QwenHF:
         content = normalize_output_text(content)
         return content, {"thinking_content": reasoning}
 
+    def get_predictions(
+        self, samples: list[dict], batch_size: int = 8
+    ) -> tuple[list[dict], list[dict]]:
+        results: list[dict] = []
+        errors: list[dict] = []
+        for start in range(0, len(samples), batch_size):
+            batch = samples[start : start + batch_size]
+            ids = list(range(start, start + len(batch)))
+            texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)
+            model_inputs = hf_tokenize_to_device(
+                self.tokenizer, texts, self.model.device
+            )
+            output = self.model.generate(**model_inputs, max_new_tokens=self.max_tokens)
+            input_lens = model_inputs.attention_mask.sum(dim=1).tolist()
+            decoded = hf_decode_batch(self.tokenizer, output, input_lens)
+            for j, idx in enumerate(ids):
+                content, reasoning = parse_think(decoded[j])
+                content = normalize_output_text(content)
+                results.append(
+                    {
+                        "id": idx,
+                        "answer": content,
+                        "meta": {"thinking_content": reasoning},
+                    }
+                )
+        return results, errors
+
 
 @dataclass
 class QwenVLLMBatch:
@@ -164,6 +264,33 @@ class QwenVLLMBatch:
         content = normalize_output_text(content)
         return content, {"thinking_content": reasoning}
 
+    def get_predictions(
+        self, samples: list[dict], batch_size: int = 16
+    ) -> tuple[list[dict], list[dict]]:
+        try:
+            params = vllm_sampling_params(self.enable_thinking, self.max_tokens)
+        except Exception as e:
+            raise RuntimeError(f"Failed to import vLLM SamplingParams: {e}")
+        results: list[dict] = []
+        errors: list[dict] = []
+        for start in range(0, len(samples), batch_size):
+            batch = samples[start : start + batch_size]
+            ids = list(range(start, start + len(batch)))
+            texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)
+            outs = self.vllm_llm.generate(texts, params)
+            for j, idx in enumerate(ids):
+                t = outs[j].outputs[0].text
+                content, reasoning = parse_think(t)
+                content = normalize_output_text(content)
+                results.append(
+                    {
+                        "id": idx,
+                        "answer": content,
+                        "meta": {"thinking_content": reasoning},
+                    }
+                )
+        return results, errors
+
 
 @dataclass
 class QwenVLLMServer:
@@ -211,6 +338,26 @@ class QwenVLLMServer:
         content = normalize_output_text(content)
         return content, {"thinking_content": reasoning}
 
+    def get_predictions(
+        self, samples: list[dict], workers: int = 8
+    ) -> tuple[list[dict], list[dict]]:
+        results: list[dict] = []
+        errors: list[dict] = []
+
+        def task(_: int, s: dict) -> tuple[str, dict]:
+            x = to_text(s["input_data"])
+            prompt = make_prompt(x, s["schema"])
+            return self.generate(prompt)
+
+        items = [(i, s) for i, s in enumerate(samples)]
+        ok, err = parallel_map(task, items, workers)
+        for i, (a, m) in ok:
+            results.append({"id": i, "answer": a, "meta": m})
+        for i, e in err:
+            errors.append({"id": i, "error": str(e)})
+        results.sort(key=lambda x: x["id"])
+        return results, errors
+
 
 @dataclass
 class QwenModel:
@@ -256,3 +403,8 @@ class QwenModel:
 
     def convert_to_json(self, input_text: str, schema: dict) -> tuple[str, dict]:
         return self.impl.convert_to_json(input_text, schema)
+
+    def get_predictions(
+        self, samples: list[dict], **kwargs
+    ) -> tuple[list[dict], list[dict]]:
+        return self.impl.get_predictions(samples, **kwargs)

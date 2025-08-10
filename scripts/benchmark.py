@@ -23,24 +23,55 @@ model_types = {
 
 
 def run_benchmark(model, samples: list[dict]) -> list[dict]:
-    results = []
-    errors = []
-    for i, sample in tqdm(
-        enumerate(samples),
-        total=len(samples),
-        desc="Benchmarking",
-    ):
+    results: list[dict] = []
+    errors: list[dict] = []
+    if hasattr(model, "get_predictions"):
+        try:
+            preds, errs = model.get_predictions(samples)
+        except KeyboardInterrupt:
+            preds, errs = [], []
+        id_to_pred = {p["id"]: p for p in preds}
+        for i, s in enumerate(samples):
+            p = id_to_pred.get(i)
+            if p:
+                input_data = s["input_data"]
+                if isinstance(input_data, dict):
+                    input_data = json.dumps(input_data)
+                results.append(
+                    {
+                        "id": i,
+                        "input_data": input_data,
+                        "schema": s["schema"],
+                        "correct_answer": s["output"],
+                        "answer": p["answer"],
+                        "meta": p.get("meta", {}),
+                    }
+                )
+        for e in errs:
+            i = e.get("id")
+            s = samples[i] if i is not None and i < len(samples) else {}
+            input_data = s.get("input_data") if s else None
+            if isinstance(input_data, dict):
+                input_data = json.dumps(input_data)
+            errors.append(
+                {
+                    "id": i,
+                    "input_data": input_data,
+                    "schema": s.get("schema") if s else None,
+                    "correct_answer": s.get("output") if s else None,
+                    "error": e.get("error", "unknown error"),
+                    "traceback": e.get("traceback", ""),
+                }
+            )
+        return results, errors
+    for i, sample in tqdm(enumerate(samples), total=len(samples), desc="Benchmarking"):
         input_data: str | dict = sample["input_data"]
-
         if isinstance(input_data, dict):
             input_data = json.dumps(input_data)
-
         schema: dict = sample["schema"]
         correct_answer: dict = sample["output"]
-
         try:
             answer, meta = model.convert_to_json(input_data, schema)
-
             results.append(
                 {
                     "id": i,
@@ -68,7 +99,6 @@ def run_benchmark(model, samples: list[dict]) -> list[dict]:
             )
         except KeyboardInterrupt:
             break
-
     return results, errors
 
 
