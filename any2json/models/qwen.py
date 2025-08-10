@@ -525,7 +525,9 @@ class QwenVLLMServer(BaseQwen):
         resp = self.client.chat.completions.create(
             model=self.resolved_model_name,
             messages=messages(prompt),
-            **params,
+            extra_body={
+                **params,
+            },
         )
         m = resp.choices[0].message
         content = m.content or ""
