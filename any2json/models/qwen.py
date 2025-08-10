@@ -261,6 +261,7 @@ class QwenHF(BaseQwen):
         logger.info(f"Using device: {device}")
         self.model.to(device)
         self.model.eval()
+        self.model = torch.compile(self.model)
 
     def get_state(self) -> dict:
         return super().get_state()
@@ -393,6 +394,7 @@ class QwenVLLMServer(BaseQwen):
     def is_server_alive(self) -> bool:
         try:
             r = httpx.get(self.health_url(), timeout=2.0)
+            logger.info(f"Health check response: {r.status_code} {r.text}")
             return r.status_code == 200
         except Exception:
             return False
