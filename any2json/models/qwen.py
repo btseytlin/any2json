@@ -1,4 +1,5 @@
 from __future__ import annotations
+import traceback
 from tqdm import tqdm
 import json
 import torch
@@ -96,11 +97,11 @@ def parallel_map(
                     results.append((i, f.result()))
                 except Exception as e:
                     exc_type, exc_value, exc_traceback = sys.exc_info()
-                    traceback = "".join(
+                    traceback_str = "".join(
                         traceback.format_exception(exc_type, exc_value, exc_traceback)
                     )
                     logger.error(f"Error during inference: {e}")
-                    errors.append((i, (e, traceback)))
+                    errors.append((i, (e, traceback_str)))
                 pbar.update(1)
 
             except KeyboardInterrupt:
@@ -585,12 +586,12 @@ class QwenVLLMServer(BaseQwen):
         ok, err = parallel_map(task, items, workers)
         for i, (answer, meta) in ok:
             results.append({"id": i, "answer": answer, "meta": meta})
-        for i, (exception, traceback) in err:
+        for i, (exception, traceback_str) in err:
             errors.append(
                 {
                     "id": i,
                     "error": str(exception),
-                    "traceback": traceback.strip(),
+                    "traceback": traceback_str.strip(),
                 }
             )
         logger.info(f"Obtained {len(results)} results and {len(errors)} errors")
