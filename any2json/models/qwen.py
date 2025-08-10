@@ -526,7 +526,7 @@ class QwenVLLMServer(BaseQwen):
         main_params = {
             "top_p": params["top_p"],
             "temperature": params["temperature"],
-            "max_output_tokens": params["max_tokens"],
+            "max_completion_tokens": params["max_tokens"],
         }
         extra_params = {
             "top_k": params["top_k"],
