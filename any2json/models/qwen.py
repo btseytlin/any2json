@@ -289,7 +289,14 @@ class QwenHF(BaseQwen):
         )
         model_inputs = self.tokenizer([text], return_tensors="pt")
         model_inputs = model_inputs.to(self.model.device)
-        output = self.model.generate(**model_inputs, max_new_tokens=self.max_tokens)
+        output = self.model.generate(
+            **model_inputs,
+            do_sample=True,
+            temperature=params["temperature"],
+            top_p=params["top_p"],
+            top_k=params["top_k"],
+            max_new_tokens=self.max_tokens,
+        )
         full_text = self.tokenizer.decode(
             output[0][len(model_inputs.input_ids[0]) :], skip_special_tokens=True
         ).strip()
@@ -307,7 +314,15 @@ class QwenHF(BaseQwen):
             model_inputs = hf_tokenize_to_device(
                 self.tokenizer, texts, self.model.device
             )
-            output = self.model.generate(**model_inputs, max_new_tokens=self.max_tokens)
+            params = get_sampling_params(self.enable_thinking, self.max_tokens)
+            output = self.model.generate(
+                **model_inputs,
+                do_sample=True,
+                temperature=params["temperature"],
+                top_p=params["top_p"],
+                top_k=params["top_k"],
+                max_new_tokens=self.max_tokens,
+            )
             input_lens = model_inputs.attention_mask.sum(dim=1).tolist()
             return output, input_lens
 
