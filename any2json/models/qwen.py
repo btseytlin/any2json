@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from tqdm import tqdm
 import json
 import torch
 from dataclasses import dataclass, field
@@ -186,7 +186,11 @@ class QwenHF:
     ) -> tuple[list[dict], list[dict]]:
         results: list[dict] = []
         errors: list[dict] = []
-        for start in range(0, len(samples), batch_size):
+        for start in tqdm(
+            range(0, len(samples), batch_size),
+            total=len(samples) // batch_size,
+            desc="Generating predictions",
+        ):
             batch = samples[start : start + batch_size]
             ids = list(range(start, start + len(batch)))
             texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)
@@ -273,7 +277,11 @@ class QwenVLLMBatch:
             raise RuntimeError(f"Failed to import vLLM SamplingParams: {e}")
         results: list[dict] = []
         errors: list[dict] = []
-        for start in range(0, len(samples), batch_size):
+        for start in tqdm(
+            range(0, len(samples), batch_size),
+            total=len(samples) // batch_size,
+            desc="Generating predictions",
+        ):
             batch = samples[start : start + batch_size]
             ids = list(range(start, start + len(batch)))
             texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)

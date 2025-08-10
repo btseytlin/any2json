@@ -193,7 +193,7 @@ def run(hf_dataset_dir, hf_dataset, split, model_type, model_kwargs, output_dir,
     model_kwargs = json.loads(model_kwargs) if model_kwargs else {}
 
     logger.info(
-        f"Benchmarking {hf_dataset_dir} split {split} with {model_type} {model_kwargs}"
+        f"Benchmarking: {hf_dataset_dir=}, {hf_dataset=}, {split=}, {model_type=}, {model_kwargs=}, {limit=}"
     )
     model_type = model_types[model_type]
     model = model_type(**model_kwargs)
