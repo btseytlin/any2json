@@ -324,7 +324,7 @@ class QwenVLLMBatch:
                 logger.error("Keyboard interrupt")
                 break
 
-        for output, ids in tqdm(
+        for outs, ids in tqdm(
             zip(outputs, input_ids, strict=True),
             total=len(outputs),
             desc="Decoding outputs",
