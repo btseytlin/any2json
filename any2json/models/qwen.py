@@ -83,7 +83,7 @@ def get_sampling_params(enable_thinking: bool, max_tokens: int) -> dict:
 
 def parallel_map(
     fn, items: list, max_workers: int
-) -> tuple[list[tuple[int, object]], list[tuple[int, Exception]]]:
+) -> tuple[list[tuple[int, object]], list[tuple[int, tuple[Exception, str]]]]:
     results: list[tuple[int, object]] = []
     errors: list[tuple[int, Exception]] = []
     pbar = tqdm(total=len(items), desc="Executing tasks")
@@ -95,11 +95,18 @@ def parallel_map(
                 try:
                     results.append((i, f.result()))
                 except Exception as e:
-                    errors.append((i, e))
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    traceback = "".join(
+                        traceback.format_exception(exc_type, exc_value, exc_traceback)
+                    )
+                    logger.error(f"Error during inference: {e}")
+                    errors.append((i, (e, traceback)))
                 pbar.update(1)
 
             except KeyboardInterrupt:
                 logger.error("Keyboard interrupt")
+                for f in futs.values():
+                    f.cancel()
                 break
     results.sort(key=lambda x: x[0])
     errors.sort(key=lambda x: x[0])
@@ -544,7 +551,8 @@ class QwenVLLMServer(BaseQwen):
         if not reasoning:
             content, reasoning = parse_think(content)
         content = normalize_output_text(content)
-        return content, {"thinking_content": reasoning}
+        meta = {"thinking_content": reasoning}
+        return content, meta
 
     def get_predictions(
         self, samples: list[dict], workers: int = 8
@@ -570,16 +578,21 @@ class QwenVLLMServer(BaseQwen):
         def task(_: int, s: dict) -> tuple[str, dict]:
             x = to_text(s["input_data"])
             prompt = make_prompt(x, s["schema"])
-            return self.generate(prompt)
+            answer, meta = self.generate(prompt)
+            return answer, meta
 
         items = [(i, s) for i, s in enumerate(samples)]
         ok, err = parallel_map(task, items, workers)
-        for i, (a, m) in ok:
-            results.append({"id": i, "answer": a, "meta": m})
-        for i, e in err:
-            errors.append({"id": i, "error": str(e)})
-        results.sort(key=lambda x: x["id"])
-        errors.sort(key=lambda x: x["id"])
+        for i, (answer, meta) in ok:
+            results.append({"id": i, "answer": answer, "meta": meta})
+        for i, (exception, traceback) in err:
+            errors.append(
+                {
+                    "id": i,
+                    "error": str(exception),
+                    "traceback": traceback.strip(),
+                }
+            )
         logger.info(f"Obtained {len(results)} results and {len(errors)} errors")
         return results, errors
 
