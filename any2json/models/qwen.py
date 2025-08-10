@@ -3,6 +3,7 @@ from tqdm import tqdm
 import json
 import torch
 from dataclasses import dataclass, field
+from typing import Iterator, Callable, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -72,6 +73,7 @@ def parallel_map(
 ) -> tuple[list[tuple[int, object]], list[tuple[int, Exception]]]:
     results: list[tuple[int, object]] = []
     errors: list[tuple[int, Exception]] = []
+    pbar = tqdm(total=len(items), desc="Executing tasks")
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futs = {ex.submit(fn, i, item): i for i, item in items}
         for f in as_completed(futs):
@@ -81,6 +83,8 @@ def parallel_map(
                     results.append((i, f.result()))
                 except Exception as e:
                     errors.append((i, e))
+                pbar.update(1)
+
             except KeyboardInterrupt:
                 logger.error("Keyboard interrupt")
                 break
@@ -146,7 +150,100 @@ def messages(prompt: str) -> list[dict]:
 
 
 @dataclass
-class QwenHF:
+class BaseQwen:
+    model_name: str | None = None
+    enable_thinking: bool = False
+    max_tokens: int = 8000
+    batch_size: int = 16
+
+    @property
+    def resolved_model_name(self) -> str:
+        return self.model_name or "Qwen/Qwen3-0.6B"
+
+    def get_state(self) -> dict:
+        return {
+            "model_name": self.resolved_model_name,
+            "class_name": str(self.__class__.__name__),
+            "enable_thinking": self.enable_thinking,
+            "max_tokens": self.max_tokens,
+        }
+
+    def convert_to_json(self, input_text: str, schema: dict) -> tuple[str, dict]:
+        prompt = make_prompt(input_text, schema)
+        return self.generate(prompt)
+
+    def to_answer_meta(self, text: str) -> tuple[str, dict]:
+        content, reasoning = parse_think(text)
+        content = normalize_output_text(content)
+        return content, {"thinking_content": reasoning}
+
+    def iter_batches(
+        self, samples: list[dict], batch_size: int
+    ) -> Iterator[tuple[list[int], list[dict]]]:
+        for start in range(0, len(samples), batch_size):
+            batch = samples[start : start + batch_size]
+            ids = list(range(start, start + len(batch)))
+            yield ids, batch
+
+    def collect_batch_outputs(
+        self,
+        samples: list[dict],
+        batch_size: int,
+        run_batch_fn: Callable[[list[dict]], tuple[object, Any]],
+    ) -> tuple[list[object], list[Any], list[list[int]]]:
+        outputs: list[object] = []
+        aux_list: list[Any] = []
+        id_list: list[list[int]] = []
+        pbar = tqdm(total=len(samples), desc="Generating predictions")
+        for ids, batch in self.iter_batches(samples, batch_size):
+            try:
+                out, aux = run_batch_fn(batch)
+                outputs.append(out)
+                aux_list.append(aux)
+                id_list.append(ids)
+                pbar.update(len(batch))
+            except KeyboardInterrupt:
+                logger.error("Keyboard interrupt")
+                break
+        return outputs, aux_list, id_list
+
+    def decode_and_build_results(
+        self,
+        outputs: list[object],
+        aux_list: list[Any],
+        id_list: list[list[int]],
+        decode_batch_fn: Callable[[object, Any], list[str]],
+    ) -> list[dict]:
+        results: list[dict] = []
+        for out, aux, ids in tqdm(
+            zip(outputs, aux_list, id_list, strict=True),
+            total=len(outputs),
+            desc="Decoding outputs",
+        ):
+            texts = decode_batch_fn(out, aux)
+            for j, idx in enumerate(ids):
+                content, meta = self.to_answer_meta(texts[j])
+                results.append({"id": idx, "answer": content, "meta": meta})
+        return results
+
+    def run_batched_inference(
+        self,
+        samples: list[dict],
+        batch_size: int,
+        run_batch_fn: Callable[[list[dict]], tuple[object, Any]],
+        decode_batch_fn: Callable[[object, Any], list[str]],
+    ) -> tuple[list[dict], list[dict]]:
+        outputs, aux_list, id_list = self.collect_batch_outputs(
+            samples, batch_size, run_batch_fn
+        )
+        results = self.decode_and_build_results(
+            outputs, aux_list, id_list, decode_batch_fn
+        )
+        return results, []
+
+
+@dataclass
+class QwenHF(BaseQwen):
     model_name: str | None = None
     enable_thinking: bool = False
     max_tokens: int = 8000
@@ -155,7 +252,7 @@ class QwenHF:
     batch_size: int = 16
 
     def __post_init__(self) -> None:
-        name = self.model_name or "Qwen/Qwen3-0.6B"
+        name = self.resolved_model_name
         self.tokenizer = AutoTokenizer.from_pretrained(name)
         self.model = AutoModelForCausalLM.from_pretrained(
             name, torch_dtype="auto", device_map="auto"
@@ -166,16 +263,7 @@ class QwenHF:
         self.model.eval()
 
     def get_state(self) -> dict:
-        return {
-            "model_name": self.model_name or "Qwen/Qwen3-0.6B",
-            "class_name": str(self.__class__.__name__),
-            "enable_thinking": self.enable_thinking,
-            "max_tokens": self.max_tokens,
-        }
-
-    def convert_to_json(self, input_text: str, schema: dict) -> tuple[str, dict]:
-        prompt = make_prompt(input_text, schema)
-        return self.generate(prompt)
+        return super().get_state()
 
     def generate(self, prompt: str) -> tuple[str, dict]:
         text = self.tokenizer.apply_chat_template(
@@ -198,58 +286,26 @@ class QwenHF:
         self, samples: list[dict], batch_size: int | None = None
     ) -> tuple[list[dict], list[dict]]:
         batch_size = batch_size or self.batch_size
-        results: list[dict] = []
-        errors: list[dict] = []
 
-        outputs = []
-        input_lenses = []
-        input_ids = []
+        def run_batch_fn(batch: list[dict]) -> tuple[object, list[int]]:
+            texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)
+            model_inputs = hf_tokenize_to_device(
+                self.tokenizer, texts, self.model.device
+            )
+            output = self.model.generate(**model_inputs, max_new_tokens=self.max_tokens)
+            input_lens = model_inputs.attention_mask.sum(dim=1).tolist()
+            return output, input_lens
 
-        for start in tqdm(
-            range(0, len(samples), batch_size),
-            total=max(1, len(samples) // batch_size),
-            desc="Generating predictions",
-        ):
-            try:
-                batch = samples[start : start + batch_size]
-                ids = list(range(start, start + len(batch)))
-                texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)
-                model_inputs = hf_tokenize_to_device(
-                    self.tokenizer, texts, self.model.device
-                )
-                output = self.model.generate(
-                    **model_inputs, max_new_tokens=self.max_tokens
-                )
-                input_lens = model_inputs.attention_mask.sum(dim=1).tolist()
-                input_ids.append(ids)
-                outputs.append(output)
-                input_lenses.append(input_lens)
+        def decode_batch_fn(output: object, input_lens: list[int]) -> list[str]:
+            return hf_decode_batch(self.tokenizer, output, input_lens)
 
-            except KeyboardInterrupt:
-                logger.error("Keyboard interrupt")
-                break
-
-        for output, input_lens, ids in tqdm(
-            zip(outputs, input_lenses, input_ids, strict=True),
-            total=len(outputs),
-            desc="Decoding outputs",
-        ):
-            decoded = hf_decode_batch(self.tokenizer, output, input_lens)
-            for j, idx in enumerate(ids):
-                content, reasoning = parse_think(decoded[j])
-                content = normalize_output_text(content)
-                results.append(
-                    {
-                        "id": idx,
-                        "answer": content,
-                        "meta": {"thinking_content": reasoning},
-                    }
-                )
-        return results, errors
+        return self.run_batched_inference(
+            samples, batch_size, run_batch_fn, decode_batch_fn
+        )
 
 
 @dataclass
-class QwenVLLMBatch:
+class QwenVLLMBatch(BaseQwen):
     model_name: str | None = None
     enable_thinking: bool = False
     max_tokens: int = 8000
@@ -262,7 +318,7 @@ class QwenVLLMBatch:
             raise RuntimeError(
                 "vLLM offline backend requires CUDA. Use QwenVLLMServer with a running server."
             )
-        name = self.model_name or "Qwen/Qwen3-0.6B"
+        name = self.resolved_model_name
         self.tokenizer = AutoTokenizer.from_pretrained(name)
         try:
             from vllm import LLM as VLLM
@@ -271,16 +327,10 @@ class QwenVLLMBatch:
         self.vllm_llm = VLLM(model=name)
 
     def get_state(self) -> dict:
-        return {
-            "model_name": self.model_name or "Qwen/Qwen3-0.6B",
-            "class_name": str(self.__class__.__name__),
-            "enable_thinking": self.enable_thinking,
-            "max_tokens": self.max_tokens,
-        }
+        return super().get_state()
 
     def convert_to_json(self, input_text: str, schema: dict) -> tuple[str, dict]:
-        prompt = make_prompt(input_text, schema)
-        return self.generate(prompt)
+        return super().convert_to_json(input_text, schema)
 
     def generate(self, prompt: str) -> tuple[str, dict]:
         text = self.tokenizer.apply_chat_template(
@@ -301,51 +351,22 @@ class QwenVLLMBatch:
     ) -> tuple[list[dict], list[dict]]:
         batch_size = batch_size or self.batch_size
         params = vllm_sampling_params(self.enable_thinking, self.max_tokens)
-        results: list[dict] = []
-        errors: list[dict] = []
 
-        outputs = []
-        input_lenses = []
-        input_ids = []
+        def run_batch_fn(batch: list[dict]) -> tuple[list[object], None]:
+            texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)
+            outs = self.vllm_llm.generate(texts, params)
+            return outs, None
 
-        for start in tqdm(
-            range(0, len(samples), batch_size),
-            total=max(1, len(samples) // batch_size),
-            desc="Generating predictions",
-        ):
-            try:
-                batch = samples[start : start + batch_size]
-                ids = list(range(start, start + len(batch)))
-                texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)
-                outs = self.vllm_llm.generate(texts, params)
-                outputs.append(outs)
-                input_ids.append(ids)
-            except KeyboardInterrupt:
-                logger.error("Keyboard interrupt")
-                break
+        def decode_batch_fn(outs: list[object], _: None) -> list[str]:
+            return [o.outputs[0].text for o in outs]
 
-        for outs, ids in tqdm(
-            zip(outputs, input_ids, strict=True),
-            total=len(outputs),
-            desc="Decoding outputs",
-        ):
-            for j, idx in enumerate(ids):
-                t = outs[j].outputs[0].text
-                content, reasoning = parse_think(t)
-                content = normalize_output_text(content)
-                results.append(
-                    {
-                        "id": idx,
-                        "answer": content,
-                        "meta": {"thinking_content": reasoning},
-                    }
-                )
-
-        return results, errors
+        return self.run_batched_inference(
+            samples, batch_size, run_batch_fn, decode_batch_fn
+        )
 
 
 @dataclass
-class QwenVLLMServer:
+class QwenVLLMServer(BaseQwen):
     model_name: str | None = None
     enable_thinking: bool = False
     max_tokens: int = 8000
@@ -358,12 +379,9 @@ class QwenVLLMServer:
     server_startup_timeout: float = 120.0
 
     def __post_init__(self) -> None:
-        name = self.model_name or "Qwen/Qwen3-0.6B"
+        name = self.resolved_model_name
         self.tokenizer = AutoTokenizer.from_pretrained(name)
         self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
-
-    def resolved_model_name(self) -> str:
-        return self.model_name or "Qwen/Qwen3-0.6B"
 
     def parse_host_port(self) -> tuple[str, int]:
         u = urlparse(self.base_url)
@@ -386,7 +404,7 @@ class QwenVLLMServer:
             "-m",
             "vllm.entrypoints.openai.api_server",
             "--model",
-            self.resolved_model_name(),
+            self.resolved_model_name,
             "--host",
             host,
             "--port",
@@ -412,11 +430,16 @@ class QwenVLLMServer:
         raise TimeoutError("Timed out waiting for vLLM server to start")
 
     def ensure_server_started(self) -> bool:
+        logger.info("Checking if server is alive")
         if self.is_server_alive():
-            return False
+            logger.warning("VLLM server is already running")
+            raise RuntimeError("VLLM server is already running")
         cmd = self.build_server_command()
+        logger.info(f"Starting server with command: {cmd}")
         self.spawn_server(cmd)
+        logger.info("Waiting for server to be ready")
         self.wait_for_server_ready()
+        logger.info("VLLM server is ready")
         return True
 
     def stop_server(self) -> None:
@@ -432,13 +455,9 @@ class QwenVLLMServer:
             self.server_process = None
 
     def get_state(self) -> dict:
-        return {
-            "model_name": self.model_name or "Qwen/Qwen3-0.6B",
-            "class_name": str(self.__class__.__name__),
-            "enable_thinking": self.enable_thinking,
-            "max_tokens": self.max_tokens,
-            "base_url": self.base_url,
-        }
+        s = super().get_state()
+        s.update({"base_url": self.base_url})
+        return s
 
     def convert_to_json(self, input_text: str, schema: dict) -> tuple[str, dict]:
         prompt = make_prompt(input_text, schema)
@@ -448,7 +467,7 @@ class QwenVLLMServer:
         temperature = 0.6 if self.enable_thinking else 0.7
         top_p = 0.95 if self.enable_thinking else 0.8
         resp = self.client.chat.completions.create(
-            model=self.model_name or "Qwen/Qwen3-0.6B",
+            model=self.resolved_model_name,
             messages=messages(prompt),
             temperature=temperature,
             top_p=top_p,
@@ -467,11 +486,7 @@ class QwenVLLMServer:
     ) -> tuple[list[dict], list[dict]]:
         started = False
         try:
-            try:
-                started = self.ensure_server_started()
-            except Exception:
-                if not self.is_server_alive():
-                    raise
+            started = self.ensure_server_started()
             return self.execute_parallel_requests(samples, workers)
         finally:
             if started:
@@ -482,6 +497,10 @@ class QwenVLLMServer:
     ) -> tuple[list[dict], list[dict]]:
         results: list[dict] = []
         errors: list[dict] = []
+
+        logger.info(
+            f"Executing {len(samples)} requests in parallel with {workers} workers"
+        )
 
         def task(_: int, s: dict) -> tuple[str, dict]:
             x = to_text(s["input_data"])
