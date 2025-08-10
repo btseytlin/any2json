@@ -7,6 +7,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from any2json.utils import logger
+import subprocess
+import sys
+import time
+import httpx
+from urllib.parse import urlparse
 
 
 def to_text(x: str | dict) -> str:
@@ -195,9 +200,14 @@ class QwenHF:
         batch_size = batch_size or self.batch_size
         results: list[dict] = []
         errors: list[dict] = []
+
+        outputs = []
+        input_lenses = []
+        input_ids = []
+
         for start in tqdm(
             range(0, len(samples), batch_size),
-            total=len(samples) // batch_size,
+            total=max(1, len(samples) // batch_size),
             desc="Generating predictions",
         ):
             try:
@@ -211,20 +221,30 @@ class QwenHF:
                     **model_inputs, max_new_tokens=self.max_tokens
                 )
                 input_lens = model_inputs.attention_mask.sum(dim=1).tolist()
-                decoded = hf_decode_batch(self.tokenizer, output, input_lens)
-                for j, idx in enumerate(ids):
-                    content, reasoning = parse_think(decoded[j])
-                    content = normalize_output_text(content)
-                    results.append(
-                        {
-                            "id": idx,
-                            "answer": content,
-                            "meta": {"thinking_content": reasoning},
-                        }
-                    )
+                input_ids.append(ids)
+                outputs.append(output)
+                input_lenses.append(input_lens)
+
             except KeyboardInterrupt:
                 logger.error("Keyboard interrupt")
                 break
+
+        for output, input_lens, ids in tqdm(
+            zip(outputs, input_lenses, input_ids, strict=True),
+            total=len(outputs),
+            desc="Decoding outputs",
+        ):
+            decoded = hf_decode_batch(self.tokenizer, output, input_lens)
+            for j, idx in enumerate(ids):
+                content, reasoning = parse_think(decoded[j])
+                content = normalize_output_text(content)
+                results.append(
+                    {
+                        "id": idx,
+                        "answer": content,
+                        "meta": {"thinking_content": reasoning},
+                    }
+                )
         return results, errors
 
 
@@ -283,9 +303,14 @@ class QwenVLLMBatch:
         params = vllm_sampling_params(self.enable_thinking, self.max_tokens)
         results: list[dict] = []
         errors: list[dict] = []
+
+        outputs = []
+        input_lenses = []
+        input_ids = []
+
         for start in tqdm(
             range(0, len(samples), batch_size),
-            total=len(samples) // batch_size,
+            total=max(1, len(samples) // batch_size),
             desc="Generating predictions",
         ):
             try:
@@ -293,20 +318,29 @@ class QwenVLLMBatch:
                 ids = list(range(start, start + len(batch)))
                 texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)
                 outs = self.vllm_llm.generate(texts, params)
-                for j, idx in enumerate(ids):
-                    t = outs[j].outputs[0].text
-                    content, reasoning = parse_think(t)
-                    content = normalize_output_text(content)
-                    results.append(
-                        {
-                            "id": idx,
-                            "answer": content,
-                            "meta": {"thinking_content": reasoning},
-                        }
-                    )
+                outputs.append(outs)
+                input_ids.append(ids)
             except KeyboardInterrupt:
                 logger.error("Keyboard interrupt")
                 break
+
+        for output, ids in tqdm(
+            zip(outputs, input_ids, strict=True),
+            total=len(outputs),
+            desc="Decoding outputs",
+        ):
+            for j, idx in enumerate(ids):
+                t = outs[j].outputs[0].text
+                content, reasoning = parse_think(t)
+                content = normalize_output_text(content)
+                results.append(
+                    {
+                        "id": idx,
+                        "answer": content,
+                        "meta": {"thinking_content": reasoning},
+                    }
+                )
+
         return results, errors
 
 
@@ -319,11 +353,83 @@ class QwenVLLMServer:
     api_key: str = "EMPTY"
     tokenizer: AutoTokenizer = field(init=False)
     client: OpenAI = field(init=False)
+    batch_size: int = 16
+    server_process: subprocess.Popen | None = field(default=None, init=False)
+    server_startup_timeout: float = 120.0
 
     def __post_init__(self) -> None:
         name = self.model_name or "Qwen/Qwen3-0.6B"
         self.tokenizer = AutoTokenizer.from_pretrained(name)
         self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
+
+    def resolved_model_name(self) -> str:
+        return self.model_name or "Qwen/Qwen3-0.6B"
+
+    def parse_host_port(self) -> tuple[str, int]:
+        u = urlparse(self.base_url)
+        return (u.hostname or "127.0.0.1", u.port or 8000)
+
+    def health_url(self) -> str:
+        return f"{self.base_url}/models"
+
+    def is_server_alive(self) -> bool:
+        try:
+            r = httpx.get(self.health_url(), timeout=2.0)
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    def build_server_command(self) -> list[str]:
+        host, port = self.parse_host_port()
+        return [
+            sys.executable,
+            "-m",
+            "vllm.entrypoints.openai.api_server",
+            "--model",
+            self.resolved_model_name(),
+            "--host",
+            host,
+            "--port",
+            str(port),
+        ]
+
+    def spawn_server(self, cmd: list[str]) -> None:
+        try:
+            self.server_process = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to start vLLM server: {e}")
+
+    def wait_for_server_ready(self) -> None:
+        deadline = time.time() + self.server_startup_timeout
+        while time.time() < deadline:
+            if self.is_server_alive():
+                return
+            if self.server_process and self.server_process.poll() is not None:
+                raise RuntimeError("vLLM server exited early")
+            time.sleep(0.5)
+        raise TimeoutError("Timed out waiting for vLLM server to start")
+
+    def ensure_server_started(self) -> bool:
+        if self.is_server_alive():
+            return False
+        cmd = self.build_server_command()
+        self.spawn_server(cmd)
+        self.wait_for_server_ready()
+        return True
+
+    def stop_server(self) -> None:
+        if self.server_process is None:
+            return
+        try:
+            self.server_process.terminate()
+            try:
+                self.server_process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.server_process.kill()
+        finally:
+            self.server_process = None
 
     def get_state(self) -> dict:
         return {
@@ -358,6 +464,21 @@ class QwenVLLMServer:
 
     def get_predictions(
         self, samples: list[dict], workers: int = 8
+    ) -> tuple[list[dict], list[dict]]:
+        started = False
+        try:
+            try:
+                started = self.ensure_server_started()
+            except Exception:
+                if not self.is_server_alive():
+                    raise
+            return self.execute_parallel_requests(samples, workers)
+        finally:
+            if started:
+                self.stop_server()
+
+    def execute_parallel_requests(
+        self, samples: list[dict], workers: int
     ) -> tuple[list[dict], list[dict]]:
         results: list[dict] = []
         errors: list[dict] = []
