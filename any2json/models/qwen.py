@@ -523,12 +523,20 @@ class QwenVLLMServer(BaseQwen):
 
     def generate(self, prompt: str) -> tuple[str, dict]:
         params = get_sampling_params(self.enable_thinking, self.max_tokens)
+        main_params = {
+            "top_p": params["top_p"],
+            "temperature": params["temperature"],
+            "max_output_tokens": params["max_tokens"],
+        }
+        extra_params = {
+            "top_k": params["top_k"],
+            "min_p": params["min_p"],
+        }
         resp = self.client.chat.completions.create(
             model=self.resolved_model_name,
             messages=messages(prompt),
-            extra_body={
-                **params,
-            },
+            **main_params,
+            extra_body=extra_params,
         )
         m = resp.choices[0].message
         content = m.content or ""
