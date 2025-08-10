@@ -402,7 +402,7 @@ class QwenVLLMServer(BaseQwen):
 
         args = []
         if self.enable_thinking:
-            args.append("--enable-thinking")
+            args.append("--enable-reasoning")
             args += ["--reasoning-parser", "deepseek_r1"]
         return [
             sys.executable,
