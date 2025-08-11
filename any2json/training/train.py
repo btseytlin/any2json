@@ -93,48 +93,13 @@ def make_group_split(ds_dict: DatasetDict, test_size: int, seed: int) -> Dataset
     return DatasetDict({"train": train_split, "validation": eval_split})
 
 
-def log_eval_examples(
-    trainer: Seq2SeqTrainer, tokenizer: AutoTokenizer, ds, max_examples: int = 8
-) -> None:
-    rows = [ds[i] for i in random.sample(range(len(ds)), min(max_examples, len(ds)))]
-    inputs = [format_example(r["input_data"], r["schema"]) for r in rows]
-    tokenized = tokenizer(
-        inputs,
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-        max_length=(getattr(tokenizer, "model_max_length", None) or 4096),
-    ).to(trainer.model.device)
-    outputs = trainer.model.generate(
-        **tokenized,
-        max_new_tokens=tokenizer.model_max_length // 4,
-        do_sample=False,
-        num_beams=1,
-    )
-    preds = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-
-    table = wandb.Table(
-        columns=["epoch", "step", "input", "schema", "target", "prediction"]
-    )
-
-    for r, p in zip(rows, preds, strict=True):
-        table.add_data(
-            trainer.state.epoch,
-            trainer.state.global_step,
-            r["input_data"],
-            r["schema"],
-            r["output"],
-            p,
-        )
-    wandb.log({"eval_examples_final": table}, step=trainer.state.global_step)
-
-
 class EvalLoggerCallback(TrainerCallback):
     def __init__(self, tokenizer: AutoTokenizer, raw_eval_ds):
         self.tokenizer = tokenizer
         self.raw_eval_ds = raw_eval_ds
         self.table = wandb.Table(
-            columns=["epoch", "step", "input", "schema", "target", "prediction"]
+            columns=["epoch", "step", "input", "schema", "target", "prediction"],
+            log_mode="INCREMENTAL",
         )
 
     def on_evaluate(
