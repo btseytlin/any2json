@@ -126,7 +126,7 @@ def log_eval_examples(
             r["output"],
             p,
         )
-    wandb.log({"eval_examples": table})
+    wandb.log({"eval_examples_final": table}, step=trainer.state.global_step)
 
 
 class EvalLoggerCallback(TrainerCallback):
@@ -417,7 +417,6 @@ def run_training(cfg: TrainingConfig) -> None:
     trainer = create_trainer(tokenized, tokenizer, model, cfg)
     trainer.add_callback(EvalLoggerCallback(tokenizer, ds["validation"]))
     trainer.train()
-    log_eval_examples(trainer, tokenizer, ds["validation"])
     trainer.save_model(cfg.output_dir)
     tokenizer.save_pretrained(cfg.output_dir)
     if cfg.push_to_hub and cfg.hub_repo_id:
