@@ -387,7 +387,7 @@ def cli():
 
 @cli.command(name="estimate-lengths")
 @click.option("--dataset-path", default="btseytlin/any2json", type=str)
-@click.option("--model-name", default="google/byt5-small", type=str)
+@click.option("--model-name", default="google/flan-t5-small", type=str)
 @click.option("--estimate-samples", default=2000, type=int)
 def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: int):
     estimate_token_lengths(dataset_path, model_name, estimate_samples)
@@ -395,12 +395,12 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 
 @cli.command(name="train")
 @click.option("--dataset-path", default="btseytlin/any2json", type=str)
-@click.option("--model-name", default="google/byt5-small", type=str)
+@click.option("--model-name", default="google/flan-t5-small", type=str)
 @click.option("--output-dir", default="checkpoints/byt5-any2json", type=str)
-@click.option("--max-source-length", default=4096, type=int)
-@click.option("--max-target-length", default=2048, type=int)
-@click.option("--per-device-train-batch-size", default=2, type=int)
-@click.option("--per-device-eval-batch-size", default=2, type=int)
+@click.option("--max-source-length", default=2048, type=int)
+@click.option("--max-target-length", default=1024, type=int)
+@click.option("--per-device-train-batch-size", default=1, type=int)
+@click.option("--per-device-eval-batch-size", default=1, type=int)
 @click.option("--learning-rate", default=5e-5, type=float)
 @click.option("--num-train-epochs", default=2, type=int)
 @click.option("--warmup-ratio", default=0.03, type=float)
