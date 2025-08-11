@@ -65,14 +65,14 @@ def build_tokenize_fn(
         model_inputs = tokenizer(
             inputs,
             max_length=max_source_length,
-            truncation=True,
+            truncation=False,
             padding=False,
             return_tensors=None,
         )
         labels = tokenizer(
             text_target=batch["output"],
             max_length=max_target_length,
-            truncation=True,
+            truncation=False,
             padding=False,
             return_tensors=None,
         )
@@ -302,6 +302,40 @@ def tokenize_splits(
     return DatasetDict({"train": train_tok, "validation": val_tok})
 
 
+def build_length_filter_fn(
+    tokenizer: AutoTokenizer, max_source_length: int, max_target_length: int
+) -> Callable[[dict[str, Any]], list[bool]]:
+    def pred(batch: dict[str, Any]) -> list[bool]:
+        inputs = [
+            format_example(i, s)
+            for i, s in zip(batch["input_data"], batch["schema"], strict=True)
+        ]
+        src = tokenizer(inputs, padding=False, truncation=False, return_tensors=None)
+        tgt = tokenizer(
+            text_target=batch["output"],
+            padding=False,
+            truncation=False,
+            return_tensors=None,
+        )
+        return [
+            (len(a) <= max_source_length) and (len(b) <= max_target_length)
+            for a, b in zip(src["input_ids"], tgt["input_ids"], strict=True)
+        ]
+
+    return pred
+
+
+def filter_splits_by_length(
+    ds: DatasetDict, tokenizer: AutoTokenizer, cfg: TrainingConfig
+) -> DatasetDict:
+    pred = build_length_filter_fn(
+        tokenizer, cfg.max_source_length, cfg.max_target_length
+    )
+    train_f = ds["train"].filter(pred, batched=True)
+    val_f = ds["validation"].filter(pred, batched=True)
+    return DatasetDict({"train": train_f, "validation": val_f})
+
+
 def create_trainer(
     tokenized: DatasetDict,
     tokenizer: AutoTokenizer,
@@ -367,6 +401,7 @@ def run_training(cfg: TrainingConfig) -> None:
     ds = prepare_splits(raw, seed=cfg.seed)
     ds = augment_train_split(ds, cfg)
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    ds = filter_splits_by_length(ds, tokenizer, cfg)
     model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_name)
     model.config.use_cache = False
     if cfg.gradient_checkpointing:
