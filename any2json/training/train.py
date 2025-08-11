@@ -133,6 +133,9 @@ class EvalLoggerCallback(TrainerCallback):
     def __init__(self, tokenizer: AutoTokenizer, raw_eval_ds):
         self.tokenizer = tokenizer
         self.raw_eval_ds = raw_eval_ds
+        self.table = wandb.Table(
+            columns=["epoch", "step", "input", "schema", "target", "prediction"]
+        )
 
     def on_evaluate(
         self, args, state, control, model=None, tokenizer=None, metrics=None, **kwargs
@@ -162,12 +165,16 @@ class EvalLoggerCallback(TrainerCallback):
             num_beams=1,
         )
         preds = self.tokenizer.batch_decode(out, skip_special_tokens=True)
-        columns = ["input", "schema", "target", "prediction"]
-        data = [
-            [r["input_data"], r["schema"], r["output"], p]
-            for r, p in zip(rows, preds, strict=True)
-        ]
-        wandb.log({"eval_examples": wandb.Table(columns=columns, data=data)})
+        for r, p in zip(rows, preds, strict=True):
+            self.table.add_data(
+                state.epoch,
+                state.global_step,
+                r["input_data"],
+                r["schema"],
+                r["output"],
+                p,
+            )
+        wandb.log({"eval_examples": self.table}, step=state.global_step)
 
 
 def load_any2json_dataset(path_or_repo: str) -> DatasetDict:
