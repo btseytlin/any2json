@@ -404,7 +404,7 @@ class QwenVLLMServer(BaseQwen):
     client: OpenAI = field(init=False)
     batch_size: int = 16
     server_process: subprocess.Popen | None = field(default=None, init=False)
-    server_startup_timeout: float = 120.0
+    server_startup_timeout: float = 180.0
     server_log_path: str | None = None
     server_log_handle: TextIO | None = field(default=None, init=False)
 
@@ -425,7 +425,8 @@ class QwenVLLMServer(BaseQwen):
             r = httpx.get(self.health_url(), timeout=2.0)
             logger.info(f"Health check response: {r.status_code} {r.text}")
             return r.status_code == 200
-        except Exception:
+        except Exception as e:
+            logger.error(f"Health check failed: {e}", exc_info=True)
             return False
 
     def build_server_command(self) -> list[str]:
@@ -605,7 +606,7 @@ class QwenModel:
     backend: str = "torch"  # vllm_offline, vllm_server, torch
     base_url: str = "http://localhost:8000/v1"
     api_key: str = "EMPTY"
-    max_tokens: int = 1000
+    max_tokens: int = 8000
     impl: object = field(init=False)
     batch_size: int = 32
     server_log_path: str | None = None
