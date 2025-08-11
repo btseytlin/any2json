@@ -112,27 +112,21 @@ def log_eval_examples(
         num_beams=1,
     )
     preds = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-    table_rows = []
-    for r, p in zip(rows, preds, strict=True):
-        table_rows.append(
-            {
-                "epoch": trainer.state.epoch,
-                "step": trainer.state.global_step,
-                "input": r["input_data"],
-                "schema": r["schema"],
-                "target": r["output"],
-                "prediction": p,
-            }
-        )
-    columns = ["epoch", "step", "input", "schema", "target", "prediction"]
-    data = [[r[c] for c in columns] for r in table_rows]
-    wandb.log(
-        {
-            "eval_examples": wandb.Table(
-                columns=columns, data=data, log_mode="INCREMENTAL"
-            )
-        }
+
+    table = wandb.Table(
+        columns=["epoch", "step", "input", "schema", "target", "prediction"]
     )
+
+    for r, p in zip(rows, preds, strict=True):
+        table.add_data(
+            trainer.state.epoch,
+            trainer.state.global_step,
+            r["input_data"],
+            r["schema"],
+            r["output"],
+            p,
+        )
+    wandb.log({"eval_examples": table})
 
 
 class EvalLoggerCallback(TrainerCallback):
