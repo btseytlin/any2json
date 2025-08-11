@@ -27,6 +27,33 @@ def format_example(input_data: str, schema: str) -> str:
     return f"[SCHEMA]\n{schema}\n[INPUT]\n{input_data}\n[OUTPUT]\n"
 
 
+def percentile(values: list[int], q: float) -> int:
+    if not values:
+        return 0
+    v = sorted(values)
+    k = int((len(v) - 1) * q)
+    return v[k]
+
+
+def estimate_lengths(dataset_path: str, model_name: str, samples: int) -> None:
+    ds_all = load_any2json_dataset(dataset_path)
+    base = ds_all["train"] if "train" in ds_all else list(ds_all.values())[0]
+    n = min(samples, len(base))
+    rows = [base[i] for i in range(n)]
+    tok = AutoTokenizer.from_pretrained(model_name)
+    src = [
+        len(tok(format_example(r["input_data"], r["schema"]))["input_ids"])
+        for r in rows
+    ]
+    tgt = [len(tok(r["output"])["input_ids"]) for r in rows]
+    click.echo(
+        f"src p90={percentile(src, 0.9)} p95={percentile(src, 0.95)} p99={percentile(src, 0.99)}"
+    )
+    click.echo(
+        f"tgt p90={percentile(tgt, 0.9)} p95={percentile(tgt, 0.95)} p99={percentile(tgt, 0.99)}"
+    )
+
+
 def build_tokenize_fn(
     tokenizer: AutoTokenizer, max_source_length: int, max_target_length: int
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
@@ -72,7 +99,11 @@ def log_eval_examples(
     rows = [ds[i] for i in random.sample(range(len(ds)), min(max_examples, len(ds)))]
     inputs = [format_example(r["input_data"], r["schema"]) for r in rows]
     tokenized = tokenizer(
-        inputs, return_tensors=True, padding=True, truncation=True
+        inputs,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=(getattr(tokenizer, "model_max_length", None) or 4096),
     ).to(trainer.model.device)
     outputs = trainer.model.generate(
         **tokenized,
@@ -115,7 +146,11 @@ class EvalLoggerCallback(TrainerCallback):
         ]
         device = next(model.parameters()).device
         toks = self.tokenizer(
-            prompts, return_tensors=True, padding=True, truncation=True
+            prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=(getattr(self.tokenizer, "model_max_length", None) or 4096),
         )
         toks = {k2: v.to(device) for k2, v in toks.items()}
         out = model.generate(
@@ -168,6 +203,8 @@ class TrainingConfig:
     input_aug: list[str]
     output_aug: list[str]
     debug_limit: int
+    gradient_checkpointing: bool
+    predict_with_generate: bool
 
     def validate(self) -> None:
         if self.fp16 and self.bf16:
@@ -285,11 +322,12 @@ def create_trainer(
         eval_steps=cfg.eval_steps,
         save_steps=cfg.save_steps,
         save_total_limit=2,
-        predict_with_generate=True,
+        predict_with_generate=cfg.predict_with_generate,
         use_cpu=use_cpu,
         bf16=local_bf16,
         fp16=cfg.fp16,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps,
+        gradient_checkpointing=cfg.gradient_checkpointing,
         report_to=["wandb"],
         load_best_model_at_end=True,
         metric_for_best_model="loss",
@@ -328,6 +366,9 @@ def run_training(cfg: TrainingConfig) -> None:
     ds = augment_train_split(ds, cfg)
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
     model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_name)
+    model.config.use_cache = False
+    if cfg.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
     tokenized = tokenize_splits(ds, tokenizer, cfg)
     trainer = create_trainer(tokenized, tokenizer, model, cfg)
     trainer.add_callback(EvalLoggerCallback(tokenizer, ds["validation"]))
@@ -367,6 +408,10 @@ def run_training(cfg: TrainingConfig) -> None:
 @click.option("--input-aug", multiple=True, default=[], type=str)
 @click.option("--output-aug", multiple=True, default=[], type=str)
 @click.option("--debug-limit", default=0, type=int)
+@click.option("--gradient-checkpointing", is_flag=True, default=True)
+@click.option("--predict-with-generate", is_flag=True, default=False)
+@click.option("--estimate-lengths", is_flag=True, default=False)
+@click.option("--estimate-samples", default=2000, type=int)
 def cli(
     dataset_path: str,
     model_name: str,
@@ -395,7 +440,15 @@ def cli(
     input_aug: tuple[str, ...],
     output_aug: tuple[str, ...],
     debug_limit: int,
+    gradient_checkpointing: bool,
+    predict_with_generate: bool,
+    estimate_lengths: bool,
+    estimate_samples: int,
 ):
+    if estimate_lengths:
+        estimate_lengths_fn = estimate_lengths
+        estimate_lengths_fn(dataset_path, model_name, estimate_samples)
+        return
     cfg = TrainingConfig(
         dataset_path=dataset_path,
         model_name=model_name,
@@ -424,6 +477,8 @@ def cli(
         input_aug=list(input_aug),
         output_aug=list(output_aug),
         debug_limit=debug_limit,
+        gradient_checkpointing=gradient_checkpointing,
+        predict_with_generate=predict_with_generate,
     )
     run_training(cfg)
 
