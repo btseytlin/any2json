@@ -39,6 +39,7 @@ dependencies = [
     "dicttoxml>=1.7.16",
     "xmltodict>=0.14.2",
     "torchvision>=0.22.0",
+    "wandb>=0.17.0",
 ]
 
 [tool.setuptools.packages.find]

@@ -426,7 +426,6 @@ class QwenVLLMServer(BaseQwen):
             logger.info(f"Health check response: {r.status_code} {r.text}")
             return r.status_code == 200
         except Exception as e:
-            logger.error(f"Health check failed: {e}", exc_info=True)
             return False
 
     def build_server_command(self) -> list[str]:
@@ -489,7 +488,7 @@ class QwenVLLMServer(BaseQwen):
                     raise RuntimeError(
                         f"vLLM server exited early with status {process_status}"
                     )
-            time.sleep(0.5)
+            time.sleep(1)
         raise TimeoutError("Timed out waiting for vLLM server to start")
 
     def ensure_server_started(self) -> bool:

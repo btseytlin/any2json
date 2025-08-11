@@ -1,168 +1,331 @@
-# Copyright 2020-2025 The HuggingFace Team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+import os
+import random
+from dataclasses import dataclass
+from typing import Any, Callable
 
-"""
-# Full training
-python trl/scripts/sft.py \
-    --model_name_or_path Qwen/Qwen2-0.5B \
-    --dataset_name trl-lib/Capybara \
-    --learning_rate 2.0e-5 \
-    --num_train_epochs 1 \
-    --packing \
-    --per_device_train_batch_size 2 \
-    --gradient_accumulation_steps 8 \
-    --gradient_checkpointing \
-    --eos_token '<|im_end|>' \
-    --logging_steps 25 \
-    --eval_strategy steps \
-    --eval_steps 100 \
-    --output_dir Qwen2-0.5B-SFT \
-    --push_to_hub
-
-# LoRA
-python trl/scripts/sft.py \
-    --model_name_or_path Qwen/Qwen2-0.5B \
-    --dataset_name trl-lib/Capybara \
-    --learning_rate 2.0e-4 \
-    --num_train_epochs 1 \
-    --packing \
-    --per_device_train_batch_size 2 \
-    --gradient_accumulation_steps 8 \
-    --gradient_checkpointing \
-    --eos_token '<|im_end|>' \
-    --logging_steps 25 \
-    --eval_strategy steps \
-    --eval_steps 100 \
-    --use_peft \
-    --lora_r 32 \
-    --lora_alpha 16 \
-    --output_dir Qwen2-0.5B-SFT \
-    --push_to_hub
-"""
-
-import argparse
-
-from datasets import load_dataset, load_from_disk
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
-from transformers.models.auto.modeling_auto import (
-    MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES,
+import click
+import wandb
+from datasets import load_from_disk, load_dataset, DatasetDict
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    DataCollatorForSeq2Seq,
+    Seq2SeqTrainingArguments,
+    Seq2SeqTrainer,
+    TrainerCallback,
 )
-
-from trl import (
-    ModelConfig,
-    ScriptArguments,
-    SFTConfig,
-    SFTTrainer,
-    TrlParser,
-    get_kbit_device_map,
-    get_peft_config,
-    get_quantization_config,
-    setup_chat_format,
-)
+import torch
+from any2json.utils import configure_loggers
+from any2json.grouping import train_test_split_groups
 
 
-def main(script_args, training_args, model_args):
-    ################
-    # Model init kwargs & Tokenizer
-    ################
-    quantization_config = get_quantization_config(model_args)
-    model_kwargs = dict(
-        revision=model_args.model_revision,
-        trust_remote_code=model_args.trust_remote_code,
-        attn_implementation=model_args.attn_implementation,
-        torch_dtype=model_args.torch_dtype,
-        use_cache=False if training_args.gradient_checkpointing else True,
-        device_map=get_kbit_device_map() if quantization_config is not None else None,
-        quantization_config=quantization_config,
+def format_example(input_data: str, schema: str) -> str:
+    return f"[SCHEMA]\n{schema}\n[INPUT]\n{input_data}\n[OUTPUT]\n"
+
+
+def build_tokenize_fn(
+    tokenizer: AutoTokenizer, max_source_length: int, max_target_length: int
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def tokenize(batch: dict[str, Any]) -> dict[str, Any]:
+        inputs = [
+            format_example(i, s)
+            for i, s in zip(batch["input_data"], batch["schema"], strict=True)
+        ]
+        model_inputs = tokenizer(
+            inputs,
+            max_length=max_source_length,
+            truncation=True,
+            padding=False,
+            return_tensors=None,
+        )
+        labels = tokenizer(
+            text_target=batch["output"],
+            max_length=max_target_length,
+            truncation=True,
+            padding=False,
+            return_tensors=None,
+        )
+        model_inputs["labels"] = labels["input_ids"]
+        return model_inputs
+
+    return tokenize
+
+
+def make_group_split(ds_dict: DatasetDict, test_size: int, seed: int) -> DatasetDict:
+    groups = [s["meta"]["group"] for s in ds_dict["train"]]
+    items = list(range(len(groups)))
+    train_idx, test_idx, _, _ = train_test_split_groups(
+        items, groups, test_size=test_size, random_state=seed
     )
+    train_split = ds_dict["train"].select(train_idx)
+    eval_split = ds_dict["train"].select(test_idx)
+    return DatasetDict({"train": train_split, "validation": eval_split})
 
-    # Create model
-    config = AutoConfig.from_pretrained(model_args.model_name_or_path)
-    valid_image_text_architectures = MODEL_FOR_IMAGE_TEXT_TO_TEXT_MAPPING_NAMES.values()
 
-    if config.architectures and any(
-        arch in valid_image_text_architectures for arch in config.architectures
+def log_eval_examples(
+    trainer: Seq2SeqTrainer, tokenizer: AutoTokenizer, ds, max_examples: int = 8
+) -> None:
+    rows = [ds[i] for i in random.sample(range(len(ds)), min(max_examples, len(ds)))]
+    inputs = [format_example(r["input_data"], r["schema"]) for r in rows]
+    tokenized = tokenizer(
+        inputs, return_tensors=True, padding=True, truncation=True
+    ).to(trainer.model.device)
+    outputs = trainer.model.generate(
+        **tokenized,
+        max_new_tokens=tokenizer.model_max_length // 4,
+        do_sample=False,
+        num_beams=1,
+    )
+    preds = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+    table_rows = []
+    for r, p in zip(rows, preds, strict=True):
+        table_rows.append(
+            {
+                "input": r["input_data"],
+                "schema": r["schema"],
+                "target": r["output"],
+                "prediction": p,
+            }
+        )
+    columns = ["input", "schema", "target", "prediction"]
+    data = [[r[c] for c in columns] for r in table_rows]
+    wandb.log({"eval_examples": wandb.Table(columns=columns, data=data)})
+
+
+class EvalLoggerCallback(TrainerCallback):
+    def __init__(self, tokenizer: AutoTokenizer, raw_eval_ds):
+        self.tokenizer = tokenizer
+        self.raw_eval_ds = raw_eval_ds
+
+    def on_evaluate(
+        self, args, state, control, model=None, tokenizer=None, metrics=None, **kwargs
     ):
-        from transformers import AutoModelForImageTextToText
-
-        model_kwargs.pop("use_cache", None)  # Image models do not support cache
-        model = AutoModelForImageTextToText.from_pretrained(
-            model_args.model_name_or_path, **model_kwargs
+        if model is None:
+            return
+        k = min(8, len(self.raw_eval_ds))
+        idx = random.sample(range(len(self.raw_eval_ds)), k)
+        rows = [self.raw_eval_ds[i] for i in idx]
+        prompts = [
+            f"[SCHEMA]\n{r['schema']}\n[INPUT]\n{r['input_data']}\n[OUTPUT]\n"
+            for r in rows
+        ]
+        device = next(model.parameters()).device
+        toks = self.tokenizer(
+            prompts, return_tensors=True, padding=True, truncation=True
         )
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_args.model_name_or_path, **model_kwargs
+        toks = {k2: v.to(device) for k2, v in toks.items()}
+        out = model.generate(
+            **toks,
+            max_new_tokens=self.tokenizer.model_max_length // 4,
+            do_sample=False,
+            num_beams=1,
         )
+        preds = self.tokenizer.batch_decode(out, skip_special_tokens=True)
+        columns = ["input", "schema", "target", "prediction"]
+        data = [
+            [r["input_data"], r["schema"], r["output"], p]
+            for r, p in zip(rows, preds, strict=True)
+        ]
+        wandb.log({"eval_examples": wandb.Table(columns=columns, data=data)})
 
-    # Create tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_args.model_name_or_path,
-        trust_remote_code=model_args.trust_remote_code,
-        use_fast=True,
+
+def load_any2json_dataset(path_or_repo: str) -> DatasetDict:
+    if os.path.isdir(path_or_repo):
+        return load_from_disk(path_or_repo)
+    return load_dataset(path_or_repo)
+
+
+@dataclass
+class TrainingConfig:
+    dataset_path: str
+    model_name: str
+    output_dir: str
+    max_source_length: int
+    max_target_length: int
+    per_device_train_batch_size: int
+    per_device_eval_batch_size: int
+    learning_rate: float
+    num_train_epochs: int
+    warmup_ratio: float
+    weight_decay: float
+    seed: int
+    gradient_accumulation_steps: int
+    logging_steps: int
+    eval_steps: int
+    save_steps: int
+    push_to_hub: bool
+    hub_repo_id: str | None
+    wandb_project: str
+    bf16: bool
+    fp16: bool
+    use_cpu: bool
+
+
+def prepare_splits(ds: DatasetDict, seed: int) -> DatasetDict:
+    base = DatasetDict({"train": ds["train"]}) if "train" in ds else ds
+    size = len(base["train"]) if "train" in base else 0
+    test_size = min(5000, size) if size > 5000 else max(1, size // 20)
+    return make_group_split(base, test_size=test_size, seed=seed)
+
+
+def tokenize_splits(
+    ds: DatasetDict, tokenizer: AutoTokenizer, cfg: TrainingConfig
+) -> DatasetDict:
+    fn = build_tokenize_fn(tokenizer, cfg.max_source_length, cfg.max_target_length)
+    train_tok = ds["train"].map(
+        fn, batched=True, remove_columns=ds["train"].column_names
+    )
+    val_tok = ds["validation"].map(
+        fn, batched=True, remove_columns=ds["validation"].column_names
+    )
+    return DatasetDict({"train": train_tok, "validation": val_tok})
+
+
+def create_trainer(
+    tokenized: DatasetDict,
+    tokenizer: AutoTokenizer,
+    model: AutoModelForSeq2SeqLM,
+    cfg: TrainingConfig,
+) -> Seq2SeqTrainer:
+    collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
+    use_cpu = cfg.use_cpu
+    local_bf16 = bool(cfg.bf16 and torch.cuda.is_bf16_supported())
+    args = Seq2SeqTrainingArguments(
+        output_dir=cfg.output_dir,
+        per_device_train_batch_size=cfg.per_device_train_batch_size,
+        per_device_eval_batch_size=cfg.per_device_eval_batch_size,
+        learning_rate=cfg.learning_rate,
+        num_train_epochs=cfg.num_train_epochs,
+        warmup_ratio=cfg.warmup_ratio,
+        weight_decay=cfg.weight_decay,
+        eval_strategy="steps",
+        logging_steps=cfg.logging_steps,
+        eval_steps=cfg.eval_steps,
+        save_steps=cfg.save_steps,
+        save_total_limit=2,
+        predict_with_generate=True,
+        use_cpu=use_cpu,
+        bf16=local_bf16,
+        fp16=cfg.fp16,
+        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
+        report_to=["wandb"],
+        load_best_model_at_end=True,
+        metric_for_best_model="loss",
+        greater_is_better=False,
+        push_to_hub=cfg.push_to_hub,
+        hub_model_id=cfg.hub_repo_id,
+        seed=cfg.seed,
     )
 
-    # Set default chat template if needed
-    if tokenizer.chat_template is None:
-        model, tokenizer = setup_chat_format(model, tokenizer, format="chatml")
+    def metrics_fn(_):
+        return {}
 
-    ################
-    # Dataset
-    ################
-    # dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
-    dataset = load_from_disk(script_args.dataset_name)
-
-    ################
-    # Training
-    ################
-    trainer = SFTTrainer(
+    trainer = Seq2SeqTrainer(
         model=model,
-        args=training_args,
-        train_dataset=dataset,
-        # eval_dataset=(
-        #     dataset[script_args.dataset_test_split]
-        #     if training_args.eval_strategy != "no"
-        #     else None
-        # ),
-        processing_class=tokenizer,
-        peft_config=get_peft_config(model_args),
+        args=args,
+        train_dataset=tokenized["train"],
+        eval_dataset=tokenized["validation"],
+        tokenizer=tokenizer,
+        data_collator=collator,
+        compute_metrics=metrics_fn,
     )
+    return trainer
 
+
+def run_training(cfg: TrainingConfig) -> None:
+    configure_loggers(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        basic_level=os.getenv("LOG_LEVEL_BASIC", "WARNING"),
+    )
+    os.environ.setdefault("WANDB_PROJECT", cfg.wandb_project)
+    wandb.init(project=cfg.wandb_project, config={"model": cfg.model_name})
+    ds = prepare_splits(load_any2json_dataset(cfg.dataset_path), seed=cfg.seed)
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_name)
+    tokenized = tokenize_splits(ds, tokenizer, cfg)
+    trainer = create_trainer(tokenized, tokenizer, model, cfg)
+    trainer.add_callback(EvalLoggerCallback(tokenizer, ds["validation"]))
     trainer.train()
+    log_eval_examples(trainer, tokenizer, ds["validation"])
+    trainer.save_model(cfg.output_dir)
+    tokenizer.save_pretrained(cfg.output_dir)
+    if cfg.push_to_hub and cfg.hub_repo_id:
+        trainer.push_to_hub()
 
-    # Save and push to hub
-    trainer.save_model(training_args.output_dir)
-    if training_args.push_to_hub:
-        trainer.push_to_hub(dataset_name=script_args.dataset_name)
 
-
-def make_parser(subparsers: argparse._SubParsersAction = None):
-    dataclass_types = (ScriptArguments, SFTConfig, ModelConfig)
-    if subparsers is not None:
-        parser = subparsers.add_parser(
-            "sft", help="Run the SFT training script", dataclass_types=dataclass_types
-        )
-    else:
-        parser = TrlParser(dataclass_types)
-    return parser
+@click.command()
+@click.option("--dataset-path", default="btseytlin/any2json", type=str)
+@click.option("--model-name", default="google/byt5-small", type=str)
+@click.option("--output-dir", default="checkpoints/byt5-any2json", type=str)
+@click.option("--max-source-length", default=4096, type=int)
+@click.option("--max-target-length", default=2048, type=int)
+@click.option("--per-device-train-batch-size", default=2, type=int)
+@click.option("--per-device-eval-batch-size", default=2, type=int)
+@click.option("--learning-rate", default=5e-5, type=float)
+@click.option("--num-train-epochs", default=2, type=int)
+@click.option("--warmup-ratio", default=0.03, type=float)
+@click.option("--weight-decay", default=0.05, type=float)
+@click.option("--seed", default=42, type=int)
+@click.option("--gradient-accumulation-steps", default=8, type=int)
+@click.option("--logging-steps", default=50, type=int)
+@click.option("--eval-steps", default=500, type=int)
+@click.option("--save-steps", default=1000, type=int)
+@click.option("--push-to-hub", is_flag=True, default=False)
+@click.option("--hub-repo-id", default=None, type=str)
+@click.option("--wandb-project", default="any2json", type=str)
+@click.option("--bf16", is_flag=True, default=False)
+@click.option("--fp16", is_flag=True, default=False)
+@click.option("--use-cpu", is_flag=True, default=False)
+def cli(
+    dataset_path: str,
+    model_name: str,
+    output_dir: str,
+    max_source_length: int,
+    max_target_length: int,
+    per_device_train_batch_size: int,
+    per_device_eval_batch_size: int,
+    learning_rate: float,
+    num_train_epochs: int,
+    warmup_ratio: float,
+    weight_decay: float,
+    seed: int,
+    gradient_accumulation_steps: int,
+    logging_steps: int,
+    eval_steps: int,
+    save_steps: int,
+    push_to_hub: bool,
+    hub_repo_id: str | None,
+    wandb_project: str,
+    bf16: bool,
+    fp16: bool,
+    use_cpu: bool,
+):
+    cfg = TrainingConfig(
+        dataset_path=dataset_path,
+        model_name=model_name,
+        output_dir=output_dir,
+        max_source_length=max_source_length,
+        max_target_length=max_target_length,
+        per_device_train_batch_size=per_device_train_batch_size,
+        per_device_eval_batch_size=per_device_eval_batch_size,
+        learning_rate=learning_rate,
+        num_train_epochs=num_train_epochs,
+        warmup_ratio=warmup_ratio,
+        weight_decay=weight_decay,
+        seed=seed,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        logging_steps=logging_steps,
+        eval_steps=eval_steps,
+        save_steps=save_steps,
+        push_to_hub=push_to_hub,
+        hub_repo_id=hub_repo_id,
+        wandb_project=wandb_project,
+        bf16=bf16,
+        fp16=fp16,
+        use_cpu=use_cpu,
+    )
+    run_training(cfg)
 
 
 if __name__ == "__main__":
-    parser = make_parser()
-    # When using the trl cli, this script may be run with additional arguments, corresponding accelerate arguments.
-    # To ensure that their parsing does not interfere with the script arguments, parse the arguments with
-    # `return_remaining_strings=True`, then ignore the remaining strings.
-    script_args, training_args, model_args, _ = parser.parse_args_and_config(
-        return_remaining_strings=True
-    )
-    main(script_args, training_args, model_args)
+    cli()
