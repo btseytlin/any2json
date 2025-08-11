@@ -116,15 +116,23 @@ def log_eval_examples(
     for r, p in zip(rows, preds, strict=True):
         table_rows.append(
             {
+                "epoch": trainer.state.epoch,
+                "step": trainer.state.global_step,
                 "input": r["input_data"],
                 "schema": r["schema"],
                 "target": r["output"],
                 "prediction": p,
             }
         )
-    columns = ["input", "schema", "target", "prediction"]
+    columns = ["epoch", "step", "input", "schema", "target", "prediction"]
     data = [[r[c] for c in columns] for r in table_rows]
-    wandb.log({"eval_examples": wandb.Table(columns=columns, data=data)})
+    wandb.log(
+        {
+            "eval_examples": wandb.Table(
+                columns=columns, data=data, log_mode="INCREMENTAL"
+            )
+        }
+    )
 
 
 class EvalLoggerCallback(TrainerCallback):
