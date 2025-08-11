@@ -35,7 +35,7 @@ def percentile(values: list[int], q: float) -> int:
     return v[k]
 
 
-def estimate_lengths(dataset_path: str, model_name: str, samples: int) -> None:
+def estimate_token_lengths(dataset_path: str, model_name: str, samples: int) -> None:
     ds_all = load_any2json_dataset(dataset_path)
     base = ds_all["train"] if "train" in ds_all else list(ds_all.values())[0]
     n = min(samples, len(base))
@@ -380,7 +380,20 @@ def run_training(cfg: TrainingConfig) -> None:
         trainer.push_to_hub()
 
 
-@click.command()
+@click.group()
+def cli():
+    pass
+
+
+@cli.command(name="estimate-lengths")
+@click.option("--dataset-path", default="btseytlin/any2json", type=str)
+@click.option("--model-name", default="google/byt5-small", type=str)
+@click.option("--estimate-samples", default=2000, type=int)
+def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: int):
+    estimate_token_lengths(dataset_path, model_name, estimate_samples)
+
+
+@cli.command(name="train")
 @click.option("--dataset-path", default="btseytlin/any2json", type=str)
 @click.option("--model-name", default="google/byt5-small", type=str)
 @click.option("--output-dir", default="checkpoints/byt5-any2json", type=str)
@@ -410,9 +423,7 @@ def run_training(cfg: TrainingConfig) -> None:
 @click.option("--debug-limit", default=0, type=int)
 @click.option("--gradient-checkpointing", is_flag=True, default=True)
 @click.option("--predict-with-generate", is_flag=True, default=False)
-@click.option("--estimate-lengths", is_flag=True, default=False)
-@click.option("--estimate-samples", default=2000, type=int)
-def cli(
+def train_cmd(
     dataset_path: str,
     model_name: str,
     output_dir: str,
@@ -442,13 +453,7 @@ def cli(
     debug_limit: int,
     gradient_checkpointing: bool,
     predict_with_generate: bool,
-    estimate_lengths: bool,
-    estimate_samples: int,
 ):
-    if estimate_lengths:
-        estimate_lengths_fn = estimate_lengths
-        estimate_lengths_fn(dataset_path, model_name, estimate_samples)
-        return
     cfg = TrainingConfig(
         dataset_path=dataset_path,
         model_name=model_name,
