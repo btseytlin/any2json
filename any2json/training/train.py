@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 import click
+from dotenv import load_dotenv
 import wandb
 from datasets import load_from_disk, load_dataset, DatasetDict
 from transformers import (
@@ -16,136 +17,13 @@ from transformers import (
 )
 import torch
 from any2json.utils import configure_loggers
-from any2json.grouping import train_test_split_groups
-from any2json.training.augment import (
-    build_augmentor,
-    apply_augmentations,
+from any2json.training.augment import build_augmentor, apply_augmentations
+from any2json.training.utils import (
+    format_example,
+    load_hf_dataset,
+    apply_debug_limit,
+    make_group_split,
 )
-
-
-def format_example(input_data: str, schema: str) -> str:
-    return f"[SCHEMA]\n{schema}\n[INPUT]\n{input_data}\n[OUTPUT]\n"
-
-
-def percentile(values: list[int], q: float) -> int:
-    if not values:
-        return 0
-    v = sorted(values)
-    k = int((len(v) - 1) * q)
-    return v[k]
-
-
-def estimate_token_lengths(dataset_path: str, model_name: str, samples: int) -> None:
-    ds_all = load_any2json_dataset(dataset_path)
-    base = ds_all["train"] if "train" in ds_all else list(ds_all.values())[0]
-    n = min(samples, len(base))
-    rows = [base[i] for i in range(n)]
-    tok = AutoTokenizer.from_pretrained(model_name)
-    src = [
-        len(tok(format_example(r["input_data"], r["schema"]))["input_ids"])
-        for r in rows
-    ]
-    tgt = [len(tok(r["output"])["input_ids"]) for r in rows]
-    click.echo(
-        f"src p90={percentile(src, 0.9)} p95={percentile(src, 0.95)} p99={percentile(src, 0.99)}"
-    )
-    click.echo(
-        f"tgt p90={percentile(tgt, 0.9)} p95={percentile(tgt, 0.95)} p99={percentile(tgt, 0.99)}"
-    )
-
-
-def build_tokenize_fn(
-    tokenizer: AutoTokenizer, max_source_length: int, max_target_length: int
-) -> Callable[[dict[str, Any]], dict[str, Any]]:
-    def tokenize(batch: dict[str, Any]) -> dict[str, Any]:
-        inputs = [
-            format_example(i, s)
-            for i, s in zip(batch["input_data"], batch["schema"], strict=True)
-        ]
-        model_inputs = tokenizer(
-            inputs,
-            max_length=max_source_length,
-            truncation=False,
-            padding=False,
-            return_tensors=None,
-        )
-        labels = tokenizer(
-            text_target=batch["output"],
-            max_length=max_target_length,
-            truncation=False,
-            padding=False,
-            return_tensors=None,
-        )
-        model_inputs["labels"] = labels["input_ids"]
-        return model_inputs
-
-    return tokenize
-
-
-def make_group_split(ds_dict: DatasetDict, test_size: int, seed: int) -> DatasetDict:
-    groups = [s["meta"]["group"] for s in ds_dict["train"]]
-    items = list(range(len(groups)))
-    train_idx, test_idx, _, _ = train_test_split_groups(
-        items, groups, test_size=test_size, random_state=seed
-    )
-    train_split = ds_dict["train"].select(train_idx)
-    eval_split = ds_dict["train"].select(test_idx)
-    return DatasetDict({"train": train_split, "validation": eval_split})
-
-
-class EvalLoggerCallback(TrainerCallback):
-    def __init__(self, tokenizer: AutoTokenizer, raw_eval_ds):
-        self.tokenizer = tokenizer
-        self.raw_eval_ds = raw_eval_ds
-        self.table = wandb.Table(
-            columns=["epoch", "step", "input", "schema", "target", "prediction"],
-            log_mode="INCREMENTAL",
-        )
-
-    def on_evaluate(
-        self, args, state, control, model=None, tokenizer=None, metrics=None, **kwargs
-    ):
-        if model is None:
-            return
-        k = min(8, len(self.raw_eval_ds))
-        idx = random.sample(range(len(self.raw_eval_ds)), k)
-        rows = [self.raw_eval_ds[i] for i in idx]
-        prompts = [
-            f"[SCHEMA]\n{r['schema']}\n[INPUT]\n{r['input_data']}\n[OUTPUT]\n"
-            for r in rows
-        ]
-        device = next(model.parameters()).device
-        toks = self.tokenizer(
-            prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=(getattr(self.tokenizer, "model_max_length", None) or 4096),
-        )
-        toks = {k2: v.to(device) for k2, v in toks.items()}
-        out = model.generate(
-            **toks,
-            max_new_tokens=self.tokenizer.model_max_length // 4,
-            do_sample=False,
-            num_beams=1,
-        )
-        preds = self.tokenizer.batch_decode(out, skip_special_tokens=True)
-        for r, p in zip(rows, preds, strict=True):
-            self.table.add_data(
-                state.epoch,
-                state.global_step,
-                r["input_data"],
-                r["schema"],
-                r["output"],
-                p,
-            )
-        wandb.log({"eval_examples": self.table}, step=state.global_step)
-
-
-def load_any2json_dataset(path_or_repo: str) -> DatasetDict:
-    if os.path.isdir(path_or_repo):
-        return load_from_disk(path_or_repo)
-    return load_dataset(path_or_repo)
 
 
 @dataclass
@@ -218,18 +96,107 @@ class TrainingConfig:
             raise ValueError("hub_repo_id must be set when push_to_hub is True")
 
 
-def prepare_splits(ds: DatasetDict, seed: int) -> DatasetDict:
+def estimate_token_lengths(dataset_path: str, model_name: str, samples: int) -> None:
+    ds_all = load_any2json_dataset(dataset_path)
+    base = ds_all["train"] if "train" in ds_all else list(ds_all.values())[0]
+    n = min(samples, len(base))
+    rows = [base[i] for i in range(n)]
+    tok = AutoTokenizer.from_pretrained(model_name)
+    src = [
+        len(tok(format_example(r["input_data"], r["schema"]))["input_ids"])
+        for r in rows
+    ]
+    tgt = [len(tok(r["output"])["input_ids"]) for r in rows]
+    click.echo(
+        f"src p90={percentile(src, 0.9)} p95={percentile(src, 0.95)} p99={percentile(src, 0.99)}"
+    )
+    click.echo(
+        f"tgt p90={percentile(tgt, 0.9)} p95={percentile(tgt, 0.95)} p99={percentile(tgt, 0.99)}"
+    )
+
+
+def build_tokenize_fn(
+    tokenizer: AutoTokenizer, max_source_length: int, max_target_length: int
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def tokenize(batch: dict[str, Any]) -> dict[str, Any]:
+        inputs = [
+            format_example(i, s)
+            for i, s in zip(batch["input_data"], batch["schema"], strict=True)
+        ]
+        model_inputs = tokenizer(
+            inputs,
+            max_length=max_source_length,
+            truncation=False,
+            padding=False,
+            return_tensors=None,
+        )
+        labels = tokenizer(
+            text_target=batch["output"],
+            max_length=max_target_length,
+            truncation=False,
+            padding=False,
+            return_tensors=None,
+        )
+        model_inputs["labels"] = labels["input_ids"]
+        return model_inputs
+
+    return tokenize
+
+
+class EvalLoggerCallback(TrainerCallback):
+    def __init__(self, tokenizer: AutoTokenizer, raw_eval_ds):
+        self.tokenizer = tokenizer
+        self.raw_eval_ds = raw_eval_ds
+        self.table = wandb.Table(
+            columns=["epoch", "step", "input", "schema", "target", "prediction"],
+            log_mode="INCREMENTAL",
+        )
+
+    def on_evaluate(
+        self, args, state, control, model=None, tokenizer=None, metrics=None, **kwargs
+    ):
+        if model is None:
+            return
+        k = min(8, len(self.raw_eval_ds))
+        idx = random.sample(range(len(self.raw_eval_ds)), k)
+        rows = [self.raw_eval_ds[i] for i in idx]
+        prompts = [
+            f"[SCHEMA]\n{r['schema']}\n[INPUT]\n{r['input_data']}\n[OUTPUT]\n"
+            for r in rows
+        ]
+        device = next(model.parameters()).device
+        toks = self.tokenizer(
+            prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=(getattr(self.tokenizer, "model_max_length", None) or 4096),
+        )
+        toks = {k2: v.to(device) for k2, v in toks.items()}
+        out = model.generate(
+            **toks,
+            max_new_tokens=self.tokenizer.model_max_length // 4,
+            do_sample=False,
+            num_beams=1,
+        )
+        preds = self.tokenizer.batch_decode(out, skip_special_tokens=True)
+        for r, p in zip(rows, preds, strict=True):
+            self.table.add_data(
+                state.epoch,
+                state.global_step,
+                r["input_data"],
+                r["schema"],
+                r["output"],
+                p,
+            )
+        wandb.log({"eval_examples": self.table}, step=state.global_step)
+
+
+def prepare_splits(ds: DatasetDict, seed: int, size: int = 5000) -> DatasetDict:
     base = DatasetDict({"train": ds["train"]}) if "train" in ds else ds
     size = len(base["train"]) if "train" in base else 0
-    test_size = min(5000, size) if size > 5000 else max(1, size // 20)
+    test_size = min(size, size) if size > 5000 else max(1, size // 20)
     return make_group_split(base, test_size=test_size, seed=seed)
-
-
-def apply_debug_limit(ds: DatasetDict, limit: int) -> DatasetDict:
-    if limit <= 0 or "train" not in ds:
-        return ds
-    n = min(limit, len(ds["train"]))
-    return DatasetDict({"train": ds["train"].select(range(n))})
 
 
 def augment_train_split(ds: DatasetDict, cfg: TrainingConfig) -> DatasetDict:
@@ -362,13 +329,9 @@ def create_trainer(
 
 def run_training(cfg: TrainingConfig) -> None:
     cfg.validate()
-    configure_loggers(
-        level=os.getenv("LOG_LEVEL", "INFO"),
-        basic_level=os.getenv("LOG_LEVEL_BASIC", "WARNING"),
-    )
     os.environ.setdefault("WANDB_PROJECT", cfg.wandb_project)
     wandb.init(project=cfg.wandb_project, config={"model": cfg.model_name})
-    raw = load_any2json_dataset(cfg.dataset_path)
+    raw = load_hf_dataset(cfg.dataset_path)
     raw = apply_debug_limit(raw, cfg.debug_limit)
     ds = prepare_splits(raw, seed=cfg.seed)
     ds = augment_train_split(ds, cfg)
@@ -390,7 +353,11 @@ def run_training(cfg: TrainingConfig) -> None:
 
 @click.group()
 def cli():
-    pass
+    load_dotenv()
+    configure_loggers(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        basic_level=os.getenv("LOG_LEVEL_BASIC", "WARNING"),
+    )
 
 
 @cli.command(name="estimate-lengths")
