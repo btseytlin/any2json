@@ -26,6 +26,10 @@ from any2json.training.utils import (
     percentile,
 )
 
+DEFAULT_MODEL = "HuggingFaceTB/SmolLM-135M"
+DEFAULT_MAX_SOURCE_LENGTH = 1024
+DEFAULT_MAX_TARGET_LENGTH = 1024
+
 
 @dataclass
 class TrainingConfig:
@@ -419,7 +423,7 @@ def cli():
 
 @cli.command(name="estimate-lengths")
 @click.option("--dataset-path", default="btseytlin/any2json", type=str)
-@click.option("--model-name", default="google/flan-t5-small", type=str)
+@click.option("--model-name", default=DEFAULT_MODEL, type=str)
 @click.option("--estimate-samples", default=2000, type=int)
 def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: int):
     estimate_token_lengths(dataset_path, model_name, estimate_samples)
@@ -427,10 +431,10 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 
 @cli.command(name="train")
 @click.option("--dataset-path", default="btseytlin/any2json", type=str)
-@click.option("--model-name", default="google/flan-t5-small", type=str)
+@click.option("--model-name", default=DEFAULT_MODEL, type=str)
 @click.option("--output-dir", default="checkpoints", type=str)
-@click.option("--max-source-length", default=2048, type=int)
-@click.option("--max-target-length", default=2048, type=int)
+@click.option("--max-source-length", default=DEFAULT_MAX_SOURCE_LENGTH, type=int)
+@click.option("--max-target-length", default=DEFAULT_MAX_TARGET_LENGTH, type=int)
 @click.option("--per-device-train-batch-size", default=1, type=int)
 @click.option("--per-device-eval-batch-size", default=1, type=int)
 @click.option("--learning-rate", default=5e-5, type=float)
