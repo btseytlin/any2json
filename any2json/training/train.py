@@ -278,6 +278,27 @@ def filter_splits_by_length(
     return DatasetDict({"train": train_f, "validation": val_f})
 
 
+def build_tokenized_length_filter_fn(
+    max_source_length: int, max_target_length: int
+) -> Callable[[dict[str, Any]], list[bool]]:
+    def pred(batch: dict[str, Any]) -> list[bool]:
+        return [
+            (len(src) <= max_source_length) and (len(lbl) <= max_target_length)
+            for src, lbl in zip(batch["input_ids"], batch["labels"], strict=True)
+        ]
+
+    return pred
+
+
+def filter_tokenized_splits_by_length(
+    ds: DatasetDict, max_source_length: int, max_target_length: int
+) -> DatasetDict:
+    pred = build_tokenized_length_filter_fn(max_source_length, max_target_length)
+    train_f = ds["train"].filter(pred, batched=True)
+    val_f = ds["validation"].filter(pred, batched=True)
+    return DatasetDict({"train": train_f, "validation": val_f})
+
+
 def create_trainer(
     tokenized: DatasetDict,
     tokenizer: AutoTokenizer,
@@ -352,24 +373,23 @@ def run_training(cfg: TrainingConfig) -> None:
     logger.info(f"Loading tokenizer and model")
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
 
+    logger.info(f"Tokenizing splits")
+    tokenized = tokenize_splits(ds, tokenizer, cfg)
+
     logger.info(
-        f"Filtering by length, max_source_length: {cfg.max_source_length}, max_target_length: {cfg.max_target_length}"
+        f"Filtering tokenized data by length, max_source_length: {cfg.max_source_length}, max_target_length: {cfg.max_target_length}"
     )
-    ds = filter_splits_by_length(
-        ds,
-        tokenizer,
+    tokenized = filter_tokenized_splits_by_length(
+        tokenized,
         max_source_length=cfg.max_source_length,
         max_target_length=cfg.max_target_length,
     )
-    logger.info(f"Filtered by length: {ds}")
+    logger.info(f"Filtered tokenized datasets: {tokenized}")
 
     model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_name)
     model.config.use_cache = False
     if cfg.gradient_checkpointing:
         model.gradient_checkpointing_enable()
-
-    logger.info(f"Tokenizing splits")
-    tokenized = tokenize_splits(ds, tokenizer, cfg)
 
     logger.info(f"Creating trainer")
     trainer = create_trainer(tokenized, tokenizer, model, cfg)
@@ -410,7 +430,7 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--model-name", default="google/flan-t5-small", type=str)
 @click.option("--output-dir", default="checkpoints", type=str)
 @click.option("--max-source-length", default=2048, type=int)
-@click.option("--max-target-length", default=1024, type=int)
+@click.option("--max-target-length", default=2048, type=int)
 @click.option("--per-device-train-batch-size", default=1, type=int)
 @click.option("--per-device-eval-batch-size", default=1, type=int)
 @click.option("--learning-rate", default=5e-5, type=float)
