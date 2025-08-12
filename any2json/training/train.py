@@ -55,7 +55,7 @@ class TrainingConfig:
     schema_missing_token: str
     input_aug: list[str]
     output_aug: list[str]
-    debug_limit: int
+    debug_limit: int | None
     gradient_checkpointing: bool
     predict_with_generate: bool
     val_size: int
@@ -75,7 +75,7 @@ class TrainingConfig:
             raise ValueError("drop_schema_proba must be in [0, 1]")
         if not 0 <= self.warmup_ratio <= 1:
             raise ValueError("warmup_ratio must be in [0, 1]")
-        if self.debug_limit < 0:
+        if self.debug_limit is not None and self.debug_limit < 0:
             raise ValueError("debug_limit must be >= 0")
         for name in [
             "max_source_length",
@@ -398,7 +398,7 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--schema-missing-token", default="[MISSING]", type=str)
 @click.option("--input-aug", multiple=True, default=[], type=str)
 @click.option("--output-aug", multiple=True, default=[], type=str)
-@click.option("--debug-limit", default=0, type=int)
+@click.option("--debug-limit", default=None, type=int)
 @click.option("--gradient-checkpointing", is_flag=True, default=True)
 @click.option("--predict-with-generate", is_flag=True, default=False)
 @click.option("--val-size", default=5000, type=int)
