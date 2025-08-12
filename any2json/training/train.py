@@ -342,6 +342,7 @@ def run_training(cfg: TrainingConfig) -> None:
         logger.info(
             f"Applied debug limit: {cfg.debug_limit}, now {len(raw['train'])} train samples"
         )
+    logger.info(f"Preparing splits with val size: {cfg.val_size}")
     ds = prepare_splits(raw, seed=cfg.seed, size=cfg.val_size)
     logger.info(f"Prepared splits with val size: {cfg.val_size}: {ds}")
     ds = augment_train_split(ds, cfg)
