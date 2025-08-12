@@ -336,7 +336,7 @@ def run_training(cfg: TrainingConfig) -> None:
     wandb.init(project=cfg.wandb_project, config={"model": cfg.model_name})
     raw = load_hf_dataset(cfg.dataset_path)
     raw = apply_debug_limit(raw, cfg.debug_limit)
-    ds = prepare_splits(raw, seed=cfg.seed)
+    ds = prepare_splits(raw, seed=cfg.seed, size=cfg.val_size)
     ds = augment_train_split(ds, cfg)
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
     ds = filter_splits_by_length(ds, tokenizer, cfg)
