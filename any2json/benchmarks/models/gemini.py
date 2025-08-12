@@ -139,7 +139,6 @@ class GeminiModel:
             system_prompt=system_prompt(),
             deps_type=GeminiAgentDeps,
             output_type=GeminiAgentOut,
-            retries=2,
         )
 
         @self.agent.system_prompt
@@ -183,21 +182,21 @@ class GeminiModel:
         async def run_one(i: int, s: dict) -> tuple[str, int, str, dict | None]:
             async with sem:
                 try:
-                    # async for attempt in AsyncRetrying(
-                    #     retry=retry_if_exception_type(Exception),
-                    #     wait=wait_exponential(
-                    #         multiplier=self.backoff_multiplier,
-                    #         min=self.backoff_min_s,
-                    #         max=self.backoff_max_s,
-                    #     ),
-                    #     stop=stop_after_attempt(self.request_max_retries),
-                    #     before_sleep=before_sleep_log(logger, logging.ERROR),
-                    # ):
-                    #     with attempt:
-                    x = to_text(s["input_data"])
-                    schema = json.loads(s["schema"])
-                    ans, meta = await self.generate_async(x, schema)
-                    return "ok", i, ans, meta
+                    async for attempt in AsyncRetrying(
+                        retry=retry_if_exception_type(Exception),
+                        wait=wait_exponential(
+                            multiplier=self.backoff_multiplier,
+                            min=self.backoff_min_s,
+                            max=self.backoff_max_s,
+                        ),
+                        stop=stop_after_attempt(self.request_max_retries),
+                        before_sleep=before_sleep_log(logger, logging.ERROR),
+                    ):
+                        with attempt:
+                            x = to_text(s["input_data"])
+                            schema = json.loads(s["schema"])
+                            ans, meta = await self.generate_async(x, schema)
+                            return "ok", i, ans, meta
                 except Exception as e:
                     exc_type, exc_value, exc_tb = sys.exc_info()
                     tb = "".join(
