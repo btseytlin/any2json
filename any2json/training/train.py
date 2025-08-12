@@ -8,11 +8,10 @@ from dotenv import load_dotenv
 import wandb
 from datasets import DatasetDict
 from transformers import (
+    AutoModelForCausalLM,
     AutoTokenizer,
-    AutoModelForSeq2SeqLM,
-    DataCollatorForSeq2Seq,
-    Seq2SeqTrainingArguments,
-    Seq2SeqTrainer,
+    TrainingArguments,
+    Trainer,
     TrainerCallback,
 )
 import torch
@@ -26,7 +25,7 @@ from any2json.training.utils import (
     percentile,
 )
 
-DEFAULT_MODEL = "HuggingFaceTB/SmolLM-135M"
+DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M"
 DEFAULT_MAX_SOURCE_LENGTH = 1024
 DEFAULT_MAX_TARGET_LENGTH = 1024
 
@@ -124,27 +123,25 @@ def estimate_token_lengths(dataset_path: str, model_name: str, samples: int) -> 
 def build_tokenize_fn(
     tokenizer: AutoTokenizer, max_source_length: int, max_target_length: int
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    eos = tokenizer.eos_token_id
+
     def tokenize(batch: dict[str, Any]) -> dict[str, Any]:
-        inputs = [
+        prompts = [
             format_example(i, s)
             for i, s in zip(batch["input_data"], batch["schema"], strict=True)
         ]
-        model_inputs = tokenizer(
-            inputs,
-            max_length=max_source_length,
-            truncation=False,
-            padding=False,
-            return_tensors=None,
-        )
-        labels = tokenizer(
-            text_target=batch["output"],
-            max_length=max_target_length,
-            truncation=False,
-            padding=False,
-            return_tensors=None,
-        )
-        model_inputs["labels"] = labels["input_ids"]
-        return model_inputs
+        enc_in = tokenizer(prompts, add_special_tokens=False)
+        enc_out = tokenizer(batch["output"], add_special_tokens=False)
+        input_ids: list[list[int]] = []
+        labels: list[list[int]] = []
+        for a, b in zip(enc_in["input_ids"], enc_out["input_ids"], strict=True):
+            a = a[:max_source_length]
+            b = b[:max_target_length]
+            ids = a + b + ([eos] if eos is not None else [])
+            lbs = ([-100] * len(a)) + b + ([-100] if eos is not None else [])
+            input_ids.append(ids)
+            labels.append(lbs)
+        return {"input_ids": input_ids, "labels": labels}
 
     return tokenize
 
@@ -185,7 +182,18 @@ class EvalLoggerCallback(TrainerCallback):
             do_sample=False,
             num_beams=1,
         )
-        preds = self.tokenizer.batch_decode(out, skip_special_tokens=True)
+        input_lens = toks.get("attention_mask")
+        if input_lens is not None:
+            input_lens = input_lens.sum(dim=1).tolist()
+        else:
+            input_lens = [toks["input_ids"].shape[1]] * toks["input_ids"].shape[0]
+        seqs = out
+        preds = []
+        for i in range(seqs.shape[0]):
+            start = int(input_lens[i])
+            preds.append(
+                self.tokenizer.decode(seqs[i][start:], skip_special_tokens=True)
+            )
         for r, p in zip(rows, preds, strict=True):
             self.table.add_data(
                 state.epoch,
@@ -257,10 +265,7 @@ def build_length_filter_fn(
         ]
         src = tokenizer(inputs, padding=False, truncation=False, return_tensors=None)
         tgt = tokenizer(
-            text_target=batch["output"],
-            padding=False,
-            truncation=False,
-            return_tensors=None,
+            batch["output"], padding=False, truncation=False, return_tensors=None
         )
         return [
             (len(a) <= max_source_length) and (len(b) <= max_target_length)
@@ -303,16 +308,41 @@ def filter_tokenized_splits_by_length(
     return DatasetDict({"train": train_f, "validation": val_f})
 
 
+class CausalLMDataCollator:
+    def __init__(self, tokenizer: AutoTokenizer, pad_to_multiple_of: int | None = None):
+        self.tokenizer = tokenizer
+        self.pad_to_multiple_of = pad_to_multiple_of
+
+    def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
+        max_len = max(len(f["input_ids"]) for f in features)
+        if self.pad_to_multiple_of:
+            m = self.pad_to_multiple_of
+            max_len = ((max_len + m - 1) // m) * m
+        pad_id = self.tokenizer.pad_token_id or self.tokenizer.eos_token_id or 0
+        input_ids, labels, attn = [], [], []
+        for f in features:
+            ids, lbs = f["input_ids"], f["labels"]
+            pad = max_len - len(ids)
+            input_ids.append(ids + [pad_id] * pad)
+            labels.append(lbs + [-100] * pad)
+            attn.append([1] * len(ids) + [0] * pad)
+        return {
+            "input_ids": torch.tensor(input_ids, dtype=torch.long),
+            "labels": torch.tensor(labels, dtype=torch.long),
+            "attention_mask": torch.tensor(attn, dtype=torch.long),
+        }
+
+
 def create_trainer(
     tokenized: DatasetDict,
     tokenizer: AutoTokenizer,
-    model: AutoModelForSeq2SeqLM,
+    model: AutoModelForCausalLM,
     cfg: TrainingConfig,
-) -> Seq2SeqTrainer:
-    collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
+):
+    collator = CausalLMDataCollator(tokenizer=tokenizer)
     use_cpu = cfg.use_cpu
     local_bf16 = bool(cfg.bf16 and torch.cuda.is_bf16_supported())
-    args = Seq2SeqTrainingArguments(
+    args = TrainingArguments(
         output_dir=cfg.output_dir,
         per_device_train_batch_size=cfg.per_device_train_batch_size,
         per_device_eval_batch_size=cfg.per_device_eval_batch_size,
@@ -325,7 +355,6 @@ def create_trainer(
         eval_steps=cfg.eval_steps,
         save_steps=cfg.save_steps,
         save_total_limit=2,
-        predict_with_generate=cfg.predict_with_generate,
         use_cpu=use_cpu,
         bf16=local_bf16,
         fp16=cfg.fp16,
@@ -343,7 +372,7 @@ def create_trainer(
     def metrics_fn(_):
         return {}
 
-    trainer = Seq2SeqTrainer(
+    trainer = Trainer(
         model=model,
         args=args,
         train_dataset=tokenized["train"],
@@ -376,6 +405,8 @@ def run_training(cfg: TrainingConfig) -> None:
 
     logger.info(f"Loading tokenizer and model")
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
 
     logger.info(f"Tokenizing splits")
     tokenized = tokenize_splits(ds, tokenizer, cfg)
@@ -390,7 +421,7 @@ def run_training(cfg: TrainingConfig) -> None:
     )
     logger.info(f"Filtered tokenized datasets: {tokenized}")
 
-    model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_name)
+    model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
     model.config.use_cache = False
     if cfg.gradient_checkpointing:
         model.gradient_checkpointing_enable()
