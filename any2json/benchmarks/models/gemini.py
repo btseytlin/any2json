@@ -6,6 +6,7 @@ import sys
 import traceback
 from dataclasses import dataclass, field
 from typing import Any
+import time
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.fallback import FallbackModel
@@ -113,7 +114,7 @@ class GeminiModel:
     backoff_min_s: float = 1.0
     backoff_max_s: float = 30.0
     backoff_multiplier: float = 2.0
-    request_timeout_s: float = 20
+    request_timeout_s: float = 10
     agent: Agent = field(init=False)
 
     def __post_init__(self) -> None:
@@ -121,14 +122,16 @@ class GeminiModel:
             self.model_name,
             settings=(
                 GoogleModelSettings(
-                    google_thinking_config={
-                        "thinking_budget": self.thinking_budget,
-                        "include_thoughts": self.include_thoughts,
-                    },
+                    google_thinking_config=(
+                        {
+                            "thinking_budget": self.thinking_budget,
+                            "include_thoughts": self.include_thoughts,
+                        }
+                        if self.enable_thinking
+                        else None
+                    ),
                     timeout=self.request_timeout_s,
                 )
-                if self.enable_thinking
-                else None
             ),
         )
         self.agent = Agent(
@@ -158,12 +161,14 @@ class GeminiModel:
         }
 
     async def generate_async(self, input_text: str, schema: dict) -> tuple[str, dict]:
+        t0 = time.perf_counter()
         res = await self.agent.run(
             deps=GeminiAgentDeps(input_text=input_text, schema=schema)
         )
+        t1 = time.perf_counter()
         content = clean_answer_text(res.output.answer)
         model_used = res.all_messages()[-2].model_name
-        return content, {"model_name": model_used}
+        return content, {"model_name": model_used, "inference_ms": (t1 - t0) * 1000.0}
 
     def convert_to_json(self, input_text: str, schema: dict) -> tuple[str, dict]:
         return asyncio.run(self.generate_async(input_text, schema))

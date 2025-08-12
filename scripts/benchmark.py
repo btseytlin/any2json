@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 import json
 import os
 import logging
@@ -115,9 +115,9 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         }
 
     return results, {
-        "percentage_json_errors": len(error) / len(results),
-        "percentage_correct": len(correct) / len(results),
-        "percentage_schema_errors": len(schema_error) / len(results),
+        "percentage_json_errors": round(len(error) / len(results), 3),
+        "percentage_correct": round(len(correct) / len(results), 3),
+        "percentage_schema_errors": round(len(schema_error) / len(results), 3),
     }
 
 

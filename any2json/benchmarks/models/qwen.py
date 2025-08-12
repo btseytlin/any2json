@@ -398,12 +398,15 @@ class QwenVLLMBatch(BaseQwen):
             **get_sampling_params(self.enable_thinking, self.max_tokens)
         )
 
-        def run_batch_fn(batch: list[dict]) -> tuple[list[object], None]:
+        def run_batch_fn(batch: list[dict]) -> tuple[list[object], dict]:
             texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)
+            t0 = time.perf_counter()
             outs = self.vllm_llm.generate(texts, params)
-            return outs, None
+            t1 = time.perf_counter()
+            per_item_ms = ((t1 - t0) * 1000.0) / max(1, len(batch))
+            return outs, {"inference_ms_list": [per_item_ms] * len(batch)}
 
-        def decode_batch_fn(outs: list[object], _: None) -> list[str]:
+        def decode_batch_fn(outs: list[object], _: dict) -> list[str]:
             return [o.outputs[0].text for o in outs]
 
         return self.run_batched_inference(
@@ -558,19 +561,21 @@ class QwenVLLMServer(BaseQwen):
             "top_k": params["top_k"],
             "min_p": params["min_p"],
         }
+        t0 = time.perf_counter()
         resp = self.client.chat.completions.create(
             model=self.resolved_model_name,
             messages=messages(prompt),
             **main_params,
             extra_body=extra_params,
         )
+        t1 = time.perf_counter()
         m = resp.choices[0].message
         content = m.content or ""
         reasoning = getattr(m, "reasoning_content", "") or ""
         if not reasoning:
             content, reasoning = parse_think(content)
         content = normalize_output_text(content)
-        meta = {"thinking_content": reasoning}
+        meta = {"thinking_content": reasoning, "inference_ms": (t1 - t0) * 1000.0}
         return content, meta
 
     def get_predictions(
