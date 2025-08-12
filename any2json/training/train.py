@@ -16,7 +16,7 @@ from transformers import (
     TrainerCallback,
 )
 import torch
-from any2json.utils import configure_loggers
+from any2json.utils import configure_loggers, logger
 from any2json.training.augment import build_augmentor, apply_augmentations
 from any2json.training.utils import (
     format_example,
@@ -58,6 +58,7 @@ class TrainingConfig:
     debug_limit: int
     gradient_checkpointing: bool
     predict_with_generate: bool
+    val_size: int
 
     def validate(self) -> None:
         if self.fp16 and self.bf16:
@@ -400,6 +401,7 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--debug-limit", default=0, type=int)
 @click.option("--gradient-checkpointing", is_flag=True, default=True)
 @click.option("--predict-with-generate", is_flag=True, default=False)
+@click.option("--val-size", default=5000, type=int)
 def train_cmd(
     dataset_path: str,
     model_name: str,
@@ -430,6 +432,7 @@ def train_cmd(
     debug_limit: int,
     gradient_checkpointing: bool,
     predict_with_generate: bool,
+    val_size: int,
 ):
     cfg = TrainingConfig(
         dataset_path=dataset_path,
@@ -461,6 +464,7 @@ def train_cmd(
         debug_limit=debug_limit,
         gradient_checkpointing=gradient_checkpointing,
         predict_with_generate=predict_with_generate,
+        val_size=val_size,
     )
     run_training(cfg)
 
