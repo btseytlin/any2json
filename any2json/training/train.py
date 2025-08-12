@@ -335,22 +335,44 @@ def run_training(cfg: TrainingConfig) -> None:
     os.environ.setdefault("WANDB_PROJECT", cfg.wandb_project)
     wandb.init(project=cfg.wandb_project, config={"model": cfg.model_name})
     raw = load_hf_dataset(cfg.dataset_path)
-    raw = apply_debug_limit(raw, cfg.debug_limit)
+    logger.info(f"Loaded {len(raw['train'])} train samples")
+
+    if cfg.debug_limit:
+        raw = apply_debug_limit(raw, cfg.debug_limit)
+        logger.info(
+            f"Applied debug limit: {cfg.debug_limit}, now {len(raw['train'])} train samples"
+        )
     ds = prepare_splits(raw, seed=cfg.seed, size=cfg.val_size)
+    logger.info(f"Prepared splits with val size: {cfg.val_size}: {ds}")
     ds = augment_train_split(ds, cfg)
-    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    logger.info(f"Augmented train split: {ds}")
     ds = filter_splits_by_length(ds, tokenizer, cfg)
+    logger.info(f"Filtered by length: {ds}")
+
+    logger.info(f"Loading tokenizer and model")
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
     model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_name)
     model.config.use_cache = False
     if cfg.gradient_checkpointing:
         model.gradient_checkpointing_enable()
+
+    logger.info(f"Tokenizing splits")
     tokenized = tokenize_splits(ds, tokenizer, cfg)
+
+    logger.info(f"Creating trainer")
     trainer = create_trainer(tokenized, tokenizer, model, cfg)
     trainer.add_callback(EvalLoggerCallback(tokenizer, ds["validation"]))
+
+    logger.info(f"Training")
     trainer.train()
+
+    logger.info(f"Saving model to {cfg.output_dir}")
     trainer.save_model(cfg.output_dir)
     tokenizer.save_pretrained(cfg.output_dir)
+
     if cfg.push_to_hub and cfg.hub_repo_id:
+        logger.info(f"Pushing to hub")
+
         trainer.push_to_hub()
 
 
