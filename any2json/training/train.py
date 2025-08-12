@@ -194,10 +194,10 @@ class EvalLoggerCallback(TrainerCallback):
         wandb.log({"eval_examples": self.table}, step=state.global_step)
 
 
-def prepare_splits(ds: DatasetDict, seed: int, size: int = 5000) -> DatasetDict:
+def prepare_splits(ds: DatasetDict, seed: int, test_size: int = 5000) -> DatasetDict:
     base = DatasetDict({"train": ds["train"]}) if "train" in ds else ds
     size = len(base["train"]) if "train" in base else 0
-    test_size = min(size, size) if size > 5000 else max(1, size // 20)
+    test_size = min(size, test_size) if size > test_size else max(1, size // 20)
     return make_group_split(base, test_size=test_size, seed=seed)
 
 
@@ -267,11 +267,12 @@ def build_length_filter_fn(
 
 
 def filter_splits_by_length(
-    ds: DatasetDict, tokenizer: AutoTokenizer, cfg: TrainingConfig
+    ds: DatasetDict,
+    tokenizer: AutoTokenizer,
+    max_source_length: int,
+    max_target_length: int,
 ) -> DatasetDict:
-    pred = build_length_filter_fn(
-        tokenizer, cfg.max_source_length, cfg.max_target_length
-    )
+    pred = build_length_filter_fn(tokenizer, max_source_length, max_target_length)
     train_f = ds["train"].filter(pred, batched=True)
     val_f = ds["validation"].filter(pred, batched=True)
     return DatasetDict({"train": train_f, "validation": val_f})
@@ -343,15 +344,25 @@ def run_training(cfg: TrainingConfig) -> None:
             f"Applied debug limit: {cfg.debug_limit}, now {len(raw['train'])} train samples"
         )
     logger.info(f"Preparing splits with val size: {cfg.val_size}")
-    ds = prepare_splits(raw, seed=cfg.seed, size=cfg.val_size)
+    ds = prepare_splits(raw, seed=cfg.seed, test_size=cfg.val_size)
     logger.info(f"Prepared splits with val size: {cfg.val_size}: {ds}")
     ds = augment_train_split(ds, cfg)
     logger.info(f"Augmented train split: {ds}")
-    ds = filter_splits_by_length(ds, tokenizer, cfg)
-    logger.info(f"Filtered by length: {ds}")
 
     logger.info(f"Loading tokenizer and model")
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+
+    logger.info(
+        f"Filtering by length, max_source_length: {cfg.max_source_length}, max_target_length: {cfg.max_target_length}"
+    )
+    ds = filter_splits_by_length(
+        ds,
+        tokenizer,
+        max_source_length=cfg.max_source_length,
+        max_target_length=cfg.max_target_length,
+    )
+    logger.info(f"Filtered by length: {ds}")
+
     model = AutoModelForSeq2SeqLM.from_pretrained(cfg.model_name)
     model.config.use_cache = False
     if cfg.gradient_checkpointing:
