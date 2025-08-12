@@ -330,6 +330,7 @@ def create_trainer(
 
 def run_training(cfg: TrainingConfig) -> None:
     cfg.validate()
+    logger.info(f"Training config: {cfg}")
     os.environ.setdefault("WANDB_PROJECT", cfg.wandb_project)
     wandb.init(project=cfg.wandb_project, config={"model": cfg.model_name})
     raw = load_hf_dataset(cfg.dataset_path)
