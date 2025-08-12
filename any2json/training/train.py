@@ -23,6 +23,7 @@ from any2json.training.utils import (
     load_hf_dataset,
     apply_debug_limit,
     make_group_split,
+    percentile,
 )
 
 
@@ -97,7 +98,7 @@ class TrainingConfig:
 
 
 def estimate_token_lengths(dataset_path: str, model_name: str, samples: int) -> None:
-    ds_all = load_any2json_dataset(dataset_path)
+    ds_all = load_hf_dataset(dataset_path)
     base = ds_all["train"] if "train" in ds_all else list(ds_all.values())[0]
     n = min(samples, len(base))
     rows = [base[i] for i in range(n)]

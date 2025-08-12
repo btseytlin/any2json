@@ -242,8 +242,15 @@ class BaseQwen:
             desc="Decoding outputs",
         ):
             texts = decode_batch_fn(out, aux)
+            ms_list = []
+            if isinstance(aux, dict) and "inference_ms_list" in aux:
+                ms_list = aux["inference_ms_list"]
+            else:
+                ms_list = [None] * len(ids)
             for j, idx in enumerate(ids):
                 content, meta = self.to_answer_meta(texts[j])
+                if j < len(ms_list) and ms_list[j] is not None:
+                    meta.update({"inference_ms": ms_list[j]})
                 results.append({"id": idx, "answer": content, "meta": meta})
         return results
 
@@ -297,6 +304,7 @@ class QwenHF(BaseQwen):
         )
         model_inputs = self.tokenizer([text], return_tensors="pt")
         model_inputs = model_inputs.to(self.model.device)
+        t0 = time.perf_counter()
         output = self.model.generate(
             **model_inputs,
             do_sample=True,
@@ -305,24 +313,29 @@ class QwenHF(BaseQwen):
             top_k=params["top_k"],
             max_new_tokens=self.max_tokens,
         )
+        t1 = time.perf_counter()
         full_text = self.tokenizer.decode(
             output[0][len(model_inputs.input_ids[0]) :], skip_special_tokens=True
         ).strip()
         content, reasoning = parse_think(full_text)
         content = normalize_output_text(content)
-        return content, {"thinking_content": reasoning}
+        return content, {
+            "thinking_content": reasoning,
+            "inference_ms": (t1 - t0) * 1000.0,
+        }
 
     def get_predictions(
         self, samples: list[dict], batch_size: int | None = None
     ) -> tuple[list[dict], list[dict]]:
         batch_size = batch_size or self.batch_size
 
-        def run_batch_fn(batch: list[dict]) -> tuple[object, list[int]]:
+        def run_batch_fn(batch: list[dict]) -> tuple[object, dict]:
             texts = build_chat_texts(self.tokenizer, self.enable_thinking, batch)
             model_inputs = hf_tokenize_to_device(
                 self.tokenizer, texts, self.model.device
             )
             params = get_sampling_params(self.enable_thinking, self.max_tokens)
+            t0 = time.perf_counter()
             output = self.model.generate(
                 **model_inputs,
                 do_sample=True,
@@ -331,11 +344,16 @@ class QwenHF(BaseQwen):
                 top_k=params["top_k"],
                 max_new_tokens=self.max_tokens,
             )
+            t1 = time.perf_counter()
             input_lens = model_inputs.attention_mask.sum(dim=1).tolist()
-            return output, input_lens
+            per_item_ms = ((t1 - t0) * 1000.0) / max(1, len(batch))
+            return output, {
+                "input_lens": input_lens,
+                "inference_ms_list": [per_item_ms] * len(batch),
+            }
 
-        def decode_batch_fn(output: object, input_lens: list[int]) -> list[str]:
-            return hf_decode_batch(self.tokenizer, output, input_lens)
+        def decode_batch_fn(output: object, aux: dict) -> list[str]:
+            return hf_decode_batch(self.tokenizer, output, aux["input_lens"])
 
         return self.run_batched_inference(
             samples, batch_size, run_batch_fn, decode_batch_fn

@@ -11,15 +11,8 @@ from pydantic_ai.models.fallback import FallbackModel
 from any2json.utils import logger
 from any2json.schema_utils import to_supported_json_schema
 from pydantic_ai import Agent, RunContext
-import tqdm.asyncio as tqdm_asyncio
 import traceback
 
-from tenacity import (
-    before_sleep_log,
-    retry,
-    wait_exponential,
-    stop_after_attempt,
-)
 
 AGENT_MAX_RETRIES = 4
 # AGENT_WAIT_MULTIPLIER = 2

@@ -1,14 +1,13 @@
+import datetime
 import json
 import os
 import logging
-import sys
-import traceback
+import time
 import click
-from datasets import Dataset, DatasetDict, load_dataset
+from datasets import DatasetDict, load_dataset
 from dotenv import load_dotenv
-from any2json.models.gemini import GeminiModel
-from any2json.models.qwen import QwenModel
-from any2json.models.gemma3n import Gemma3nModel
+from any2json.benchmarks.models.gemini import GeminiModel
+from any2json.benchmarks.models.qwen import QwenModel
 from tqdm.auto import tqdm
 import fastjsonschema
 
@@ -18,7 +17,6 @@ from any2json.utils import configure_loggers, logger
 model_types = {
     "qwen": QwenModel,
     "gemini": GeminiModel,
-    "gemma3n": Gemma3nModel,
 }
 
 
@@ -72,11 +70,12 @@ def postprocess_answer(answer: str) -> dict | str | list | int | float | bool | 
     return json.loads(answer)
 
 
-def calculate_metrics(results):
+def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
     error = []
     correct = []
     schema_error = []
     for i, result in enumerate(results):
+        results[i]["metrics"] = {}
         if isinstance(result["schema"], str):
             result["schema"] = json.loads(result["schema"])
 
@@ -87,10 +86,14 @@ def calculate_metrics(results):
         except json.JSONDecodeError as e:
             error.append(i)
             logger.error(e, exc_info=True)
+            results[i]["metrics"]["error_type"] = "json_decode_error"
+            results[i]["metrics"]["error_message"] = str(e)
             continue
         except fastjsonschema.JsonSchemaException as e:
             schema_error.append(i)
             logger.error(e, exc_info=True)
+            results[i]["metrics"]["error_type"] = "schema_error"
+            results[i]["metrics"]["error_message"] = str(e)
             continue
 
         correct_answer = result["correct_answer"]
@@ -100,6 +103,9 @@ def calculate_metrics(results):
 
         if answer == correct_answer:
             correct.append(i)
+            results[i]["metrics"]["correct"] = True
+        else:
+            results[i]["metrics"]["correct"] = False
 
     if len(results) == 0:
         return {
@@ -108,7 +114,7 @@ def calculate_metrics(results):
             "percentage_schema_errors": 0,
         }
 
-    return {
+    return results, {
         "percentage_json_errors": len(error) / len(results),
         "percentage_correct": len(correct) / len(results),
         "percentage_schema_errors": len(schema_error) / len(results),
@@ -162,10 +168,12 @@ def run(hf_dataset_dir, hf_dataset, split, model_type, model_kwargs, output_dir,
     model_kwargs = json.loads(model_kwargs) if model_kwargs else {}
 
     logger.info(
-        f"Benchmarking: {hf_dataset_dir=}, {hf_dataset=}, {split=}, {model_type=}, {model_kwargs=}, {limit=}"
+        f"Benchmarking with inputs: {hf_dataset_dir=}, {hf_dataset=}, {split=}, {model_type=}, {model_kwargs=}, {limit=}"
     )
     model_type = model_types[model_type]
     model = model_type(**model_kwargs)
+
+    logger.info(f"Model state: {model.get_state()}")
 
     if hf_dataset_dir:
         dataset_dict = DatasetDict.load_from_disk(hf_dataset_dir)
@@ -179,9 +187,15 @@ def run(hf_dataset_dir, hf_dataset, split, model_type, model_kwargs, output_dir,
     if limit:
         samples = samples[:limit]
 
-    results, errors = run_benchmark(model, samples)
+    logger.info(f"Running benchmark with {len(samples)} samples")
 
-    metrics = calculate_metrics(results)
+    start_dt = datetime.now()
+    results, errors = run_benchmark(model, samples)
+    end_dt = datetime.now()
+    logger.info(f"Benchmarking took {end_dt - start_dt}")
+
+    logger.info(f"Obtained {len(results)} results, {len(errors)} errors")
+    results, metrics = calculate_metrics(results)
 
     logger.info(f"Metrics: {metrics}")
 
@@ -193,6 +207,9 @@ def run(hf_dataset_dir, hf_dataset, split, model_type, model_kwargs, output_dir,
         "model_state": model.get_state(),
         "limit": limit,
         "actual_samples": len(samples),
+        "start_dt": start_dt.isoformat(),
+        "end_dt": end_dt.isoformat(),
+        "duration_s": (end_dt - start_dt).total_seconds(),
     }
     with open(os.path.join(output_dir, "config.json"), "w") as f:
         json.dump(
