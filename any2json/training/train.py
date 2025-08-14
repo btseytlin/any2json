@@ -285,7 +285,6 @@ def create_trainer(
         length_column_name="length",
         prediction_loss_only=True,
         torch_compile=True,
-        weight_decay=cfg.weight_decay,
     )
 
     trainer = Trainer(
@@ -439,7 +438,6 @@ def train_cmd(
     predict_with_generate: bool,
     val_size: int,
     auto_find_batch_size: bool,
-    weight_decay: float,
 ):
     cfg = TrainingConfig(
         dataset_path=dataset_path,
@@ -473,7 +471,6 @@ def train_cmd(
         predict_with_generate=predict_with_generate,
         val_size=val_size,
         auto_find_batch_size=auto_find_batch_size,
-        weight_decay=weight_decay,
     )
     run_training(cfg)
 
