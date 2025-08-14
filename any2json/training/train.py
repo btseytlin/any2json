@@ -38,6 +38,7 @@ class TrainingConfig:
     max_target_length: int
     per_device_train_batch_size: int
     per_device_eval_batch_size: int
+    auto_find_batch_size: bool
     learning_rate: float
     num_train_epochs: int
     warmup_ratio: float
@@ -256,6 +257,7 @@ def create_trainer(
     local_bf16 = bool(cfg.bf16 and torch.cuda.is_bf16_supported())
     args = TrainingArguments(
         output_dir=cfg.output_dir,
+        auto_find_batch_size=cfg.auto_find_batch_size,
         per_device_train_batch_size=cfg.per_device_train_batch_size,
         per_device_eval_batch_size=cfg.per_device_eval_batch_size,
         learning_rate=cfg.learning_rate,
@@ -263,10 +265,10 @@ def create_trainer(
         warmup_ratio=cfg.warmup_ratio,
         weight_decay=cfg.weight_decay,
         eval_strategy="steps",
+        save_strategy="steps",
         logging_steps=cfg.logging_steps,
         eval_steps=cfg.eval_steps,
         save_steps=cfg.save_steps,
-        save_total_limit=2,
         use_cpu=use_cpu,
         bf16=local_bf16,
         fp16=cfg.fp16,
@@ -281,10 +283,10 @@ def create_trainer(
         seed=cfg.seed,
         group_by_length=True,
         length_column_name="length",
+        prediction_loss_only=True,
+        torch_compile=True,
+        weight_decay=cfg.weight_decay,
     )
-
-    def metrics_fn(_):
-        return {}
 
     trainer = Trainer(
         model=model,
@@ -293,7 +295,6 @@ def create_trainer(
         eval_dataset=tokenized["validation"],
         tokenizer=tokenizer,
         data_collator=collator,
-        compute_metrics=metrics_fn,
     )
     return trainer
 
@@ -404,6 +405,8 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--gradient-checkpointing", is_flag=True, default=True)
 @click.option("--predict-with-generate", is_flag=True, default=False)
 @click.option("--val-size", default=5000, type=int)
+@click.option("--auto-find-batch-size", is_flag=True, default=True)
+@click.option("--weight-decay", default=0, type=float)
 def train_cmd(
     dataset_path: str,
     model_name: str,
@@ -435,6 +438,8 @@ def train_cmd(
     gradient_checkpointing: bool,
     predict_with_generate: bool,
     val_size: int,
+    auto_find_batch_size: bool,
+    weight_decay: float,
 ):
     cfg = TrainingConfig(
         dataset_path=dataset_path,
@@ -467,6 +472,8 @@ def train_cmd(
         gradient_checkpointing=gradient_checkpointing,
         predict_with_generate=predict_with_generate,
         val_size=val_size,
+        auto_find_batch_size=auto_find_batch_size,
+        weight_decay=weight_decay,
     )
     run_training(cfg)
 
