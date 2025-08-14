@@ -212,6 +212,8 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
     validate_pipeline_config(pcfg)
     validate_training_args(args)
     tokenizer = AutoTokenizer.from_pretrained(pcfg.model_name)
+    if not tokenizer.pad_token:
+        tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
     logger.info(f"Training with model: {pcfg.model_name}")
     os.environ.setdefault("WANDB_PROJECT", pcfg.wandb_project)
     wandb.init(project=pcfg.wandb_project, config={"model": pcfg.model_name})
