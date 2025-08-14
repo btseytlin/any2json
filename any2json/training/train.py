@@ -404,7 +404,7 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--gradient-checkpointing", is_flag=True, default=True)
 @click.option("--predict-with-generate", is_flag=True, default=False)
 @click.option("--val-size", default=5000, type=int)
-@click.option("--auto-find-batch-size", is_flag=True, default=True)
+@click.option("--auto-find-batch-size", is_flag=True, default=False)
 @click.option("--weight-decay", default=0, type=float)
 def train_cmd(
     dataset_path: str,
