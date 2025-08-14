@@ -12,7 +12,6 @@ from transformers import (
     AutoTokenizer,
     TrainingArguments,
     Trainer,
-    TrainerCallback,
 )
 import torch
 from any2json.utils import configure_loggers, logger
@@ -23,11 +22,11 @@ from any2json.training.utils import (
     apply_debug_limit,
     make_group_split,
     percentile,
+    EvalLoggerCallback,
+    estimate_token_lengths,
 )
 
 DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M"
-DEFAULT_MAX_SOURCE_LENGTH = 1024
-DEFAULT_MAX_TARGET_LENGTH = 1024
 
 
 @dataclass
@@ -101,25 +100,6 @@ class TrainingConfig:
             raise ValueError("hub_repo_id must be set when push_to_hub is True")
 
 
-def estimate_token_lengths(dataset_path: str, model_name: str, samples: int) -> None:
-    ds_all = load_hf_dataset(dataset_path)
-    base = ds_all["train"] if "train" in ds_all else list(ds_all.values())[0]
-    n = min(samples, len(base))
-    rows = [base[i] for i in range(n)]
-    tok = AutoTokenizer.from_pretrained(model_name)
-    src = [
-        len(tok(format_example(r["input_data"], r["schema"]))["input_ids"])
-        for r in rows
-    ]
-    tgt = [len(tok(r["output"])["input_ids"]) for r in rows]
-    click.echo(
-        f"src p90={percentile(src, 0.9)} p95={percentile(src, 0.95)} p99={percentile(src, 0.99)}"
-    )
-    click.echo(
-        f"tgt p90={percentile(tgt, 0.9)} p95={percentile(tgt, 0.95)} p99={percentile(tgt, 0.99)}"
-    )
-
-
 def build_tokenize_fn(
     tokenizer: AutoTokenizer, max_source_length: int, max_target_length: int
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
@@ -134,6 +114,7 @@ def build_tokenize_fn(
         enc_out = tokenizer(batch["output"], add_special_tokens=False)
         input_ids: list[list[int]] = []
         labels: list[list[int]] = []
+        lengths: list[int] = []
         for a, b in zip(enc_in["input_ids"], enc_out["input_ids"], strict=True):
             a = a[:max_source_length]
             b = b[:max_target_length]
@@ -141,69 +122,10 @@ def build_tokenize_fn(
             lbs = ([-100] * len(a)) + b + ([-100] if eos is not None else [])
             input_ids.append(ids)
             labels.append(lbs)
-        return {"input_ids": input_ids, "labels": labels}
+            lengths.append(len(ids))
+        return {"input_ids": input_ids, "labels": labels, "length": lengths}
 
     return tokenize
-
-
-class EvalLoggerCallback(TrainerCallback):
-    def __init__(self, tokenizer: AutoTokenizer, raw_eval_ds):
-        self.tokenizer = tokenizer
-        self.raw_eval_ds = raw_eval_ds
-        self.table = wandb.Table(
-            columns=["epoch", "step", "input", "schema", "target", "prediction"],
-            log_mode="INCREMENTAL",
-        )
-
-    def on_evaluate(
-        self, args, state, control, model=None, tokenizer=None, metrics=None, **kwargs
-    ):
-        if model is None:
-            return
-        k = min(8, len(self.raw_eval_ds))
-        idx = random.sample(range(len(self.raw_eval_ds)), k)
-        rows = [self.raw_eval_ds[i] for i in idx]
-        prompts = [
-            f"[SCHEMA]\n{r['schema']}\n[INPUT]\n{r['input_data']}\n[OUTPUT]\n"
-            for r in rows
-        ]
-        device = next(model.parameters()).device
-        toks = self.tokenizer(
-            prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=(getattr(self.tokenizer, "model_max_length", None) or 4096),
-        )
-        toks = {k2: v.to(device) for k2, v in toks.items()}
-        out = model.generate(
-            **toks,
-            max_new_tokens=self.tokenizer.model_max_length // 4,
-            do_sample=False,
-            num_beams=1,
-        )
-        input_lens = toks.get("attention_mask")
-        if input_lens is not None:
-            input_lens = input_lens.sum(dim=1).tolist()
-        else:
-            input_lens = [toks["input_ids"].shape[1]] * toks["input_ids"].shape[0]
-        seqs = out
-        preds = []
-        for i in range(seqs.shape[0]):
-            start = int(input_lens[i])
-            preds.append(
-                self.tokenizer.decode(seqs[i][start:], skip_special_tokens=True)
-            )
-        for r, p in zip(rows, preds, strict=True):
-            self.table.add_data(
-                state.epoch,
-                state.global_step,
-                r["input_data"],
-                r["schema"],
-                r["output"],
-                p,
-            )
-        wandb.log({"eval_examples": self.table}, step=state.global_step)
 
 
 def prepare_splits(ds: DatasetDict, seed: int, test_size: int = 5000) -> DatasetDict:
@@ -256,7 +178,9 @@ def tokenize_splits(
 
 
 def build_length_filter_fn(
-    tokenizer: AutoTokenizer, max_source_length: int, max_target_length: int
+    tokenizer: AutoTokenizer,
+    max_source_length: int,
+    max_target_length: int,
 ) -> Callable[[dict[str, Any]], list[bool]]:
     def pred(batch: dict[str, Any]) -> list[bool]:
         inputs = [
@@ -273,18 +197,6 @@ def build_length_filter_fn(
         ]
 
     return pred
-
-
-def filter_splits_by_length(
-    ds: DatasetDict,
-    tokenizer: AutoTokenizer,
-    max_source_length: int,
-    max_target_length: int,
-) -> DatasetDict:
-    pred = build_length_filter_fn(tokenizer, max_source_length, max_target_length)
-    train_f = ds["train"].filter(pred, batched=True)
-    val_f = ds["validation"].filter(pred, batched=True)
-    return DatasetDict({"train": train_f, "validation": val_f})
 
 
 def build_tokenized_length_filter_fn(
@@ -367,6 +279,8 @@ def create_trainer(
         push_to_hub=cfg.push_to_hub,
         hub_model_id=cfg.hub_repo_id,
         seed=cfg.seed,
+        group_by_length=True,
+        length_column_name="length",
     )
 
     def metrics_fn(_):
@@ -385,6 +299,10 @@ def create_trainer(
 
 
 def run_training(cfg: TrainingConfig) -> None:
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    cfg.max_source_length = cfg.max_source_length or tokenizer.model_max_length // 2
+    cfg.max_target_length = cfg.max_target_length or tokenizer.model_max_length // 2
+
     cfg.validate()
     logger.info(f"Training config: {cfg}")
     os.environ.setdefault("WANDB_PROJECT", cfg.wandb_project)
@@ -402,11 +320,6 @@ def run_training(cfg: TrainingConfig) -> None:
     logger.info(f"Prepared splits with val size: {cfg.val_size}: {ds}")
     ds = augment_train_split(ds, cfg)
     logger.info(f"Augmented train split: {ds}")
-
-    logger.info(f"Loading tokenizer and model")
-    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
 
     logger.info(f"Tokenizing splits")
     tokenized = tokenize_splits(ds, tokenizer, cfg)
@@ -464,8 +377,8 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--dataset-path", default="btseytlin/any2json", type=str)
 @click.option("--model-name", default=DEFAULT_MODEL, type=str)
 @click.option("--output-dir", default="checkpoints", type=str)
-@click.option("--max-source-length", default=DEFAULT_MAX_SOURCE_LENGTH, type=int)
-@click.option("--max-target-length", default=DEFAULT_MAX_TARGET_LENGTH, type=int)
+@click.option("--max-source-length", default=None, type=int)
+@click.option("--max-target-length", default=None, type=int)
 @click.option("--per-device-train-batch-size", default=1, type=int)
 @click.option("--per-device-eval-batch-size", default=1, type=int)
 @click.option("--learning-rate", default=5e-5, type=float)
