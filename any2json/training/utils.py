@@ -118,7 +118,7 @@ class EvalLoggerCallback(TrainerCallback):
         with torch.no_grad():
             for k, v in tqdm(toks.items(), desc="Generating eval example predictions"):
                 input_prompts.append(
-                    self.tokenizer.decode(v, skip_special_tokens=False)
+                    self.tokenizer.decode(v["input_ids"], skip_special_tokens=False)
                 )
                 one_example_toks = {k: v.to(device)}
                 generation = self.generate_prediction_for_prompt(
