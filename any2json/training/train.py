@@ -144,7 +144,8 @@ def build_tokenized_length_filter_fn(
 ) -> Callable[[dict[str, Any]], list[bool]]:
     def pred(batch: dict[str, Any]) -> list[bool]:
         return [
-            (len(src) <= max_source_length) and (len(lbl) <= max_target_length)
+            (len(src) <= max_source_length)
+            and (sum(1 for t in lbl if t != -100) <= max_target_length)
             for src, lbl in zip(batch["input_ids"], batch["labels"], strict=True)
         ]
 
@@ -170,7 +171,11 @@ class CausalLMDataCollator:
         if self.pad_to_multiple_of:
             m = self.pad_to_multiple_of
             max_len = ((max_len + m - 1) // m) * m
-        pad_id = self.tokenizer.pad_token_id or self.tokenizer.eos_token_id or 0
+        pad_id = (
+            self.tokenizer.pad_token_id
+            or self.tokenizer.eos_token_id
+            or self.tokenizer.unk_token_id
+        )
         input_ids, labels, attn = [], [], []
         for f in features:
             ids, lbs = f["input_ids"], f["labels"]
@@ -329,6 +334,7 @@ def train_cmd(
         debug_limit=debug_limit,
         val_size=val_size,
         wandb_project=wandb_project,
+        hf_args=args,
     )
     run_training(pcfg, args)
 
