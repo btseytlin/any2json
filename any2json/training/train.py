@@ -65,7 +65,7 @@ def validate_training_args(args: TrainingArguments) -> None:
 
 
 def build_tokenize_fn(
-    tokenizer: AutoTokenizer, max_source_length: int, max_target_length: int
+    tokenizer: AutoTokenizer,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     eos = tokenizer.eos_token_id
 
@@ -80,8 +80,6 @@ def build_tokenize_fn(
         labels: list[list[int]] = []
         lengths: list[int] = []
         for a, b in zip(enc_in["input_ids"], enc_out["input_ids"], strict=True):
-            a = a[:max_source_length]
-            b = b[:max_target_length]
             ids = a + b + ([eos] if eos is not None else [])
             lbs = ([-100] * len(a)) + b + ([-100] if eos is not None else [])
             input_ids.append(ids)
@@ -131,9 +129,7 @@ def augment_train_split(ds: DatasetDict, cfg: PipelineConfig, seed: int) -> Data
 def tokenize_splits(
     ds: DatasetDict, tokenizer: AutoTokenizer, cfg: PipelineConfig
 ) -> DatasetDict:
-    max_src = cfg.max_source_length or tokenizer.model_max_length // 2
-    max_tgt = cfg.max_target_length or tokenizer.model_max_length // 2
-    fn = build_tokenize_fn(tokenizer, max_src, max_tgt)
+    fn = build_tokenize_fn(tokenizer)
     train_tok = ds["train"].map(
         fn, batched=True, remove_columns=ds["train"].column_names
     )
@@ -214,6 +210,8 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
     tokenizer = AutoTokenizer.from_pretrained(pcfg.model_name)
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
+    pcfg.max_source_length = pcfg.max_source_length or tokenizer.model_max_length // 2
+    pcfg.max_target_length = pcfg.max_target_length or tokenizer.model_max_length // 2
     logger.info(f"Training with model: {pcfg.model_name}")
     os.environ.setdefault("WANDB_PROJECT", pcfg.wandb_project)
     wandb.init(project=pcfg.wandb_project, config={"model": pcfg.model_name})
