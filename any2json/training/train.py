@@ -42,6 +42,7 @@ class PipelineConfig:
     debug_limit: int | None
     val_size: int
     wandb_project: str
+    hf_args: TrainingArguments
 
 
 def validate_pipeline_config(cfg: PipelineConfig) -> None:
