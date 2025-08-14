@@ -13,6 +13,7 @@ from transformers import (
     TrainingArguments,
     Trainer,
 )
+from transformers.hf_argparser import HfArgumentParser
 import torch
 from any2json.utils import configure_loggers, logger
 from any2json.training.augment import build_augmentor, apply_augmentations
@@ -30,75 +31,38 @@ DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M"
 
 
 @dataclass
-class TrainingConfig:
+class PipelineConfig:
     dataset_path: str
     model_name: str
-    output_dir: str
-    max_source_length: int
-    max_target_length: int
-    per_device_train_batch_size: int
-    per_device_eval_batch_size: int
-    auto_find_batch_size: bool
-    learning_rate: float
-    num_train_epochs: int
-    warmup_ratio: float
-    weight_decay: float
-    seed: int
-    gradient_accumulation_steps: int
-    logging_steps: int
-    eval_steps: int
-    save_steps: int
-    push_to_hub: bool
-    hub_repo_id: str | None
-    wandb_project: str
-    bf16: bool
-    fp16: bool
-    use_cpu: bool
+    max_source_length: int | None
+    max_target_length: int | None
     drop_schema_proba: float
     schema_missing_token: str
     input_aug: list[str]
     output_aug: list[str]
     debug_limit: int | None
-    gradient_checkpointing: bool
-    predict_with_generate: bool
     val_size: int
+    wandb_project: str
 
-    def validate(self) -> None:
-        if self.fp16 and self.bf16:
-            raise ValueError("Cannot enable both fp16 and bf16")
-        if self.use_cpu and (self.fp16 or self.bf16):
-            raise ValueError(
-                "Mixed precision requires GPU; disable use_cpu or fp16/bf16"
-            )
-        if self.bf16 and not torch.cuda.is_bf16_supported():
-            raise ValueError("bf16 requested but not supported on this hardware")
-        if self.fp16 and not torch.cuda.is_available():
-            raise ValueError("fp16 requested but CUDA is not available")
-        if not 0 <= self.drop_schema_proba <= 1:
-            raise ValueError("drop_schema_proba must be in [0, 1]")
-        if not 0 <= self.warmup_ratio <= 1:
-            raise ValueError("warmup_ratio must be in [0, 1]")
-        if self.debug_limit is not None and self.debug_limit < 0:
-            raise ValueError("debug_limit must be >= 0")
-        for name in [
-            "max_source_length",
-            "max_target_length",
-            "per_device_train_batch_size",
-            "per_device_eval_batch_size",
-            "num_train_epochs",
-            "gradient_accumulation_steps",
-            "logging_steps",
-            "eval_steps",
-            "save_steps",
-        ]:
-            if getattr(self, name) <= 0:
-                raise ValueError(f"{name} must be > 0")
-        if self.learning_rate <= 0:
-            raise ValueError("learning_rate must be > 0")
-        if self.weight_decay < 0:
-            raise ValueError("weight_decay must be >= 0")
-        if self.push_to_hub and not self.hub_repo_id:
-            raise ValueError("hub_repo_id must be set when push_to_hub is True")
+
+def validate_pipeline_config(cfg: PipelineConfig) -> None:
+    if not 0 <= cfg.drop_schema_proba <= 1:
+        raise ValueError("drop_schema_proba must be in [0, 1]")
+    if cfg.debug_limit is not None and cfg.debug_limit < 0:
+        raise ValueError("debug_limit must be >= 0")
+
+
+def validate_training_args(args: TrainingArguments) -> None:
+    if getattr(args, "fp16", False) and getattr(args, "bf16", False):
+        raise ValueError("Cannot enable both fp16 and bf16")
+    if getattr(args, "use_cpu", False) and (
+        getattr(args, "fp16", False) or getattr(args, "bf16", False)
+    ):
+        raise ValueError("Mixed precision requires GPU; disable use_cpu or fp16/bf16")
+    if getattr(args, "bf16", False) and not torch.cuda.is_bf16_supported():
+        raise ValueError("bf16 requested but not supported on this hardware")
+    if getattr(args, "fp16", False) and not torch.cuda.is_available():
+        raise ValueError("fp16 requested but CUDA is not available")
 
 
 def build_tokenize_fn(
@@ -136,14 +100,14 @@ def prepare_splits(ds: DatasetDict, seed: int, test_size: int = 5000) -> Dataset
     return make_group_split(base, test_size=test_size, seed=seed)
 
 
-def augment_train_split(ds: DatasetDict, cfg: TrainingConfig) -> DatasetDict:
+def augment_train_split(ds: DatasetDict, cfg: PipelineConfig, seed: int) -> DatasetDict:
     aug = build_augmentor(
         drop_schema_proba=cfg.drop_schema_proba,
         schema_missing_token=cfg.schema_missing_token,
         input_aug_paths=cfg.input_aug,
         output_aug_paths=cfg.output_aug,
     )
-    rng = random.Random(cfg.seed)
+    rng = random.Random(seed)
 
     def map_fn(batch: dict[str, Any]) -> dict[str, Any]:
         inputs, schemas, outputs = [], [], []
@@ -166,9 +130,11 @@ def augment_train_split(ds: DatasetDict, cfg: TrainingConfig) -> DatasetDict:
 
 
 def tokenize_splits(
-    ds: DatasetDict, tokenizer: AutoTokenizer, cfg: TrainingConfig
+    ds: DatasetDict, tokenizer: AutoTokenizer, cfg: PipelineConfig
 ) -> DatasetDict:
-    fn = build_tokenize_fn(tokenizer, cfg.max_source_length, cfg.max_target_length)
+    max_src = cfg.max_source_length or tokenizer.model_max_length // 2
+    max_tgt = cfg.max_target_length or tokenizer.model_max_length // 2
+    fn = build_tokenize_fn(tokenizer, max_src, max_tgt)
     train_tok = ds["train"].map(
         fn, batched=True, remove_columns=ds["train"].column_names
     )
@@ -250,42 +216,9 @@ def create_trainer(
     tokenized: DatasetDict,
     tokenizer: AutoTokenizer,
     model: AutoModelForCausalLM,
-    cfg: TrainingConfig,
+    args: TrainingArguments,
 ):
     collator = CausalLMDataCollator(tokenizer=tokenizer)
-    use_cpu = cfg.use_cpu
-    local_bf16 = bool(cfg.bf16 and torch.cuda.is_bf16_supported())
-    args = TrainingArguments(
-        output_dir=cfg.output_dir,
-        auto_find_batch_size=cfg.auto_find_batch_size,
-        per_device_train_batch_size=cfg.per_device_train_batch_size,
-        per_device_eval_batch_size=cfg.per_device_eval_batch_size,
-        learning_rate=cfg.learning_rate,
-        num_train_epochs=cfg.num_train_epochs,
-        warmup_ratio=cfg.warmup_ratio,
-        weight_decay=cfg.weight_decay,
-        eval_strategy="steps",
-        save_strategy="steps",
-        logging_steps=cfg.logging_steps,
-        eval_steps=cfg.eval_steps,
-        save_steps=cfg.save_steps,
-        use_cpu=use_cpu,
-        bf16=local_bf16,
-        fp16=cfg.fp16,
-        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
-        gradient_checkpointing=cfg.gradient_checkpointing,
-        report_to=["wandb"],
-        load_best_model_at_end=True,
-        metric_for_best_model="loss",
-        greater_is_better=False,
-        push_to_hub=cfg.push_to_hub,
-        hub_model_id=cfg.hub_repo_id,
-        seed=cfg.seed,
-        group_by_length=True,
-        length_column_name="length",
-        prediction_loss_only=True,
-        torch_compile=True,
-    )
 
     trainer = Trainer(
         model=model,
@@ -298,61 +231,64 @@ def create_trainer(
     return trainer
 
 
-def run_training(cfg: TrainingConfig) -> None:
-    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
-    cfg.max_source_length = cfg.max_source_length or tokenizer.model_max_length // 2
-    cfg.max_target_length = cfg.max_target_length or tokenizer.model_max_length // 2
-
-    cfg.validate()
-    logger.info(f"Training config: {cfg}")
-    os.environ.setdefault("WANDB_PROJECT", cfg.wandb_project)
-    wandb.init(project=cfg.wandb_project, config={"model": cfg.model_name})
-    raw = load_hf_dataset(cfg.dataset_path)
+def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
+    validate_pipeline_config(pcfg)
+    validate_training_args(args)
+    tokenizer = AutoTokenizer.from_pretrained(pcfg.model_name)
+    logger.info(f"Training with model: {pcfg.model_name}")
+    os.environ.setdefault("WANDB_PROJECT", pcfg.wandb_project)
+    wandb.init(project=pcfg.wandb_project, config={"model": pcfg.model_name})
+    raw = load_hf_dataset(pcfg.dataset_path)
     logger.info(f"Loaded {len(raw['train'])} train samples")
 
-    if cfg.debug_limit:
-        raw = apply_debug_limit(raw, cfg.debug_limit)
+    if pcfg.debug_limit:
+        raw = apply_debug_limit(raw, pcfg.debug_limit)
         logger.info(
-            f"Applied debug limit: {cfg.debug_limit}, now {len(raw['train'])} train samples"
+            f"Applied debug limit: {pcfg.debug_limit}, now {len(raw['train'])} train samples"
         )
-    logger.info(f"Preparing splits with val size: {cfg.val_size}")
-    ds = prepare_splits(raw, seed=cfg.seed, test_size=cfg.val_size)
-    logger.info(f"Prepared splits with val size: {cfg.val_size}: {ds}")
-    ds = augment_train_split(ds, cfg)
+    logger.info(f"Preparing splits with val size: {pcfg.val_size}")
+    ds = prepare_splits(raw, seed=args.seed, test_size=pcfg.val_size)
+    logger.info(f"Prepared splits with val size: {pcfg.val_size}: {ds}")
+    ds = augment_train_split(ds, pcfg, seed=args.seed)
     logger.info(f"Augmented train split: {ds}")
 
     logger.info(f"Tokenizing splits")
-    tokenized = tokenize_splits(ds, tokenizer, cfg)
+    tokenized = tokenize_splits(ds, tokenizer, pcfg)
 
     logger.info(
-        f"Filtering tokenized data by length, max_source_length: {cfg.max_source_length}, max_target_length: {cfg.max_target_length}"
+        f"Filtering tokenized data by length, max_source_length: {pcfg.max_source_length}, max_target_length: {pcfg.max_target_length}"
     )
     tokenized = filter_tokenized_splits_by_length(
         tokenized,
-        max_source_length=cfg.max_source_length,
-        max_target_length=cfg.max_target_length,
+        max_source_length=pcfg.max_source_length or tokenizer.model_max_length // 2,
+        max_target_length=pcfg.max_target_length or tokenizer.model_max_length // 2,
     )
     logger.info(f"Filtered tokenized datasets: {tokenized}")
 
-    model = AutoModelForCausalLM.from_pretrained(cfg.model_name)
+    model = AutoModelForCausalLM.from_pretrained(pcfg.model_name)
     model.config.use_cache = False
-    if cfg.gradient_checkpointing:
+    if getattr(args, "gradient_checkpointing", False):
         model.gradient_checkpointing_enable()
 
     logger.info(f"Creating trainer")
-    trainer = create_trainer(tokenized, tokenizer, model, cfg)
+    if not args.output_dir:
+        args.output_dir = "checkpoints"
+    if args.group_by_length and not args.length_column_name:
+        args.length_column_name = "length"
+    if not args.report_to:
+        args.report_to = ["wandb"]
+    trainer = create_trainer(tokenized, tokenizer, model, args)
     trainer.add_callback(EvalLoggerCallback(tokenizer, ds["validation"]))
 
     logger.info(f"Training")
     trainer.train()
 
-    logger.info(f"Saving model to {cfg.output_dir}")
-    trainer.save_model(cfg.output_dir)
-    tokenizer.save_pretrained(cfg.output_dir)
+    logger.info(f"Saving model to {args.output_dir}")
+    trainer.save_model(args.output_dir)
+    tokenizer.save_pretrained(args.output_dir)
 
-    if cfg.push_to_hub and cfg.hub_repo_id:
+    if getattr(args, "push_to_hub", False) and getattr(args, "hub_model_id", None):
         logger.info(f"Pushing to hub")
-
         trainer.push_to_hub()
 
 
@@ -373,106 +309,53 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
     estimate_token_lengths(dataset_path, model_name, estimate_samples)
 
 
-@cli.command(name="train")
+@cli.command(
+    name="train",
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
+@click.pass_context
 @click.option("--dataset-path", default="btseytlin/any2json", type=str)
 @click.option("--model-name", default=DEFAULT_MODEL, type=str)
-@click.option("--output-dir", default="checkpoints", type=str)
 @click.option("--max-source-length", default=None, type=int)
 @click.option("--max-target-length", default=None, type=int)
-@click.option("--per-device-train-batch-size", default=1, type=int)
-@click.option("--per-device-eval-batch-size", default=1, type=int)
-@click.option("--learning-rate", default=5e-5, type=float)
-@click.option("--num-train-epochs", default=2, type=int)
-@click.option("--warmup-ratio", default=0.03, type=float)
-@click.option("--weight-decay", default=0.05, type=float)
-@click.option("--seed", default=42, type=int)
-@click.option("--gradient-accumulation-steps", default=8, type=int)
-@click.option("--logging-steps", default=50, type=int)
-@click.option("--eval-steps", default=500, type=int)
-@click.option("--save-steps", default=1000, type=int)
-@click.option("--push-to-hub", is_flag=True, default=False)
-@click.option("--hub-repo-id", default=None, type=str)
-@click.option("--wandb-project", default="any2json", type=str)
-@click.option("--bf16", is_flag=True, default=False)
-@click.option("--fp16", is_flag=True, default=False)
-@click.option("--use-cpu", is_flag=True, default=False)
 @click.option("--drop-schema-proba", default=0.01, type=float)
 @click.option("--schema-missing-token", default="[MISSING]", type=str)
 @click.option("--input-aug", multiple=True, default=[], type=str)
 @click.option("--output-aug", multiple=True, default=[], type=str)
 @click.option("--debug-limit", default=None, type=int)
-@click.option("--gradient-checkpointing", is_flag=True, default=True)
-@click.option("--predict-with-generate", is_flag=True, default=False)
 @click.option("--val-size", default=5000, type=int)
-@click.option("--auto-find-batch-size", is_flag=True, default=False)
-@click.option("--weight-decay", default=0, type=float)
+@click.option("--wandb-project", default="any2json", type=str)
 def train_cmd(
+    ctx: click.Context,
     dataset_path: str,
     model_name: str,
-    output_dir: str,
-    max_source_length: int,
-    max_target_length: int,
-    per_device_train_batch_size: int,
-    per_device_eval_batch_size: int,
-    learning_rate: float,
-    num_train_epochs: int,
-    warmup_ratio: float,
-    weight_decay: float,
-    seed: int,
-    gradient_accumulation_steps: int,
-    logging_steps: int,
-    eval_steps: int,
-    save_steps: int,
-    push_to_hub: bool,
-    hub_repo_id: str | None,
-    wandb_project: str,
-    bf16: bool,
-    fp16: bool,
-    use_cpu: bool,
+    max_source_length: int | None,
+    max_target_length: int | None,
     drop_schema_proba: float,
     schema_missing_token: str,
     input_aug: tuple[str, ...],
     output_aug: tuple[str, ...],
-    debug_limit: int,
-    gradient_checkpointing: bool,
-    predict_with_generate: bool,
+    debug_limit: int | None,
     val_size: int,
-    auto_find_batch_size: bool,
+    wandb_project: str,
 ):
-    cfg = TrainingConfig(
+    parser = HfArgumentParser(TrainingArguments)
+    hf_args_list = list(ctx.args)
+    (args,) = parser.parse_args_into_dataclasses(hf_args_list)
+    pcfg = PipelineConfig(
         dataset_path=dataset_path,
         model_name=model_name,
-        output_dir=output_dir,
         max_source_length=max_source_length,
         max_target_length=max_target_length,
-        per_device_train_batch_size=per_device_train_batch_size,
-        per_device_eval_batch_size=per_device_eval_batch_size,
-        learning_rate=learning_rate,
-        num_train_epochs=num_train_epochs,
-        warmup_ratio=warmup_ratio,
-        weight_decay=weight_decay,
-        seed=seed,
-        gradient_accumulation_steps=gradient_accumulation_steps,
-        logging_steps=logging_steps,
-        eval_steps=eval_steps,
-        save_steps=save_steps,
-        push_to_hub=push_to_hub,
-        hub_repo_id=hub_repo_id,
-        wandb_project=wandb_project,
-        bf16=bf16,
-        fp16=fp16,
-        use_cpu=use_cpu,
         drop_schema_proba=drop_schema_proba,
         schema_missing_token=schema_missing_token,
         input_aug=list(input_aug),
         output_aug=list(output_aug),
         debug_limit=debug_limit,
-        gradient_checkpointing=gradient_checkpointing,
-        predict_with_generate=predict_with_generate,
         val_size=val_size,
-        auto_find_batch_size=auto_find_batch_size,
+        wandb_project=wandb_project,
     )
-    run_training(cfg)
+    run_training(pcfg, args)
 
 
 if __name__ == "__main__":
