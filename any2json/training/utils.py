@@ -9,7 +9,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 import wandb
 from transformers.trainer_callback import TrainerCallback
-
+from any2json.utils import logger
 from any2json.grouping import train_test_split_groups
 
 
@@ -50,7 +50,7 @@ def apply_debug_limit(ds: DatasetDict, limit: int) -> DatasetDict:
 
 
 class EvalLoggerCallback(TrainerCallback):
-    def __init__(self, tokenizer: AutoTokenizer, raw_eval_ds, num_examples: int = 4):
+    def __init__(self, tokenizer: AutoTokenizer, raw_eval_ds, num_examples: int = 3):
         self.tokenizer = tokenizer
         self.raw_eval_ds = raw_eval_ds
         self.table = wandb.Table(
@@ -89,6 +89,7 @@ class EvalLoggerCallback(TrainerCallback):
             max_new_tokens=max_new_tokens,
             do_sample=False,
             num_beams=1,
+            pad_token_id=self.tokenizer.pad_token_id,
         )
         attn = toks.get("attention_mask")
         start = (
@@ -103,30 +104,29 @@ class EvalLoggerCallback(TrainerCallback):
         self, model: Any, prompts: list[str]
     ) -> tuple[list[str], list[str]]:
         model.eval()
+        old_use_cache = model.config.use_cache
+        model.config.use_cache = True
         device = next(model.parameters()).device
-        toks = self.tokenizer(
-            prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=self.tokenizer.model_max_length // 2,
-        )
-
-        input_prompts = []
-        generations = []
-
-        with torch.no_grad():
-            for k, v in tqdm(toks.items(), desc="Generating eval example predictions"):
-                input_prompts.append(
-                    self.tokenizer.decode(v["input_ids"], skip_special_tokens=False)
+        inputs: list[str] = []
+        preds: list[str] = []
+        with torch.inference_mode():
+            for p in tqdm(prompts, desc="Generating eval example predictions"):
+                toks = self.tokenizer(
+                    p,
+                    return_tensors="pt",
+                    truncation=False,
+                    max_length=self.tokenizer.model_max_length // 2,
                 )
-                one_example_toks = {k: v.to(device)}
-                generation = self.generate_prediction_for_prompt(
-                    model, one_example_toks, max_new_tokens=len(v)
+                toks = {k: v.to(device) for k, v in toks.items()}
+                pred = self.generate_prediction_for_prompt(
+                    model,
+                    toks,
+                    max_new_tokens=int(len(toks["input_ids"][0]) * 0.7),
                 )
-                generations.append(generation)
-
-        return input_prompts, generations
+                inputs.append(p)
+                preds.append(pred)
+        model.config.use_cache = old_use_cache
+        return inputs, preds
 
     def log_examples(
         self,
@@ -145,16 +145,20 @@ class EvalLoggerCallback(TrainerCallback):
                 ip,
                 p,
             )
-        wandb.log({"eval_examples": self.table}, step=state.global_step)
+        wandb.log({"eval_examples": self.table})
 
     def on_evaluate(
         self, args, state, control, model=None, tokenizer=None, metrics=None, **kwargs
     ):
+        logger.info(f"Running ´val example predictions callback")
         if model is None:
             return
         rows = self.sample_rows()
         prompts = self.build_prompts(rows)
         input_prompts, preds = self.generate_predictions(model, prompts)
+        logger.info(
+            f"Generated {len(input_prompts)} predictions.\nPrompts:\n{input_prompts}\nPreds:\n{preds}"
+        )
         self.log_examples(state, rows, input_prompts, preds)
 
 
