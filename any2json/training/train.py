@@ -236,9 +236,7 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
         f"Filtering tokenized data by length, max_source_length: {pcfg.max_source_length}, max_target_length: {pcfg.max_target_length}"
     )
     tokenized = filter_tokenized_splits_by_length(
-        tokenized,
-        max_source_length=pcfg.max_source_length or tokenizer.model_max_length // 2,
-        max_target_length=pcfg.max_target_length or tokenizer.model_max_length // 2,
+        tokenized, pcfg.max_source_length, pcfg.max_target_length
     )
     logger.info(f"Filtered tokenized datasets: {tokenized}")
 
