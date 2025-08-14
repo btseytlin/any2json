@@ -22,7 +22,6 @@ from any2json.training.utils import (
     load_hf_dataset,
     apply_debug_limit,
     make_group_split,
-    percentile,
     EvalLoggerCallback,
     estimate_token_lengths,
 )
@@ -142,28 +141,6 @@ def tokenize_splits(
         fn, batched=True, remove_columns=ds["validation"].column_names
     )
     return DatasetDict({"train": train_tok, "validation": val_tok})
-
-
-def build_length_filter_fn(
-    tokenizer: AutoTokenizer,
-    max_source_length: int,
-    max_target_length: int,
-) -> Callable[[dict[str, Any]], list[bool]]:
-    def pred(batch: dict[str, Any]) -> list[bool]:
-        inputs = [
-            format_example(i, s)
-            for i, s in zip(batch["input_data"], batch["schema"], strict=True)
-        ]
-        src = tokenizer(inputs, padding=False, truncation=False, return_tensors=None)
-        tgt = tokenizer(
-            batch["output"], padding=False, truncation=False, return_tensors=None
-        )
-        return [
-            (len(a) <= max_source_length) and (len(b) <= max_target_length)
-            for a, b in zip(src["input_ids"], tgt["input_ids"], strict=True)
-        ]
-
-    return pred
 
 
 def build_tokenized_length_filter_fn(

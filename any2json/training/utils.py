@@ -5,6 +5,7 @@ from typing import Any
 import click
 from datasets import load_from_disk, load_dataset, DatasetDict
 import torch
+from tqdm import tqdm
 from transformers import AutoTokenizer
 import wandb
 from transformers.trainer_callback import TrainerCallback
@@ -12,8 +13,8 @@ from transformers.trainer_callback import TrainerCallback
 from any2json.grouping import train_test_split_groups
 
 
-def format_example(input_data: str, schema: str, output: str = "") -> str:
-    return f"[SCHEMA]\n{schema}\n[INPUT]\n{input_data}\n[OUTPUT]\n{output}"
+def format_example(input_data: str, schema: str) -> str:
+    return f"[SCHEMA]\n{schema}\n[INPUT]\n{input_data}\n[OUTPUT]\n"
 
 
 def percentile(values: list[int], q: float) -> int:
@@ -53,7 +54,15 @@ class EvalLoggerCallback(TrainerCallback):
         self.tokenizer = tokenizer
         self.raw_eval_ds = raw_eval_ds
         self.table = wandb.Table(
-            columns=["epoch", "step", "input", "schema", "target", "prediction"],
+            columns=[
+                "epoch",
+                "step",
+                "input",
+                "schema",
+                "target",
+                "prompt",
+                "prediction",
+            ],
             log_mode="INCREMENTAL",
         )
         self.num_examples = min(num_examples, len(raw_eval_ds))
@@ -67,21 +76,11 @@ class EvalLoggerCallback(TrainerCallback):
             format_example(
                 input_data=r["input_data"],
                 schema=r["schema"],
-                output=r["output"],
             )
             for r in rows
         ]
 
-    def generate_prediction_for_prompt(self, model: Any, prompt: str) -> str:
-        device = next(model.parameters()).device
-        toks = self.tokenizer(
-            prompt,
-            return_tensors="pt",
-            padding=False,
-            truncation=False,
-            max_length=self.tokenizer.model_max_length // 2,
-        )
-        toks = {k: v.to(device) for k, v in toks.items()}
+    def generate_prediction_for_prompt(self, model: Any, toks: dict[str, Any]) -> str:
         out = model.generate(
             **toks,
             max_new_tokens=self.tokenizer.model_max_length // 2,
@@ -95,23 +94,52 @@ class EvalLoggerCallback(TrainerCallback):
             else int(toks["input_ids"].shape[1])
         )
         seq = out[0]
-        return self.tokenizer.decode(seq[start:], skip_special_tokens=True)
+        return self.tokenizer.decode(seq[start:], skip_special_tokens=False)
 
-    def generate_predictions(self, model: Any, prompts: list[str]) -> list[str]:
+    def generate_predictions(
+        self, model: Any, prompts: list[str]
+    ) -> tuple[list[str], list[str]]:
         model.eval()
+        device = next(model.parameters()).device
+        toks = self.tokenizer(
+            prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=self.tokenizer.model_max_length // 2,
+        )
+
+        input_prompts = []
+        generations = []
+
         with torch.no_grad():
-            return [self.generate_prediction_for_prompt(model, p) for p in prompts]
+            for k, v in tqdm(toks.items(), desc="Generating eval example predictions"):
+                input_prompts.append(
+                    self.tokenizer.decode(v, skip_special_tokens=False)
+                )
+                one_example_toks = {k: v.to(device)}
+                generation = self.generate_prediction_for_prompt(
+                    model, one_example_toks
+                )
+                generations.append(generation)
+
+        return input_prompts, generations
 
     def log_examples(
-        self, state: Any, rows: list[dict[str, Any]], preds: list[str]
+        self,
+        state: Any,
+        rows: list[dict[str, Any]],
+        input_prompts: list[str],
+        preds: list[str],
     ) -> None:
-        for r, p in zip(rows, preds, strict=True):
+        for r, ip, p in zip(rows, input_prompts, preds, strict=True):
             self.table.add_data(
                 state.epoch,
                 state.global_step,
                 r["input_data"],
                 r["schema"],
                 r["output"],
+                ip,
                 p,
             )
         wandb.log({"eval_examples": self.table}, step=state.global_step)
@@ -123,8 +151,8 @@ class EvalLoggerCallback(TrainerCallback):
             return
         rows = self.sample_rows()
         prompts = self.build_prompts(rows)
-        preds = self.generate_predictions(model, prompts)
-        self.log_examples(state, rows, preds)
+        input_prompts, preds = self.generate_predictions(model, prompts)
+        self.log_examples(state, rows, input_prompts, preds)
 
 
 def estimate_token_lengths(dataset_path: str, model_name: str, samples: int) -> None:
