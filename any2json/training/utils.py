@@ -80,10 +80,13 @@ class EvalLoggerCallback(TrainerCallback):
             for r in rows
         ]
 
-    def generate_prediction_for_prompt(self, model: Any, toks: dict[str, Any]) -> str:
+    def generate_prediction_for_prompt(
+        self, model: Any, toks: dict[str, Any], max_new_tokens: int | None = None
+    ) -> str:
+        max_new_tokens = max_new_tokens or self.tokenizer.model_max_length // 2
         out = model.generate(
             **toks,
-            max_new_tokens=self.tokenizer.model_max_length // 2,
+            max_new_tokens=max_new_tokens,
             do_sample=False,
             num_beams=1,
         )
@@ -119,7 +122,7 @@ class EvalLoggerCallback(TrainerCallback):
                 )
                 one_example_toks = {k: v.to(device)}
                 generation = self.generate_prediction_for_prompt(
-                    model, one_example_toks
+                    model, one_example_toks, max_new_tokens=len(v)
                 )
                 generations.append(generation)
 
