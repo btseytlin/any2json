@@ -220,6 +220,7 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
     pcfg.max_target_length = pcfg.max_target_length or tokenizer.model_max_length // 2
     logger.info(f"Training with model: {pcfg.model_name}")
     os.environ.setdefault("WANDB_PROJECT", pcfg.wandb_project)
+    os.environ.setdefault("WANDB_LOG_MODEL", "checkpoint")
     wandb.init(project=pcfg.wandb_project, config={"model": pcfg.model_name})
     raw = load_hf_dataset(pcfg.dataset_path)
     logger.info(f"Loaded {len(raw['train'])} train samples")
