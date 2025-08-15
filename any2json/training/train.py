@@ -213,6 +213,10 @@ def create_trainer(
 def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
     validate_pipeline_config(pcfg)
     validate_training_args(args)
+
+    logger.info(f"Pipeline config: {pcfg}")
+    logger.info(f"Training arguments: {args}")
+
     tokenizer = AutoTokenizer.from_pretrained(pcfg.model_name)
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
