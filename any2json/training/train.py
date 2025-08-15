@@ -221,6 +221,7 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
     logger.info(f"Training with model: {pcfg.model_name}")
     os.environ.setdefault("WANDB_PROJECT", pcfg.wandb_project)
     os.environ.setdefault("WANDB_LOG_MODEL", "checkpoint")
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "False")
     wandb.init(project=pcfg.wandb_project, config={"model": pcfg.model_name})
     raw = load_hf_dataset(pcfg.dataset_path)
     logger.info(f"Loaded {len(raw['train'])} train samples")
