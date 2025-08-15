@@ -42,6 +42,7 @@ class PipelineConfig:
     debug_limit: int | None
     val_size: int
     wandb_project: str
+    pad_to_multiple_of: int
     hf_args: TrainingArguments
 
 
@@ -163,7 +164,7 @@ def filter_tokenized_splits_by_length(
 
 
 class CausalLMDataCollator:
-    def __init__(self, tokenizer: AutoTokenizer, pad_to_multiple_of: int | None = None):
+    def __init__(self, tokenizer: AutoTokenizer, pad_to_multiple_of: int = 8):
         self.tokenizer = tokenizer
         self.pad_to_multiple_of = pad_to_multiple_of
 
@@ -196,8 +197,12 @@ def create_trainer(
     tokenizer: AutoTokenizer,
     model: AutoModelForCausalLM,
     args: TrainingArguments,
+    pad_to_multiple_of: int = 8,
 ):
-    collator = CausalLMDataCollator(tokenizer=tokenizer)
+    collator = CausalLMDataCollator(
+        tokenizer=tokenizer,
+        pad_to_multiple_of=pad_to_multiple_of,
+    )
 
     trainer = Trainer(
         model=model,
@@ -211,6 +216,13 @@ def create_trainer(
 
 
 def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
+    if not args.output_dir:
+        args.output_dir = "checkpoints"
+    if args.group_by_length and not args.length_column_name:
+        args.length_column_name = "length"
+    if not args.report_to:
+        args.report_to = ["wandb"]
+
     validate_pipeline_config(pcfg)
     validate_training_args(args)
 
@@ -258,13 +270,7 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
         model.gradient_checkpointing_enable()
 
     logger.info(f"Creating trainer")
-    if not args.output_dir:
-        args.output_dir = "checkpoints"
-    if args.group_by_length and not args.length_column_name:
-        args.length_column_name = "length"
-    if not args.report_to:
-        args.report_to = ["wandb"]
-    trainer = create_trainer(tokenized, tokenizer, model, args)
+    trainer = create_trainer(tokenized, tokenizer, model, args, pcfg.pad_to_multiple_of)
     trainer.add_callback(EvalLoggerCallback(tokenizer, ds["validation"]))
 
     logger.info(f"Training")
@@ -312,6 +318,7 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--debug-limit", default=None, type=int)
 @click.option("--val-size", default=5000, type=int)
 @click.option("--wandb-project", default="any2json", type=str)
+@click.option("--pad-to-multiple-of", default=8, type=int)
 def train_cmd(
     ctx: click.Context,
     dataset_path: str,
@@ -325,6 +332,7 @@ def train_cmd(
     debug_limit: int | None,
     val_size: int,
     wandb_project: str,
+    pad_to_multiple_of: int,
 ):
     parser = HfArgumentParser(TrainingArguments)
     hf_args_list = list(ctx.args)
@@ -341,6 +349,7 @@ def train_cmd(
         debug_limit=debug_limit,
         val_size=val_size,
         wandb_project=wandb_project,
+        pad_to_multiple_of=pad_to_multiple_of,
         hf_args=args,
     )
     run_training(pcfg, args)
