@@ -227,7 +227,6 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
     validate_training_args(args)
 
     logger.info(f"Pipeline config: {pcfg}")
-    logger.info(f"Training arguments: {args}")
 
     tokenizer = AutoTokenizer.from_pretrained(pcfg.model_name)
     if not tokenizer.pad_token:
