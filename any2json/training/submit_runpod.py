@@ -87,7 +87,7 @@ def build_pod_kwargs(pcfg: PodConfig) -> dict[str, Any]:
 @click.option("--docker-args", default=None, type=str)
 @click.option("--command", default=None, type=str, help="Command to run on the pod")
 @click.option("--script", type=click.Path(exists=True, dir_okay=False), default=None)
-@click.option("--auto-terminate/--no-auto-terminate", default=False)
+@click.option("--auto-terminate/--no-auto-terminate", default=True)
 def submit(
     name: str,
     template_id: str,
@@ -154,6 +154,9 @@ def submit(
     )
     kwargs = build_pod_kwargs(pcfg)
 
+    docker_args = kwargs.get("docker_args", "")
+    cmd = ""
+
     if script:
         script_text = Path(script).read_text()
         encoded = base64.b64encode(script_text.encode()).decode()
@@ -161,13 +164,18 @@ def submit(
             f'echo \\"{encoded}\\" | base64 -d > /workspace/run.sh && '
             f"chmod +x /workspace/run.sh && /workspace/run.sh"
         ).strip()
-        cmd = f"bash -lc '{cmd}'"
-        docker_args = kwargs.get("docker_args", "")
-        docker_args = f"{docker_args} {cmd}".strip()
-
-        kwargs["docker_args"] = docker_args
     elif command:
-        kwargs["docker_args"] = f"{kwargs.get('docker_args', '')} {command}".strip()
+        cmd = command
+
+    if auto_terminate and cmd:
+        cmd = f"{cmd} && sleep 10m && runpodctl stop pod $RUNPOD_POD_ID"
+
+    if cmd:
+        cmd = f"bash -lc '{cmd}'"
+
+    docker_args = f"{docker_args} {cmd}".strip()
+
+    kwargs["docker_args"] = docker_args
     logger.info(f"Creating pod with kwargs: {kwargs}")
     pod = runpod.create_pod(
         image_name=image,

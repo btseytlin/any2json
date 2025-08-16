@@ -19,9 +19,9 @@ git pull && git fetch && git reset --hard origin/main
 export UV_LINK_MODE=copy
 uv sync && source .venv/bin/activate && uv pip install -e .
 
-python any2json/training/train.py estimate-lengths 
+echo "Setup complete, running command"
+python any2json/training/train.py estimate-lengths
 
-poweroff
 
 
 
