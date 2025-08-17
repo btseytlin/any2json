@@ -1,3 +1,8 @@
+try:
+    import unsloth
+except ImportError:
+    pass
+
 import os
 import random
 from dataclasses import dataclass
@@ -28,10 +33,6 @@ from any2json.training.utils import (
     CausalLMDataCollator,
 )
 
-try:
-    import unsloth
-except ImportError:
-    pass
 
 DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M"
 
