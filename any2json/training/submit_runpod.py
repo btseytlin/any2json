@@ -80,14 +80,14 @@ def build_pod_kwargs(pcfg: PodConfig) -> dict[str, Any]:
 @click.option("--container-disk-gb", default=None, type=int)
 @click.option("--volume-gb", default=None, type=int)
 @click.option("--volume-mount-path", default="/workspace", type=str)
-@click.option("--start-ssh/--no-start-ssh", default=True)
+@click.option("--start-ssh", is_flag=True)
 @click.option("--port", "ports", multiple=True, type=str)
 @click.option("--env", "env_pairs", multiple=True, type=str)
 @click.option("--network-volume-id", "network_volume_id", default=None, type=str)
 @click.option("--docker-args", default=None, type=str)
 @click.option("--command", default=None, type=str, help="Command to run on the pod")
 @click.option("--script", type=click.Path(exists=True, dir_okay=False), default=None)
-@click.option("--auto-terminate/--no-auto-terminate", default=True)
+@click.option("--auto-terminate", is_flag=True)
 def submit(
     name: str,
     template_id: str,

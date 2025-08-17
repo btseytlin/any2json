@@ -18,12 +18,14 @@ import torch
 from any2json.utils import configure_loggers, logger
 from any2json.training.augment import build_augmentor, apply_augmentations
 from any2json.training.utils import (
-    format_example,
     load_hf_dataset,
     apply_debug_limit,
     make_group_split,
     EvalLoggerCallback,
+    DebugTokensCallback,
     estimate_token_lengths,
+    build_tokenize_fn,
+    CausalLMDataCollator,
 )
 
 DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M"
@@ -43,6 +45,7 @@ class PipelineConfig:
     val_size: int
     wandb_project: str
     pad_to_multiple_of: int
+    debug_tokens: bool
     hf_args: TrainingArguments
 
 
@@ -64,34 +67,6 @@ def validate_training_args(args: TrainingArguments) -> None:
         raise ValueError("bf16 requested but not supported on this hardware")
     if getattr(args, "fp16", False) and not torch.cuda.is_available():
         raise ValueError("fp16 requested but CUDA is not available")
-
-
-def build_tokenize_fn(
-    tokenizer: AutoTokenizer,
-) -> Callable[[dict[str, Any]], dict[str, Any]]:
-    eos = tokenizer.eos_token_id
-    if eos is None:
-        raise ValueError("Tokenizer must define eos_token_id")
-
-    def tokenize(batch: dict[str, Any]) -> dict[str, Any]:
-        prompts = [
-            format_example(i, s)
-            for i, s in zip(batch["input_data"], batch["schema"], strict=True)
-        ]
-        enc_in = tokenizer(prompts, add_special_tokens=False)
-        enc_out = tokenizer(batch["output"], add_special_tokens=False)
-        input_ids: list[list[int]] = []
-        labels: list[list[int]] = []
-        lengths: list[int] = []
-        for a, b in zip(enc_in["input_ids"], enc_out["input_ids"], strict=True):
-            ids = a + b + [eos]
-            lbs = ([-100] * len(a)) + b + [eos]
-            input_ids.append(ids)
-            labels.append(lbs)
-            lengths.append(len(ids))
-        return {"input_ids": input_ids, "labels": labels, "length": lengths}
-
-    return tokenize
 
 
 def prepare_splits(ds: DatasetDict, seed: int, test_size: int = 5000) -> DatasetDict:
@@ -133,7 +108,7 @@ def augment_train_split(ds: DatasetDict, cfg: PipelineConfig, seed: int) -> Data
 def tokenize_splits(
     ds: DatasetDict, tokenizer: AutoTokenizer, cfg: PipelineConfig
 ) -> DatasetDict:
-    fn = build_tokenize_fn(tokenizer)
+    fn = build_tokenize_fn(tokenizer, debug=cfg.debug_tokens)
     train_tok = ds["train"].map(
         fn, batched=True, remove_columns=ds["train"].column_names
     )
@@ -165,41 +140,14 @@ def filter_tokenized_splits_by_length(
     return DatasetDict({"train": train_f, "validation": val_f})
 
 
-class CausalLMDataCollator:
-    def __init__(self, tokenizer: AutoTokenizer, pad_to_multiple_of: int = 8):
-        self.tokenizer = tokenizer
-        self.pad_to_multiple_of = pad_to_multiple_of
-
-    def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
-        max_len = max(len(f["input_ids"]) for f in features)
-        if self.pad_to_multiple_of:
-            m = self.pad_to_multiple_of
-            max_len = ((max_len + m - 1) // m) * m
-        pad_id = (
-            self.tokenizer.pad_token_id
-            or self.tokenizer.eos_token_id
-            or self.tokenizer.unk_token_id
-        )
-        input_ids, labels, attn = [], [], []
-        for f in features:
-            ids, lbs = f["input_ids"], f["labels"]
-            pad = max_len - len(ids)
-            input_ids.append(ids + [pad_id] * pad)
-            labels.append(lbs + ([-100] * pad))
-            attn.append([1] * len(ids) + [0] * pad)
-        return {
-            "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "labels": torch.tensor(labels, dtype=torch.long),
-            "attention_mask": torch.tensor(attn, dtype=torch.long),
-        }
-
-
 def create_trainer(
+    ds: DatasetDict,
     tokenized: DatasetDict,
     tokenizer: AutoTokenizer,
     model: AutoModelForCausalLM,
     args: TrainingArguments,
     pad_to_multiple_of: int = 8,
+    debug_tokens: bool = False,
 ):
     collator = CausalLMDataCollator(
         tokenizer=tokenizer,
@@ -214,6 +162,13 @@ def create_trainer(
         tokenizer=tokenizer,
         data_collator=collator,
     )
+    trainer.add_callback(
+        EvalLoggerCallback(
+            tokenizer, ds["validation"], pad_to_multiple_of=pad_to_multiple_of
+        )
+    )
+    if debug_tokens:
+        trainer.add_callback(DebugTokensCallback(tokenizer))
     return trainer
 
 
@@ -271,8 +226,15 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
         model.gradient_checkpointing_enable()
 
     logger.info(f"Creating trainer")
-    trainer = create_trainer(tokenized, tokenizer, model, args, pcfg.pad_to_multiple_of)
-    trainer.add_callback(EvalLoggerCallback(tokenizer, ds["validation"]))
+    trainer = create_trainer(
+        ds=ds,
+        tokenized=tokenized,
+        tokenizer=tokenizer,
+        model=model,
+        args=args,
+        pad_to_multiple_of=pcfg.pad_to_multiple_of,
+        debug_tokens=pcfg.debug_tokens,
+    )
 
     logger.info(f"Training")
     trainer.train()
@@ -320,6 +282,7 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--val-size", default=5000, type=int)
 @click.option("--wandb-project", default="any2json", type=str)
 @click.option("--pad-to-multiple-of", default=8, type=int)
+@click.option("--debug-tokens", is_flag=True)
 def train_cmd(
     ctx: click.Context,
     dataset_path: str,
@@ -334,6 +297,7 @@ def train_cmd(
     val_size: int,
     wandb_project: str,
     pad_to_multiple_of: int,
+    debug_tokens: bool,
 ):
     parser = HfArgumentParser(TrainingArguments)
     hf_args_list = list(ctx.args)
@@ -352,6 +316,7 @@ def train_cmd(
         wandb_project=wandb_project,
         pad_to_multiple_of=pad_to_multiple_of,
         hf_args=args,
+        debug_tokens=debug_tokens,
     )
     run_training(pcfg, args)
 
