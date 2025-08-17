@@ -70,6 +70,8 @@ def build_tokenize_fn(
     tokenizer: AutoTokenizer,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     eos = tokenizer.eos_token_id
+    if eos is None:
+        raise ValueError("Tokenizer must define eos_token_id")
 
     def tokenize(batch: dict[str, Any]) -> dict[str, Any]:
         prompts = [
@@ -82,8 +84,8 @@ def build_tokenize_fn(
         labels: list[list[int]] = []
         lengths: list[int] = []
         for a, b in zip(enc_in["input_ids"], enc_out["input_ids"], strict=True):
-            ids = a + b + ([eos] if eos is not None else [])
-            lbs = ([-100] * len(a)) + b + ([-100] if eos is not None else [])
+            ids = a + b + [eos]
+            lbs = ([-100] * len(a)) + b + [eos]
             input_ids.append(ids)
             labels.append(lbs)
             lengths.append(len(ids))
@@ -183,7 +185,7 @@ class CausalLMDataCollator:
             ids, lbs = f["input_ids"], f["labels"]
             pad = max_len - len(ids)
             input_ids.append(ids + [pad_id] * pad)
-            labels.append(lbs + [-100] * pad)
+            labels.append(lbs + ([-100] * pad))
             attn.append([1] * len(ids) + [0] * pad)
         return {
             "input_ids": torch.tensor(input_ids, dtype=torch.long),
