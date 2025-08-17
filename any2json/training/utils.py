@@ -9,7 +9,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 import wandb
 from transformers.trainer_callback import TrainerCallback
-from any2json.training.augment import apply_augmentations
+from any2json.training.augment import apply_augmentations, build_augmentor
 from any2json.utils import logger
 from any2json.grouping import train_test_split_groups
 
@@ -455,7 +455,7 @@ def filter_tokenized_splits_by_length(
     return DatasetDict({"train": train_f, "validation": val_f})
 
 
-def augment_train_split(ds: DatasetDict, cfg: PipelineConfig, seed: int) -> DatasetDict:
+def augment_train_split(ds: DatasetDict, cfg, seed: int) -> DatasetDict:
     aug = build_augmentor(
         drop_schema_proba=cfg.drop_schema_proba,
         schema_missing_token=cfg.schema_missing_token,
