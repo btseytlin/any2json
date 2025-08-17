@@ -9,6 +9,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 import wandb
 from transformers.trainer_callback import TrainerCallback
+from any2json.training.augment import apply_augmentations
 from any2json.utils import logger
 from any2json.grouping import train_test_split_groups
 
@@ -427,3 +428,57 @@ def build_gen_toks(
         "attention_mask": torch.tensor([attn], dtype=torch.long).to(device),
     }
     return toks, padded, attn
+
+
+def build_tokenized_length_filter_fn(
+    max_source_length: int, max_target_length: int
+) -> Callable[[dict[str, Any]], list[bool]]:
+    def pred(batch: dict[str, Any]) -> list[bool]:
+        return [
+            (len(src) <= max_source_length)
+            and (sum(1 for t in lbl if t != -100) <= max_target_length)
+            for src, lbl in zip(batch["input_ids"], batch["labels"], strict=True)
+        ]
+
+    return pred
+
+
+def filter_tokenized_splits_by_length(
+    ds: DatasetDict,
+    max_source_length: int,
+    max_target_length: int,
+    num_proc: int = 8,
+) -> DatasetDict:
+    pred = build_tokenized_length_filter_fn(max_source_length, max_target_length)
+    train_f = ds["train"].filter(pred, batched=True, num_proc=num_proc)
+    val_f = ds["validation"].filter(pred, batched=True, num_proc=num_proc)
+    return DatasetDict({"train": train_f, "validation": val_f})
+
+
+def augment_train_split(ds: DatasetDict, cfg: PipelineConfig, seed: int) -> DatasetDict:
+    aug = build_augmentor(
+        drop_schema_proba=cfg.drop_schema_proba,
+        schema_missing_token=cfg.schema_missing_token,
+        input_aug_paths=cfg.input_aug,
+        output_aug_paths=cfg.output_aug,
+    )
+    rng = random.Random(seed)
+
+    def map_fn(batch: dict[str, Any]) -> dict[str, Any]:
+        inputs, schemas, outputs = [], [], []
+        for i, s, o in zip(
+            batch["input_data"], batch["schema"], batch["output"], strict=True
+        ):
+            ni, ns, no = apply_augmentations(i, s, o, aug, rng.random)
+            inputs.append(ni)
+            schemas.append(ns)
+            outputs.append(no)
+        return {
+            "input_data": inputs,
+            "schema": schemas,
+            "output": outputs,
+            "meta": batch.get("meta"),
+        }
+
+    train_aug = ds["train"].map(map_fn, batched=True)
+    return DatasetDict({"train": train_aug, "validation": ds["validation"]})

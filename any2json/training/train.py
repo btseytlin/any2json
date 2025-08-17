@@ -4,9 +4,7 @@ except ImportError:
     pass
 
 import os
-import random
 from dataclasses import dataclass
-from typing import Any, Callable
 
 import click
 from dotenv import load_dotenv
@@ -23,6 +21,8 @@ import torch
 from any2json.utils import configure_loggers, logger
 from any2json.training.augment import build_augmentor, apply_augmentations
 from any2json.training.utils import (
+    augment_train_split,
+    filter_tokenized_splits_by_length,
     load_hf_dataset,
     apply_debug_limit,
     make_group_split,
@@ -83,74 +83,26 @@ def prepare_splits(ds: DatasetDict, seed: int, test_size: int = 5000) -> Dataset
     return make_group_split(base, test_size=test_size, seed=seed)
 
 
-def augment_train_split(ds: DatasetDict, cfg: PipelineConfig, seed: int) -> DatasetDict:
-    aug = build_augmentor(
-        drop_schema_proba=cfg.drop_schema_proba,
-        schema_missing_token=cfg.schema_missing_token,
-        input_aug_paths=cfg.input_aug,
-        output_aug_paths=cfg.output_aug,
-    )
-    rng = random.Random(seed)
-
-    def map_fn(batch: dict[str, Any]) -> dict[str, Any]:
-        inputs, schemas, outputs = [], [], []
-        for i, s, o in zip(
-            batch["input_data"], batch["schema"], batch["output"], strict=True
-        ):
-            ni, ns, no = apply_augmentations(i, s, o, aug, rng.random)
-            inputs.append(ni)
-            schemas.append(ns)
-            outputs.append(no)
-        return {
-            "input_data": inputs,
-            "schema": schemas,
-            "output": outputs,
-            "meta": batch.get("meta"),
-        }
-
-    train_aug = ds["train"].map(map_fn, batched=True)
-    return DatasetDict({"train": train_aug, "validation": ds["validation"]})
-
-
 def tokenize_splits(
-    ds: DatasetDict, tokenizer: AutoTokenizer, cfg: PipelineConfig
+    ds: DatasetDict,
+    tokenizer: AutoTokenizer,
+    cfg: PipelineConfig,
+    num_proc: int = 8,
 ) -> DatasetDict:
     fn = build_tokenize_fn(tokenizer, debug=cfg.debug_tokens)
     train_tok = ds["train"].map(
         fn,
         batched=True,
         remove_columns=ds["train"].column_names,
-        num_proc=4,
+        num_proc=num_proc,
     )
     val_tok = ds["validation"].map(
         fn,
         batched=True,
         remove_columns=ds["validation"].column_names,
-        num_proc=4,
+        num_proc=num_proc,
     )
     return DatasetDict({"train": train_tok, "validation": val_tok})
-
-
-def build_tokenized_length_filter_fn(
-    max_source_length: int, max_target_length: int
-) -> Callable[[dict[str, Any]], list[bool]]:
-    def pred(batch: dict[str, Any]) -> list[bool]:
-        return [
-            (len(src) <= max_source_length)
-            and (sum(1 for t in lbl if t != -100) <= max_target_length)
-            for src, lbl in zip(batch["input_ids"], batch["labels"], strict=True)
-        ]
-
-    return pred
-
-
-def filter_tokenized_splits_by_length(
-    ds: DatasetDict, max_source_length: int, max_target_length: int
-) -> DatasetDict:
-    pred = build_tokenized_length_filter_fn(max_source_length, max_target_length)
-    train_f = ds["train"].filter(pred, batched=True, num_proc=4)
-    val_f = ds["validation"].filter(pred, batched=True, num_proc=4)
-    return DatasetDict({"train": train_f, "validation": val_f})
 
 
 def create_trainer(
