@@ -169,18 +169,14 @@ class EvalLoggerCallback(TrainerCallback):
         input_prompts: list[str],
         preds: list[str],
     ) -> None:
-        eos = self.tokenizer.eos_token_id
         pad_id = resolve_pad_id(self.tokenizer)
         m = self.pad_to_multiple_of
         for r, ip, p in zip(rows, input_prompts, preds, strict=True):
-            enc_in = self.tokenizer(
-                format_example(r["input_data"], r["schema"]), add_special_tokens=False
+            prompt_ids = encode_prompt_ids(self.tokenizer, r["input_data"], r["schema"])
+            target_ids = encode_target_ids(self.tokenizer, r["output"])
+            train_ids, train_labels = build_train_sequence(
+                self.tokenizer, prompt_ids, target_ids
             )
-            enc_out = self.tokenizer(r["output"], add_special_tokens=False)
-            a = enc_in["input_ids"][0]
-            b = enc_out["input_ids"][0]
-            train_ids = a + b + [eos]
-            train_labels = ([-100] * len(a)) + b + [eos]
             train_ids_p, train_attn = pad_to_multiple(train_ids, m, pad_id)
             train_labels_p, _ = pad_to_multiple(train_labels, m, -100)
             self.table.add_data(
@@ -400,18 +396,20 @@ def encode_prompt_ids(
     tokenizer: AutoTokenizer, input_data: str, schema: str
 ) -> list[int]:
     enc = tokenizer(format_example(input_data, schema), add_special_tokens=False)
-    return enc["input_ids"][0]
+    return enc["input_ids"]
 
 
 def encode_target_ids(tokenizer: AutoTokenizer, output: str) -> list[int]:
     enc = tokenizer(output, add_special_tokens=False)
-    return enc["input_ids"][0]
+    return enc["input_ids"]
 
 
 def build_train_sequence(
     tokenizer: AutoTokenizer, prompt_ids: list[int], target_ids: list[int]
 ) -> tuple[list[int], list[int]]:
     eos = tokenizer.eos_token_id
+    if eos is None:
+        raise ValueError("Tokenizer must define eos_token_id")
     ids = prompt_ids + target_ids + [eos]
     labels = ([-100] * len(prompt_ids)) + target_ids + [eos]
     return ids, labels
