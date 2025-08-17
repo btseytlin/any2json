@@ -46,6 +46,7 @@ class PipelineConfig:
     wandb_project: str
     pad_to_multiple_of: int
     debug_tokens: bool
+    unsloth: bool
     hf_args: TrainingArguments
 
 
@@ -172,29 +173,11 @@ def create_trainer(
     return trainer
 
 
-def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
-    if not args.output_dir:
-        args.output_dir = "checkpoints"
-    if args.group_by_length and not args.length_column_name:
-        args.length_column_name = "length"
-    if not args.report_to:
-        args.report_to = ["wandb"]
-
-    validate_pipeline_config(pcfg)
-    validate_training_args(args)
-
-    logger.info(f"Pipeline config: {pcfg}")
-
-    tokenizer = AutoTokenizer.from_pretrained(pcfg.model_name)
-    if not tokenizer.pad_token:
-        tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
-    pcfg.max_source_length = pcfg.max_source_length or tokenizer.model_max_length // 2
-    pcfg.max_target_length = pcfg.max_target_length or tokenizer.model_max_length // 2
-    logger.info(f"Training with model: {pcfg.model_name}")
-    os.environ.setdefault("WANDB_PROJECT", pcfg.wandb_project)
-    os.environ.setdefault("WANDB_LOG_MODEL", "checkpoint")
-    os.environ.setdefault("TOKENIZERS_PARALLELISM", "False")
-    wandb.init(project=pcfg.wandb_project, config={"model": pcfg.model_name})
+def prepare_dataset(
+    pcfg: PipelineConfig,
+    args: TrainingArguments,
+    tokenizer: AutoTokenizer,
+) -> DatasetDict:
     raw = load_hf_dataset(pcfg.dataset_path)
     logger.info(f"Loaded {len(raw['train'])} train samples")
 
@@ -219,11 +202,62 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
         tokenized, pcfg.max_source_length, pcfg.max_target_length
     )
     logger.info(f"Filtered tokenized datasets: {tokenized}")
+    return ds, tokenized
 
-    model = AutoModelForCausalLM.from_pretrained(pcfg.model_name)
-    model.config.use_cache = False
-    if getattr(args, "gradient_checkpointing", False):
-        model.gradient_checkpointing_enable()
+
+def prepare_model_and_tokenizer(
+    pcfg: PipelineConfig, args: TrainingArguments
+) -> tuple[AutoModelForCausalLM, AutoTokenizer | None]:
+    if pcfg.unsloth:
+        from unsloth import FastModel
+
+        assert "unsloth" in pcfg.model_name, "Must use an unsloth model with --unsloth"
+
+        max_seq_length = (
+            pcfg.max_source_length + pcfg.max_target_length
+            if pcfg.max_source_length and pcfg.max_target_length
+            else None
+        )
+
+        model, tokenizer = FastModel.from_pretrained(
+            pcfg.model_name,
+            full_finetuning=True,
+            use_gradient_checkpointing="unsloth",
+            max_seq_length=max_seq_length,
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(pcfg.model_name)
+        model.config.use_cache = False
+        if getattr(args, "gradient_checkpointing", False):
+            model.gradient_checkpointing_enable()
+        tokenizer = AutoTokenizer.from_pretrained(pcfg.model_name)
+
+        pcfg.max_source_length = (
+            pcfg.max_source_length or tokenizer.model_max_length // 2
+        )
+        pcfg.max_target_length = (
+            pcfg.max_target_length or tokenizer.model_max_length // 2
+        )
+    if not tokenizer.pad_token:
+        tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
+    return model, tokenizer
+
+
+def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
+    os.environ.setdefault("WANDB_PROJECT", pcfg.wandb_project)
+    os.environ.setdefault("WANDB_LOG_MODEL", "checkpoint")
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "False")
+
+    logger.info(f"Pipeline config: {pcfg}")
+
+    logger.info(f"Loading model and tokenizer")
+    model, tokenizer = prepare_model_and_tokenizer(pcfg, args)
+
+    logger.info(f"Training with model: {pcfg.model_name}")
+    wandb.init(project=pcfg.wandb_project, config={"model": pcfg.model_name})
+
+    logger.info(f"Preparing dataset")
+    ds, tokenized = prepare_dataset(pcfg, args, tokenizer)
 
     logger.info(f"Creating trainer")
     trainer = create_trainer(
@@ -283,6 +317,7 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--wandb-project", default="any2json", type=str)
 @click.option("--pad-to-multiple-of", default=8, type=int)
 @click.option("--debug-tokens", is_flag=True)
+@click.option("--unsloth", is_flag=True)
 def train_cmd(
     ctx: click.Context,
     dataset_path: str,
@@ -298,6 +333,7 @@ def train_cmd(
     wandb_project: str,
     pad_to_multiple_of: int,
     debug_tokens: bool,
+    unsloth: bool,
 ):
     parser = HfArgumentParser(TrainingArguments)
     hf_args_list = list(ctx.args)
@@ -315,9 +351,19 @@ def train_cmd(
         val_size=val_size,
         wandb_project=wandb_project,
         pad_to_multiple_of=pad_to_multiple_of,
-        hf_args=args,
         debug_tokens=debug_tokens,
+        unsloth=unsloth,
+        hf_args=args,
     )
+    if not args.output_dir:
+        args.output_dir = "checkpoints"
+    if args.group_by_length and not args.length_column_name:
+        args.length_column_name = "length"
+    if not args.report_to:
+        args.report_to = ["wandb"]
+
+    validate_pipeline_config(pcfg)
+    validate_training_args(args)
     run_training(pcfg, args)
 
 
