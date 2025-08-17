@@ -28,6 +28,11 @@ from any2json.training.utils import (
     CausalLMDataCollator,
 )
 
+try:
+    import unsloth
+except ImportError:
+    pass
+
 DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M"
 
 
@@ -111,10 +116,16 @@ def tokenize_splits(
 ) -> DatasetDict:
     fn = build_tokenize_fn(tokenizer, debug=cfg.debug_tokens)
     train_tok = ds["train"].map(
-        fn, batched=True, remove_columns=ds["train"].column_names
+        fn,
+        batched=True,
+        remove_columns=ds["train"].column_names,
+        num_proc=4,
     )
     val_tok = ds["validation"].map(
-        fn, batched=True, remove_columns=ds["validation"].column_names
+        fn,
+        batched=True,
+        remove_columns=ds["validation"].column_names,
+        num_proc=4,
     )
     return DatasetDict({"train": train_tok, "validation": val_tok})
 
@@ -136,8 +147,8 @@ def filter_tokenized_splits_by_length(
     ds: DatasetDict, max_source_length: int, max_target_length: int
 ) -> DatasetDict:
     pred = build_tokenized_length_filter_fn(max_source_length, max_target_length)
-    train_f = ds["train"].filter(pred, batched=True)
-    val_f = ds["validation"].filter(pred, batched=True)
+    train_f = ds["train"].filter(pred, batched=True, num_proc=4)
+    val_f = ds["validation"].filter(pred, batched=True, num_proc=4)
     return DatasetDict({"train": train_f, "validation": val_f})
 
 
