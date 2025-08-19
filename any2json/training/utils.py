@@ -268,10 +268,12 @@ class EvalLoggerCallback(TrainerCallback):
         raw_eval_ds,
         num_examples: int = 3,
         pad_to_multiple_of: int = 8,
+        max_new_tokens: int = 50,
     ):
         self.tokenizer = tokenizer
         self.raw_eval_ds = raw_eval_ds
         self.pad_to_multiple_of = pad_to_multiple_of
+        self.max_new_tokens = max_new_tokens
         self.table = wandb.Table(
             columns=[
                 "epoch",
@@ -295,12 +297,10 @@ class EvalLoggerCallback(TrainerCallback):
         self,
         model: Any,
         generation_input: dict[str, Any],
-        max_new_tokens: int | None = None,
     ) -> str:
-        max_new_tokens = max_new_tokens or self.tokenizer.model_max_length
         out = model.generate(
             **generation_input,
-            max_new_tokens=max_new_tokens,
+            max_new_tokens=self.max_new_tokens,
             do_sample=False,
             num_beams=1,
             pad_token_id=self.tokenizer.pad_token_id,
@@ -339,7 +339,6 @@ class EvalLoggerCallback(TrainerCallback):
                 pred = self.generate_completion_for_prompt(
                     model,
                     generation_input,
-                    max_new_tokens=50,
                 )
                 inputs.append(input_string)
                 preds.append(pred)

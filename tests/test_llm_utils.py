@@ -326,7 +326,9 @@ class TestEvalLoggerCallback:
 
     def test_sample_rows(self, tokenizer, mock_eval_dataset):
         callback = EvalLoggerCallback(
-            tokenizer=tokenizer, raw_eval_ds=mock_eval_dataset, num_examples=2
+            tokenizer=tokenizer,
+            raw_eval_ds=mock_eval_dataset,
+            num_examples=2,
         )
         rows = callback.sample_rows()
         assert len(rows) == 2
@@ -335,9 +337,12 @@ class TestEvalLoggerCallback:
         assert all("schema" in row for row in rows)
         assert all("output" in row for row in rows)
 
-    def test_generate_prediction_for_prompt(self, tokenizer, model, mock_eval_dataset):
+    def test_generate_completion_for_prompt(self, tokenizer, model, mock_eval_dataset):
         callback = EvalLoggerCallback(
-            tokenizer=tokenizer, raw_eval_ds=mock_eval_dataset, num_examples=1
+            tokenizer=tokenizer,
+            raw_eval_ds=mock_eval_dataset,
+            num_examples=1,
+            max_new_tokens=10,
         )
 
         prompt_ids = tokenizer("test prompt", add_special_tokens=False)["input_ids"]
@@ -347,14 +352,15 @@ class TestEvalLoggerCallback:
             "attention_mask": torch.tensor(attn, dtype=torch.long),
         }
 
-        pred = callback.generate_prediction_for_prompt(model, toks, max_new_tokens=10)
-        print(pred)
-        assert isinstance(pred, str)
-        assert len(pred) > 0
+        pred = callback.generate_completion_for_prompt(model, toks)
+        assert pred == "\n\nThe prompt is a text box that you"
 
     def test_generate_predictions(self, tokenizer, model, mock_eval_dataset):
         callback = EvalLoggerCallback(
-            tokenizer=tokenizer, raw_eval_ds=mock_eval_dataset, num_examples=1
+            tokenizer=tokenizer,
+            raw_eval_ds=mock_eval_dataset,
+            num_examples=1,
+            max_new_tokens=10,
         )
 
         batch = {
@@ -380,7 +386,11 @@ class TestEvalLoggerCallback:
         self, tokenizer, model, mock_eval_dataset
     ):
         callback = EvalLoggerCallback(
-            tokenizer=tokenizer, raw_eval_ds=mock_eval_dataset, num_examples=2
+            tokenizer=tokenizer,
+            raw_eval_ds=mock_eval_dataset,
+            num_examples=2,
+            pad_to_multiple_of=8,
+            max_new_tokens=10,
         )
 
         batch = {
@@ -395,7 +405,10 @@ class TestEvalLoggerCallback:
             "output": [mock_eval_dataset[0]["output"], mock_eval_dataset[1]["output"]],
         }
         tokenized = callback.tokenize_fn(batch)
-        inputs, preds = callback.generate_predictions(model, tokenized)
+        inputs, preds = callback.generate_predictions(
+            model,
+            tokenized,
+        )
 
         assert len(inputs) == 2
         assert len(preds) == 2
