@@ -41,8 +41,7 @@ DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M"
 class PipelineConfig:
     dataset_path: str
     model_name: str
-    max_source_length: int | None
-    max_target_length: int | None
+    max_sequence_length: int
     drop_schema_proba: float
     schema_missing_token: str
     input_aug: list[str]
@@ -160,10 +159,11 @@ def prepare_dataset(
     tokenized = tokenize_splits(ds, tokenizer, pcfg)
 
     logger.info(
-        f"Filtering tokenized data by length, max_source_length: {pcfg.max_source_length}, max_target_length: {pcfg.max_target_length}"
+        f"Filtering tokenized data by length, max_sequence_length: {pcfg.max_sequence_length}"
     )
     tokenized = filter_tokenized_splits_by_length(
-        tokenized, pcfg.max_source_length, pcfg.max_target_length
+        tokenized,
+        pcfg.max_sequence_length,
     )
     logger.info(f"Filtered tokenized datasets: {tokenized}")
     return ds, tokenized
@@ -177,17 +177,11 @@ def prepare_model_and_tokenizer(
 
         assert "unsloth" in pcfg.model_name, "Must use an unsloth model with --unsloth"
 
-        max_seq_length = (
-            pcfg.max_source_length + pcfg.max_target_length
-            if pcfg.max_source_length and pcfg.max_target_length
-            else None
-        )
-
         model, tokenizer = FastModel.from_pretrained(
             pcfg.model_name,
             full_finetuning=True,
             use_gradient_checkpointing="unsloth",
-            max_seq_length=max_seq_length,
+            max_seq_length=pcfg.max_sequence_length,
         )
     else:
         model = AutoModelForCausalLM.from_pretrained(pcfg.model_name)
@@ -210,13 +204,10 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
     logger.info(f"Loading model and tokenizer")
     model, tokenizer = prepare_model_and_tokenizer(pcfg, args)
 
-    pcfg.max_source_length = pcfg.max_source_length or tokenizer.model_max_length // 2
-    pcfg.max_source_length = min(pcfg.max_source_length, tokenizer.model_max_length)
-    pcfg.max_target_length = pcfg.max_target_length or tokenizer.model_max_length // 2
-    pcfg.max_target_length = min(pcfg.max_target_length, tokenizer.model_max_length)
+    pcfg.max_sequence_length = pcfg.max_sequence_length or tokenizer.model_max_length
+    pcfg.max_sequence_length = min(pcfg.max_sequence_length, tokenizer.model_max_length)
     logger.info(f"Model max length: {tokenizer.model_max_length}")
-    logger.info(f"Max source length: {pcfg.max_source_length}")
-    logger.info(f"Max target length: {pcfg.max_target_length}")
+    logger.info(f"Max sequence length: {pcfg.max_sequence_length}")
 
     logger.info(f"Training with model: {pcfg.model_name}")
     wandb.init(project=pcfg.wandb_project, config={"model": pcfg.model_name})
@@ -271,8 +262,7 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.pass_context
 @click.option("--dataset-path", default="btseytlin/any2json", type=str)
 @click.option("--model-name", default=DEFAULT_MODEL, type=str)
-@click.option("--max-source-length", default=None, type=int)
-@click.option("--max-target-length", default=None, type=int)
+@click.option("--max-sequence-length", default=None, type=int)
 @click.option("--drop-schema-proba", default=0.01, type=float)
 @click.option("--schema-missing-token", default="[MISSING]", type=str)
 @click.option("--input-aug", multiple=True, default=[], type=str)
@@ -287,8 +277,7 @@ def train_cmd(
     ctx: click.Context,
     dataset_path: str,
     model_name: str,
-    max_source_length: int | None,
-    max_target_length: int | None,
+    max_sequence_length: int | None,
     drop_schema_proba: float,
     schema_missing_token: str,
     input_aug: tuple[str, ...],
@@ -306,8 +295,7 @@ def train_cmd(
     pcfg = PipelineConfig(
         dataset_path=dataset_path,
         model_name=model_name,
-        max_source_length=max_source_length,
-        max_target_length=max_target_length,
+        max_sequence_length=max_sequence_length,
         drop_schema_proba=drop_schema_proba,
         schema_missing_token=schema_missing_token,
         input_aug=list(input_aug),

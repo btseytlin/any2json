@@ -1,7 +1,8 @@
 import json
+import os
 import pytest
 import torch
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from any2json.training.utils import (
     format_example,
@@ -10,17 +11,25 @@ from any2json.training.utils import (
     build_tokenize_fn,
     CausalLMDataCollator,
     resolve_pad_id,
-    build_gen_toks,
+    # build_gen_toks,
     build_tokenized_length_filter_fn,
     ids_to_token_str,
     encode_prompt_ids,
     encode_target_ids,
+    EvalLoggerCallback,
 )
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 @pytest.fixture
 def tokenizer():
     return AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM2-135M")
+
+
+@pytest.fixture
+def model():
+    return AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM2-135M")
 
 
 def test_format_example() -> None:
@@ -33,42 +42,74 @@ def test_format_example() -> None:
     assert s == expected
 
 
+def test_resolve_pad_id(tokenizer) -> None:
+    class A:
+        pad_token_id = 7
+        eos_token_id = 1
+        unk_token_id = 2
+
+    class B:
+        pad_token_id = None
+        eos_token_id = 5
+        unk_token_id = 9
+
+    class C:
+        pad_token_id = None
+        eos_token_id = None
+        unk_token_id = 3
+
+    assert resolve_pad_id(A()) == 7
+    assert resolve_pad_id(B()) == 5
+    assert resolve_pad_id(C()) == 3
+    pad_id = resolve_pad_id(tokenizer)
+    assert pad_id is not None
+
+
 class TestPadToMultiple:
     def test_pad_to_multiple_no_pad(self) -> None:
         ids, attn = pad_to_multiple(
-            ids=[9, 8, 7],
+            ids=[[9, 8, 7]],
             multiple=3,
             pad_id=0,
         )
-        assert ids == [9, 8, 7]
-        assert attn == [1, 1, 1]
+        assert ids == [[9, 8, 7]]
+        assert attn == [[1, 1, 1]]
 
     def test_pad_to_multiple_base(self) -> None:
         ids, attn = pad_to_multiple(
-            ids=[9, 8, 7],
+            ids=[[9, 8, 7]],
             multiple=4,
             pad_id=0,
         )
-        assert ids == [9, 8, 7, 0]
-        assert attn == [1, 1, 1, 0]
+        assert ids == [[9, 8, 7, 0]]
+        assert attn == [[1, 1, 1, 0]]
 
     def test_pad_to_multiple_larger_input(self) -> None:
         ids, attn = pad_to_multiple(
-            ids=[9, 8, 7, 6, 5, 4],
+            ids=[[9, 8, 7, 6, 5, 4]],
             multiple=4,
             pad_id=0,
         )
-        assert ids == [9, 8, 7, 6, 5, 4, 0, 0]
-        assert attn == [1, 1, 1, 1, 1, 1, 0, 0]
+        assert ids == [[9, 8, 7, 6, 5, 4, 0, 0]]
+        assert attn == [[1, 1, 1, 1, 1, 1, 0, 0]]
 
     def test_pad_to_multiple_eight(self) -> None:
         ids, attn = pad_to_multiple(
-            ids=[9, 8, 7],
+            ids=[[9, 8, 7]],
             multiple=8,
             pad_id=0,
         )
-        assert ids == [9, 8, 7, 0, 0, 0, 0, 0]
-        assert attn == [1, 1, 1, 0, 0, 0, 0, 0]
+        assert ids == [[9, 8, 7, 0, 0, 0, 0, 0]]
+        assert attn == [[1, 1, 1, 0, 0, 0, 0, 0]]
+
+    def test_pad_to_multiple_multiple_inputs(self) -> None:
+        ids, attn = pad_to_multiple(
+            ids=[[9, 8, 7, 6], [6, 5, 4]],
+            multiple=4,
+            pad_id=0,
+        )
+        assert ids == [[9, 8, 7, 6], [6, 5, 4, 0]]
+        assert attn == [[1, 1, 1, 1], [1, 1, 1, 0]]
 
 
 class TestTokenization:
@@ -159,61 +200,53 @@ class TestTokenization:
             expected_target = f"{batch['output'][i]}{tokenizer.eos_token}"
             assert tokenizer.decode(target_ids) == expected_target
 
+    def test_causal_lm_data_collator_padding(self, tokenizer) -> None:
+        coll = CausalLMDataCollator(tokenizer, pad_to_multiple_of=4)
+        features = [
+            {"input_ids": [3, 4, 5, 0], "labels": [-100, -100, 7, 0], "length": 3},
+            {
+                "input_ids": [6, 7, 8, 9, 10],
+                "labels": [-100, -100, 1, 2, 3],
+                "length": 5,
+            },
+        ]
+        out = coll(features)
+        assert out["input_ids"].shape == torch.Size([2, 8])
 
-def test_causal_lm_data_collator_padding(tokenizer) -> None:
-    coll = CausalLMDataCollator(tokenizer, pad_to_multiple_of=4)
-    features = [
-        {"input_ids": [3, 4, 5], "labels": [-100, -100, 7], "length": 3},
-        {"input_ids": [6, 7, 8, 9, 10], "labels": [-100, -100, 1, 2, 3], "length": 5},
-    ]
-    out = coll(features)
-    assert out["input_ids"].shape == torch.Size([2, 8])
-    assert out["attention_mask"][0].tolist() == [1, 1, 1, 0, 0, 0, 0, 0]
-    pad_id = resolve_pad_id(tokenizer)
-    assert out["input_ids"][0, 3:].tolist() == [pad_id] * 5
-    assert out["labels"][0, 3:].tolist() == [-100] * 5
+        assert out["input_ids"][0].tolist() == [
+            3,
+            4,
+            5,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ]
+        assert out["attention_mask"][0].tolist() == [1, 1, 1, 1, 0, 0, 0, 0]
 
+        assert out["input_ids"][1].tolist() == [
+            6,
+            7,
+            8,
+            9,
+            10,
+            0,
+            0,
+            0,
+        ]
+        assert out["attention_mask"][1].tolist() == [1, 1, 1, 1, 1, 0, 0, 0]
 
-def test_resolve_pad_id_variants(tokenizer) -> None:
-    class A:
-        pad_token_id = 7
-        eos_token_id = 1
-        unk_token_id = 2
-
-    class B:
-        pad_token_id = None
-        eos_token_id = 5
-        unk_token_id = 9
-
-    class C:
-        pad_token_id = None
-        eos_token_id = None
-        unk_token_id = 3
-
-    assert resolve_pad_id(A()) == 7
-    assert resolve_pad_id(B()) == 5
-    assert resolve_pad_id(C()) == 3
-    pad_id = resolve_pad_id(tokenizer)
-    assert pad_id is not None
-
-
-def test_build_gen_toks(tokenizer) -> None:
-    device = torch.device("cpu")
-    pad_id = resolve_pad_id(tokenizer)
-    toks, padded, attn = build_gen_toks(device, [1, 2, 3], 4, pad_id)
-    assert padded == [1, 2, 3, pad_id]
-    assert attn == [1, 1, 1, 0]
-    assert toks["input_ids"].shape == torch.Size([1, 4])
-
-
-def test_build_tokenized_length_filter_fn() -> None:
-    pred = build_tokenized_length_filter_fn(5, 2)
-    batch = {
-        "input_ids": [[1, 2, 3, 4, 5], [1, 2, 3, 4, 5]],
-        "labels": [[-100, -100, 7, 8, -100], [-100, 7, 8, 9, -100]],
-    }
-    res = pred(batch)
-    assert res == [True, False]
+    def test_build_tokenized_length_filter_fn(self) -> None:
+        pred = build_tokenized_length_filter_fn(
+            max_sequence_length=3,
+        )
+        batch = {
+            "input_ids": [[1, 2, 3], [1, 2, 3, 4, 5]],
+            "labels": [[-100, -100, 7], [-100, 7, 8, 9, -100]],
+        }
+        res = pred(batch)
+        assert res == [True, False]
 
 
 def test_ids_to_token_str_and_encoders(tokenizer) -> None:
@@ -230,37 +263,6 @@ def test_ids_to_token_str_and_encoders(tokenizer) -> None:
     c = encode_target_ids(tokenizer, "out")
     d = tokenizer("out", add_special_tokens=False)["input_ids"]
     assert c == d
-
-
-def test_collator_fallback_pad_id(tokenizer) -> None:
-    class NoPad:
-        def __init__(self) -> None:
-            self.pad_token_id = None
-            self.eos_token_id = 9
-            self.unk_token_id = 3
-
-    coll = CausalLMDataCollator(NoPad(), pad_to_multiple_of=4)
-    out = coll(
-        [
-            {"input_ids": [1, 2, 3], "labels": [4, 5, 6]},
-        ]
-    )
-    assert out["input_ids"][0, 3:].tolist() == [9]
-    assert out["labels"][0, 3:].tolist() == [-100]
-
-
-def test_real_tokenizer_properties(tokenizer) -> None:
-    assert hasattr(tokenizer, "eos_token_id")
-    assert hasattr(tokenizer, "model_max_length")
-    assert tokenizer.eos_token_id is not None
-
-    text = "Hello world"
-    enc = tokenizer(text, add_special_tokens=False)
-    assert "input_ids" in enc
-    assert isinstance(enc["input_ids"], list)
-
-    decoded = tokenizer.decode(enc["input_ids"])
-    assert isinstance(decoded, str)
 
 
 def test_full_pipeline_with_real_tokenizer(tokenizer) -> None:
@@ -290,3 +292,131 @@ def test_full_pipeline_with_real_tokenizer(tokenizer) -> None:
         assert torch.all(collated["attention_mask"][i, :seq_len] == 1)
         if collated["input_ids"].shape[1] > seq_len:
             assert torch.all(collated["attention_mask"][i, seq_len:] == 0)
+
+
+@pytest.fixture
+def mock_eval_dataset():
+    return [
+        {
+            "input_data": "hello world",
+            "schema": '{"type": "object", "properties": {"text": {"type": "string"}}}',
+            "output": '{"text": "hello world"}',
+        },
+        {
+            "input_data": "test data",
+            "schema": '{"type": "object", "properties": {"message": {"type": "string"}}}',
+            "output": '{"message": "test data"}',
+        },
+    ]
+
+
+class TestEvalLoggerCallback:
+    def test_init(self, tokenizer, mock_eval_dataset):
+        callback = EvalLoggerCallback(
+            tokenizer=tokenizer,
+            raw_eval_ds=mock_eval_dataset,
+            num_examples=2,
+            pad_to_multiple_of=8,
+        )
+        assert callback.tokenizer == tokenizer
+        assert callback.raw_eval_ds == mock_eval_dataset
+        assert callback.pad_to_multiple_of == 8
+        assert callback.num_examples == 2
+        assert callback.tokenize_fn is not None
+
+    def test_sample_rows(self, tokenizer, mock_eval_dataset):
+        callback = EvalLoggerCallback(
+            tokenizer=tokenizer, raw_eval_ds=mock_eval_dataset, num_examples=2
+        )
+        rows = callback.sample_rows()
+        assert len(rows) == 2
+        assert all(isinstance(row, dict) for row in rows)
+        assert all("input_data" in row for row in rows)
+        assert all("schema" in row for row in rows)
+        assert all("output" in row for row in rows)
+
+    def test_generate_prediction_for_prompt(self, tokenizer, model, mock_eval_dataset):
+        callback = EvalLoggerCallback(
+            tokenizer=tokenizer, raw_eval_ds=mock_eval_dataset, num_examples=1
+        )
+
+        prompt_ids = tokenizer("test prompt", add_special_tokens=False)["input_ids"]
+        padded, attn = pad_to_multiple([prompt_ids], 8, resolve_pad_id(tokenizer))
+        toks = {
+            "input_ids": torch.tensor(padded, dtype=torch.long),
+            "attention_mask": torch.tensor(attn, dtype=torch.long),
+        }
+
+        pred = callback.generate_prediction_for_prompt(model, toks, max_new_tokens=10)
+        print(pred)
+        assert isinstance(pred, str)
+        assert len(pred) > 0
+
+    def test_generate_predictions(self, tokenizer, model, mock_eval_dataset):
+        callback = EvalLoggerCallback(
+            tokenizer=tokenizer, raw_eval_ds=mock_eval_dataset, num_examples=1
+        )
+
+        batch = {
+            "input_data": [mock_eval_dataset[0]["input_data"]],
+            "schema": [mock_eval_dataset[0]["schema"]],
+            "output": [mock_eval_dataset[0]["output"]],
+        }
+        tokenized = callback.tokenize_fn(batch)
+        inputs, preds = callback.generate_predictions(model, tokenized)
+
+        assert inputs == [
+            '<|endoftext|>Convert input data to json according to JSONSchema\n[SCHEMA]{"type": "object", "properties": {"text": {"type": "string"}}}[INPUT]hello world[OUTPUT]'
+        ]
+
+        assert isinstance(preds[0], str)
+        assert len(preds[0]) > 0
+        assert "SCHEMA" not in preds[0]
+        assert "INPUT" not in preds[0]
+        assert batch["input_data"][0] not in preds[0]
+        assert batch["schema"][0] not in preds[0]
+
+    def test_generate_predictions_multiple_examples(
+        self, tokenizer, model, mock_eval_dataset
+    ):
+        callback = EvalLoggerCallback(
+            tokenizer=tokenizer, raw_eval_ds=mock_eval_dataset, num_examples=2
+        )
+
+        batch = {
+            "input_data": [
+                mock_eval_dataset[0]["input_data"],
+                mock_eval_dataset[1]["input_data"],
+            ],
+            "schema": [
+                mock_eval_dataset[0]["schema"],
+                mock_eval_dataset[1]["schema"],
+            ],
+            "output": [mock_eval_dataset[0]["output"], mock_eval_dataset[1]["output"]],
+        }
+        tokenized = callback.tokenize_fn(batch)
+        inputs, preds = callback.generate_predictions(model, tokenized)
+
+        assert len(inputs) == 2
+        assert len(preds) == 2
+
+        assert inputs[0] == (
+            '<|endoftext|>Convert input data to json according to JSONSchema\n[SCHEMA]{"type": "object", "properties": {"text": {"type": "string"}}}[INPUT]hello world[OUTPUT]'
+        )
+        assert inputs[1] == (
+            '<|endoftext|>Convert input data to json according to JSONSchema\n[SCHEMA]{"type": "object", "properties": {"message": {"type": "string"}}}[INPUT]test data[OUTPUT]'
+        )
+
+        assert isinstance(preds[0], str)
+        assert len(preds[0]) > 0
+        assert "SCHEMA" not in preds[0]
+        assert "INPUT" not in preds[0]
+        assert batch["input_data"][0] not in preds[0]
+        assert batch["schema"][0] not in preds[0]
+
+        assert isinstance(preds[1], str)
+        assert len(preds[1]) > 0
+        assert "SCHEMA" not in preds[1]
+        assert "INPUT" not in preds[1]
+        assert batch["input_data"][1] not in preds[1]
+        assert batch["schema"][1] not in preds[1]
