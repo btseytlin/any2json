@@ -195,13 +195,6 @@ def prepare_model_and_tokenizer(
         if getattr(args, "gradient_checkpointing", False):
             model.gradient_checkpointing_enable()
         tokenizer = AutoTokenizer.from_pretrained(pcfg.model_name)
-
-        pcfg.max_source_length = (
-            pcfg.max_source_length or tokenizer.model_max_length // 2
-        )
-        pcfg.max_target_length = (
-            pcfg.max_target_length or tokenizer.model_max_length // 2
-        )
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
     return model, tokenizer
@@ -216,6 +209,14 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
 
     logger.info(f"Loading model and tokenizer")
     model, tokenizer = prepare_model_and_tokenizer(pcfg, args)
+
+    pcfg.max_source_length = pcfg.max_source_length or tokenizer.model_max_length // 2
+    pcfg.max_source_length = min(pcfg.max_source_length, tokenizer.model_max_length)
+    pcfg.max_target_length = pcfg.max_target_length or tokenizer.model_max_length // 2
+    pcfg.max_target_length = min(pcfg.max_target_length, tokenizer.model_max_length)
+    logger.info(f"Model max length: {tokenizer.model_max_length}")
+    logger.info(f"Max source length: {pcfg.max_source_length}")
+    logger.info(f"Max target length: {pcfg.max_target_length}")
 
     logger.info(f"Training with model: {pcfg.model_name}")
     wandb.init(project=pcfg.wandb_project, config={"model": pcfg.model_name})

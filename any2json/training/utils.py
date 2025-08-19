@@ -14,8 +14,8 @@ from any2json.utils import logger
 from any2json.grouping import train_test_split_groups
 
 
-def format_example(input_data: str, schema: str) -> str:
-    return f"[SCHEMA]\n{schema}\n[INPUT]\n{input_data}\n[OUTPUT]\n"
+def format_example(input_data: str, schema: str, output: str = "") -> str:
+    return f"[SCHEMA]{schema}[INPUT]{input_data}[OUTPUT]{output}"
 
 
 def percentile(values: list[int], q: float) -> int:
@@ -58,6 +58,206 @@ def ids_to_token_str(tok: AutoTokenizer, ids: list[int]) -> str:
         else:
             out.append(tok.convert_ids_to_tokens([t], skip_special_tokens=False)[0])
     return " ".join(out)
+
+
+def estimate_token_lengths(dataset_path: str, model_name: str, samples: int) -> None:
+    ds_all = load_hf_dataset(dataset_path)
+    base = ds_all["train"] if "train" in ds_all else list(ds_all.values())[0]
+    n = min(samples, len(base))
+    rows = [base[i] for i in range(n)]
+    tok = AutoTokenizer.from_pretrained(model_name)
+    src = [
+        len(tok(format_example(r["input_data"], r["schema"]))["input_ids"])
+        for r in rows
+    ]
+    tgt = [len(tok(r["output"])["input_ids"]) for r in rows]
+    click.echo(
+        f"src p90={percentile(src, 0.9)} p95={percentile(src, 0.95)} p99={percentile(src, 0.99)}"
+    )
+    click.echo(
+        f"tgt p90={percentile(tgt, 0.9)} p95={percentile(tgt, 0.95)} p99={percentile(tgt, 0.99)}"
+    )
+
+
+def build_tokenize_fn(
+    tokenizer: AutoTokenizer,
+    debug: bool = False,
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    eos = tokenizer.eos_token_id
+    if eos is None:
+        raise ValueError("Tokenizer must define eos_token_id")
+
+    def tokenize(batch: dict[str, Any]) -> dict[str, Any]:
+        input_data = batch["input_data"]
+        schema = batch["schema"]
+        output = batch["output"]
+        prompts = [
+            format_example(i, s) for i, s in zip(input_data, schema, strict=True)
+        ]
+        enc_in = tokenizer(prompts, add_special_tokens=False)
+        enc_out = tokenizer(output, add_special_tokens=False)
+        input_ids: list[list[int]] = []
+        labels: list[list[int]] = []
+        lengths: list[int] = []
+        for idx, (prompt_ids, target_ids) in enumerate(
+            zip(enc_in["input_ids"], enc_out["input_ids"], strict=True)
+        ):
+            ids, lbs = build_train_sequence(tokenizer, prompt_ids, target_ids)
+            input_ids.append(ids)
+            labels.append(lbs)
+            lengths.append(len(ids))
+            if debug and idx == 0:
+                logger.debug(f"DEBUG TOKENIZATION - Example {idx}:")
+                logger.debug(f"  Input prompt: {repr(prompts[idx])}")
+                logger.debug(f"  Input tokens: {prompt_ids}")
+                logger.debug(f"  Input decoded: {repr(tokenizer.decode(prompt_ids))}")
+                logger.debug(f"  Target tokens: {target_ids}")
+                logger.debug(f"  Target decoded: {repr(tokenizer.decode(target_ids))}")
+                logger.debug(f"  Output: {repr(batch['output'][idx])}")
+                logger.debug(f"  EOS token: {eos}")
+                logger.debug(f"  Final input_ids: {ids}")
+                logger.debug(f"  Final labels: {lbs}")
+                logger.debug(f"  Final length: {len(ids)}")
+        return {"input_ids": input_ids, "labels": labels, "length": lengths}
+
+    return tokenize
+
+
+class CausalLMDataCollator:
+    def __init__(self, tokenizer: AutoTokenizer, pad_to_multiple_of: int = 8):
+        self.tokenizer = tokenizer
+        self.pad_to_multiple_of = pad_to_multiple_of
+
+    def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
+        max_len = max(len(f["input_ids"]) for f in features)
+        if self.pad_to_multiple_of:
+            m = self.pad_to_multiple_of
+            max_len = ((max_len + m - 1) // m) * m
+        pad_id = (
+            self.tokenizer.pad_token_id
+            or self.tokenizer.eos_token_id
+            or self.tokenizer.unk_token_id
+        )
+        input_ids, labels, attn = [], [], []
+        for f in features:
+            ids, lbs = f["input_ids"], f["labels"]
+            pad = max_len - len(ids)
+            input_ids.append(ids + [pad_id] * pad)
+            labels.append(lbs + ([-100] * pad))
+            attn.append([1] * len(ids) + [0] * pad)
+        return {
+            "input_ids": torch.tensor(input_ids, dtype=torch.long),
+            "labels": torch.tensor(labels, dtype=torch.long),
+            "attention_mask": torch.tensor(attn, dtype=torch.long),
+        }
+
+
+def resolve_pad_id(tokenizer: AutoTokenizer) -> int:
+    return tokenizer.pad_token_id or tokenizer.eos_token_id or tokenizer.unk_token_id
+
+
+def pad_to_multiple(
+    ids: list[int], multiple: int, pad_id: int
+) -> tuple[list[int], list[int]]:
+    if not multiple:
+        return ids, [1] * len(ids)
+    tgt = ((len(ids) + multiple - 1) // multiple) * multiple
+    pad = max(0, tgt - len(ids))
+    return ids + [pad_id] * pad, ([1] * len(ids) + [0] * pad)
+
+
+def encode_prompt_ids(
+    tokenizer: AutoTokenizer, input_data: str, schema: str
+) -> list[int]:
+    enc = tokenizer(format_example(input_data, schema), add_special_tokens=False)
+    return enc["input_ids"]
+
+
+def encode_target_ids(tokenizer: AutoTokenizer, output: str) -> list[int]:
+    enc = tokenizer(output, add_special_tokens=False)
+    return enc["input_ids"]
+
+
+def build_train_sequence(
+    tokenizer: AutoTokenizer,
+    prompt_ids: list[int],
+    target_ids: list[int],
+) -> tuple[list[int], list[int]]:
+    bos = tokenizer.bos_token_id
+    eos = tokenizer.eos_token_id
+    if eos is None:
+        raise ValueError("Tokenizer must define eos_token_id")
+    ids = [bos] + prompt_ids + target_ids + [eos]
+    labels = ([-100] * (len(prompt_ids) + 1)) + target_ids + [eos]
+    return ids, labels
+
+
+def build_gen_toks(
+    device: torch.device,
+    prompt_ids: list[int],
+    pad_multiple: int,
+    pad_id: int,
+) -> tuple[dict[str, torch.Tensor], list[int], list[int]]:
+    padded, attn = pad_to_multiple(prompt_ids, pad_multiple, pad_id)
+    toks = {
+        "input_ids": torch.tensor([padded], dtype=torch.long).to(device),
+        "attention_mask": torch.tensor([attn], dtype=torch.long).to(device),
+    }
+    return toks, padded, attn
+
+
+def build_tokenized_length_filter_fn(
+    max_source_length: int, max_target_length: int
+) -> Callable[[dict[str, Any]], list[bool]]:
+    def pred(batch: dict[str, Any]) -> list[bool]:
+        return [
+            (len(src) <= max_source_length)
+            and (sum(1 for t in lbl if t != -100) <= max_target_length)
+            for src, lbl in zip(batch["input_ids"], batch["labels"], strict=True)
+        ]
+
+    return pred
+
+
+def filter_tokenized_splits_by_length(
+    ds: DatasetDict,
+    max_source_length: int,
+    max_target_length: int,
+    num_proc: int = 8,
+) -> DatasetDict:
+    pred = build_tokenized_length_filter_fn(max_source_length, max_target_length)
+    train_f = ds["train"].filter(pred, batched=True, num_proc=num_proc)
+    val_f = ds["validation"].filter(pred, batched=True, num_proc=num_proc)
+    return DatasetDict({"train": train_f, "validation": val_f})
+
+
+def augment_train_split(ds: DatasetDict, cfg, seed: int) -> DatasetDict:
+    aug = build_augmentor(
+        drop_schema_proba=cfg.drop_schema_proba,
+        schema_missing_token=cfg.schema_missing_token,
+        input_aug_paths=cfg.input_aug,
+        output_aug_paths=cfg.output_aug,
+    )
+    rng = random.Random(seed)
+
+    def map_fn(batch: dict[str, Any]) -> dict[str, Any]:
+        inputs, schemas, outputs = [], [], []
+        for i, s, o in zip(
+            batch["input_data"], batch["schema"], batch["output"], strict=True
+        ):
+            ni, ns, no = apply_augmentations(i, s, o, aug, rng.random)
+            inputs.append(ni)
+            schemas.append(ns)
+            outputs.append(no)
+        return {
+            "input_data": inputs,
+            "schema": schemas,
+            "output": outputs,
+            "meta": batch.get("meta"),
+        }
+
+    train_aug = ds["train"].map(map_fn, batched=True)
+    return DatasetDict({"train": train_aug, "validation": ds["validation"]})
 
 
 class EvalLoggerCallback(TrainerCallback):
@@ -286,199 +486,3 @@ class DebugTokensCallback(TrainerCallback):
                 )
 
             model.forward = debug_forward
-
-
-def estimate_token_lengths(dataset_path: str, model_name: str, samples: int) -> None:
-    ds_all = load_hf_dataset(dataset_path)
-    base = ds_all["train"] if "train" in ds_all else list(ds_all.values())[0]
-    n = min(samples, len(base))
-    rows = [base[i] for i in range(n)]
-    tok = AutoTokenizer.from_pretrained(model_name)
-    src = [
-        len(tok(format_example(r["input_data"], r["schema"]))["input_ids"])
-        for r in rows
-    ]
-    tgt = [len(tok(r["output"])["input_ids"]) for r in rows]
-    click.echo(
-        f"src p90={percentile(src, 0.9)} p95={percentile(src, 0.95)} p99={percentile(src, 0.99)}"
-    )
-    click.echo(
-        f"tgt p90={percentile(tgt, 0.9)} p95={percentile(tgt, 0.95)} p99={percentile(tgt, 0.99)}"
-    )
-
-
-def build_tokenize_fn(
-    tokenizer: AutoTokenizer,
-    debug: bool = False,
-) -> Callable[[dict[str, Any]], dict[str, Any]]:
-    eos = tokenizer.eos_token_id
-    if eos is None:
-        raise ValueError("Tokenizer must define eos_token_id")
-
-    def tokenize(batch: dict[str, Any]) -> dict[str, Any]:
-        prompts = [
-            format_example(i, s)
-            for i, s in zip(batch["input_data"], batch["schema"], strict=True)
-        ]
-        enc_in = tokenizer(prompts, add_special_tokens=False)
-        enc_out = tokenizer(batch["output"], add_special_tokens=False)
-        input_ids: list[list[int]] = []
-        labels: list[list[int]] = []
-        lengths: list[int] = []
-        for idx, (a, b) in enumerate(
-            zip(enc_in["input_ids"], enc_out["input_ids"], strict=True)
-        ):
-            ids = a + b + [eos]
-            lbs = ([-100] * len(a)) + b + [eos]
-            input_ids.append(ids)
-            labels.append(lbs)
-            lengths.append(len(ids))
-            if debug and idx == 0:
-                logger.debug(f"DEBUG TOKENIZATION - Example {idx}:")
-                logger.debug(f"  Input prompt: {repr(prompts[idx])}")
-                logger.debug(f"  Input tokens: {a}")
-                logger.debug(f"  Input decoded: {repr(tokenizer.decode(a))}")
-                logger.debug(f"  Target tokens: {b}")
-                logger.debug(f"  Target decoded: {repr(tokenizer.decode(b))}")
-                logger.debug(f"  Output: {repr(batch['output'][idx])}")
-                logger.debug(f"  EOS token: {eos}")
-                logger.debug(f"  Final input_ids: {ids}")
-                logger.debug(f"  Final labels: {lbs}")
-                logger.debug(f"  Final length: {len(ids)}")
-        return {"input_ids": input_ids, "labels": labels, "length": lengths}
-
-    return tokenize
-
-
-class CausalLMDataCollator:
-    def __init__(self, tokenizer: AutoTokenizer, pad_to_multiple_of: int = 8):
-        self.tokenizer = tokenizer
-        self.pad_to_multiple_of = pad_to_multiple_of
-
-    def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
-        max_len = max(len(f["input_ids"]) for f in features)
-        if self.pad_to_multiple_of:
-            m = self.pad_to_multiple_of
-            max_len = ((max_len + m - 1) // m) * m
-        pad_id = (
-            self.tokenizer.pad_token_id
-            or self.tokenizer.eos_token_id
-            or self.tokenizer.unk_token_id
-        )
-        input_ids, labels, attn = [], [], []
-        for f in features:
-            ids, lbs = f["input_ids"], f["labels"]
-            pad = max_len - len(ids)
-            input_ids.append(ids + [pad_id] * pad)
-            labels.append(lbs + ([-100] * pad))
-            attn.append([1] * len(ids) + [0] * pad)
-        return {
-            "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "labels": torch.tensor(labels, dtype=torch.long),
-            "attention_mask": torch.tensor(attn, dtype=torch.long),
-        }
-
-
-def resolve_pad_id(tokenizer: AutoTokenizer) -> int:
-    return tokenizer.pad_token_id or tokenizer.eos_token_id or tokenizer.unk_token_id
-
-
-def pad_to_multiple(
-    ids: list[int], multiple: int, pad_id: int
-) -> tuple[list[int], list[int]]:
-    if not multiple:
-        return ids, [1] * len(ids)
-    tgt = ((len(ids) + multiple - 1) // multiple) * multiple
-    pad = max(0, tgt - len(ids))
-    return ids + [pad_id] * pad, ([1] * len(ids) + [0] * pad)
-
-
-def encode_prompt_ids(
-    tokenizer: AutoTokenizer, input_data: str, schema: str
-) -> list[int]:
-    enc = tokenizer(format_example(input_data, schema), add_special_tokens=False)
-    return enc["input_ids"]
-
-
-def encode_target_ids(tokenizer: AutoTokenizer, output: str) -> list[int]:
-    enc = tokenizer(output, add_special_tokens=False)
-    return enc["input_ids"]
-
-
-def build_train_sequence(
-    tokenizer: AutoTokenizer, prompt_ids: list[int], target_ids: list[int]
-) -> tuple[list[int], list[int]]:
-    eos = tokenizer.eos_token_id
-    if eos is None:
-        raise ValueError("Tokenizer must define eos_token_id")
-    ids = prompt_ids + target_ids + [eos]
-    labels = ([-100] * len(prompt_ids)) + target_ids + [eos]
-    return ids, labels
-
-
-def build_gen_toks(
-    device: torch.device,
-    prompt_ids: list[int],
-    pad_multiple: int,
-    pad_id: int,
-) -> tuple[dict[str, torch.Tensor], list[int], list[int]]:
-    padded, attn = pad_to_multiple(prompt_ids, pad_multiple, pad_id)
-    toks = {
-        "input_ids": torch.tensor([padded], dtype=torch.long).to(device),
-        "attention_mask": torch.tensor([attn], dtype=torch.long).to(device),
-    }
-    return toks, padded, attn
-
-
-def build_tokenized_length_filter_fn(
-    max_source_length: int, max_target_length: int
-) -> Callable[[dict[str, Any]], list[bool]]:
-    def pred(batch: dict[str, Any]) -> list[bool]:
-        return [
-            (len(src) <= max_source_length)
-            and (sum(1 for t in lbl if t != -100) <= max_target_length)
-            for src, lbl in zip(batch["input_ids"], batch["labels"], strict=True)
-        ]
-
-    return pred
-
-
-def filter_tokenized_splits_by_length(
-    ds: DatasetDict,
-    max_source_length: int,
-    max_target_length: int,
-    num_proc: int = 8,
-) -> DatasetDict:
-    pred = build_tokenized_length_filter_fn(max_source_length, max_target_length)
-    train_f = ds["train"].filter(pred, batched=True, num_proc=num_proc)
-    val_f = ds["validation"].filter(pred, batched=True, num_proc=num_proc)
-    return DatasetDict({"train": train_f, "validation": val_f})
-
-
-def augment_train_split(ds: DatasetDict, cfg, seed: int) -> DatasetDict:
-    aug = build_augmentor(
-        drop_schema_proba=cfg.drop_schema_proba,
-        schema_missing_token=cfg.schema_missing_token,
-        input_aug_paths=cfg.input_aug,
-        output_aug_paths=cfg.output_aug,
-    )
-    rng = random.Random(seed)
-
-    def map_fn(batch: dict[str, Any]) -> dict[str, Any]:
-        inputs, schemas, outputs = [], [], []
-        for i, s, o in zip(
-            batch["input_data"], batch["schema"], batch["output"], strict=True
-        ):
-            ni, ns, no = apply_augmentations(i, s, o, aug, rng.random)
-            inputs.append(ni)
-            schemas.append(ns)
-            outputs.append(no)
-        return {
-            "input_data": inputs,
-            "schema": schemas,
-            "output": outputs,
-            "meta": batch.get("meta"),
-        }
-
-    train_aug = ds["train"].map(map_fn, batched=True)
-    return DatasetDict({"train": train_aug, "validation": ds["validation"]})
