@@ -197,21 +197,6 @@ def encode_target_ids(tokenizer: AutoTokenizer, output: str) -> list[int]:
     return enc["input_ids"]
 
 
-# TODO WTF is that
-# def build_gen_toks(
-#     device: torch.device,
-#     prompt_ids: list[int],
-#     pad_multiple: int,
-#     pad_id: int,
-# ) -> tuple[dict[str, torch.Tensor], list[int], list[int]]:
-#     padded, attn = pad_to_multiple(prompt_ids, pad_multiple, pad_id)
-#     toks = {
-#         "input_ids": torch.tensor([padded], dtype=torch.long).to(device),
-#         "attention_mask": torch.tensor([attn], dtype=torch.long).to(device),
-#     }
-#     return toks, padded, attn
-
-
 def build_tokenized_length_filter_fn(
     max_sequence_length: int,
 ) -> Callable[[dict[str, Any]], list[bool]]:
@@ -265,13 +250,17 @@ class EvalLoggerCallback(TrainerCallback):
     def __init__(
         self,
         tokenizer: AutoTokenizer,
+        collator: CausalLMDataCollator,
         tokenized_eval_ds: Dataset,
+        raw_eval_ds: Dataset,
         num_examples: int = 3,
         pad_to_multiple_of: int = 8,
         max_new_tokens: int = 50,
     ):
         self.tokenizer = tokenizer
+        self.collator = collator
         self.tokenized_eval_ds = tokenized_eval_ds
+        self.raw_eval_ds = raw_eval_ds
         self.pad_to_multiple_of = pad_to_multiple_of
         self.max_new_tokens = max_new_tokens
         self.table = wandb.Table(
@@ -280,9 +269,9 @@ class EvalLoggerCallback(TrainerCallback):
                 "step",
                 "prompt",
                 "completion",
-                "input",
+                "input_data",
                 "schema",
-                "target",
+                "output",
             ],
             log_mode="INCREMENTAL",
         )
@@ -290,12 +279,14 @@ class EvalLoggerCallback(TrainerCallback):
 
     def sample_rows(self) -> list[dict[str, Any]]:
         idx = random.sample(range(len(self.tokenized_eval_ds)), self.num_examples)
-        return [self.tokenized_eval_ds[i] for i in idx]
+        return [self.tokenized_eval_ds[i] for i in idx], [
+            self.raw_eval_ds[i] for i in idx
+        ]
 
     def generate_completion_for_prompt(
         self,
         model: Any,
-        generation_input: dict[str, Any],
+        generation_input: dict[str, list[int] | torch.Tensor],
     ) -> str:
         out = model.generate(
             **generation_input,
@@ -310,27 +301,36 @@ class EvalLoggerCallback(TrainerCallback):
         return self.tokenizer.decode(seq, skip_special_tokens=False)
 
     def generate_predictions(
-        self, model: Any, tokenized: dict[str, Any]
+        self, model: Any, tokenized: dict[str, torch.Tensor]
     ) -> tuple[list[str], list[str]]:
+        """
+        tokenized is the output of collator.
+        It has 3 tensors of shape:
+        - input_ids: [batch_size, seq_len]
+        - labels: [batch_size, seq_len]
+        - attention_mask: [batch_size, seq_len]
+        """
         model.eval()
         device = next(model.parameters()).device
         inputs: list[str] = []
         preds: list[str] = []
+
         with torch.inference_mode():
-            for input_ids, labels in tqdm(
-                zip(tokenized["input_ids"], tokenized["labels"], strict=True),
+            for input_ids, labels, attn in tqdm(
+                zip(
+                    tokenized["input_ids"],
+                    tokenized["labels"],
+                    tokenized["attention_mask"],
+                    strict=True,
+                ),
                 desc="Generating eval example completions",
             ):
                 start_idx = next(i for i, l in enumerate(labels) if l != -100)
                 prompt_ids = input_ids[:start_idx]
-                padded, attn = pad_to_multiple(
-                    [prompt_ids],
-                    self.pad_to_multiple_of,
-                    resolve_pad_id(self.tokenizer),
-                )
+                attn = attn[:start_idx]
                 generation_input = {
-                    "input_ids": torch.tensor(padded, dtype=torch.long).to(device),
-                    "attention_mask": torch.tensor(attn, dtype=torch.long).to(device),
+                    "input_ids": prompt_ids.unsqueeze(0).to(device),
+                    "attention_mask": attn.unsqueeze(0).to(device),
                 }
                 input_string = self.tokenizer.decode(
                     prompt_ids, skip_special_tokens=False
@@ -346,11 +346,11 @@ class EvalLoggerCallback(TrainerCallback):
     def log_examples(
         self,
         state: Any,
-        rows: list[dict[str, Any]],
+        raw_rows: list[dict[str, Any]],
         input_prompts: list[str],
         preds: list[str],
     ) -> None:
-        for r, prompt, completion in zip(rows, input_prompts, preds, strict=True):
+        for r, prompt, completion in zip(raw_rows, input_prompts, preds, strict=True):
             self.table.add_data(
                 state.epoch,
                 state.global_step,
@@ -368,13 +368,13 @@ class EvalLoggerCallback(TrainerCallback):
         logger.info(f"Running eval example predictions callback")
         if model is None:
             return
-        rows = self.sample_rows()
-        print(rows)
-        input_prompts, preds = self.generate_predictions(model, rows)
+        tokenized_rows, raw_rows = self.sample_rows()
+        collated = self.collator(tokenized_rows)
+        input_prompts, preds = self.generate_predictions(model, collated)
         logger.info(
             f"Generated {len(input_prompts)} predictions.\nPrompts:\n{input_prompts}\nPreds:\n{preds}"
         )
-        self.log_examples(state, rows, input_prompts, preds)
+        self.log_examples(state, raw_rows, input_prompts, preds)
 
 
 class DebugTokensCallback(TrainerCallback):
