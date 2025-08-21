@@ -3,7 +3,7 @@ import random
 from typing import Any, Callable
 
 import click
-from datasets import load_from_disk, load_dataset, DatasetDict
+from datasets import load_from_disk, load_dataset, DatasetDict, Dataset
 import torch
 from tqdm import tqdm
 from transformers import AutoTokenizer
@@ -265,13 +265,13 @@ class EvalLoggerCallback(TrainerCallback):
     def __init__(
         self,
         tokenizer: AutoTokenizer,
-        raw_eval_ds,
+        tokenized_eval_ds: Dataset,
         num_examples: int = 3,
         pad_to_multiple_of: int = 8,
         max_new_tokens: int = 50,
     ):
         self.tokenizer = tokenizer
-        self.raw_eval_ds = raw_eval_ds
+        self.tokenized_eval_ds = tokenized_eval_ds
         self.pad_to_multiple_of = pad_to_multiple_of
         self.max_new_tokens = max_new_tokens
         self.table = wandb.Table(
@@ -286,12 +286,11 @@ class EvalLoggerCallback(TrainerCallback):
             ],
             log_mode="INCREMENTAL",
         )
-        self.num_examples = min(num_examples, len(raw_eval_ds))
-        self.tokenize_fn = build_tokenize_fn(self.tokenizer)
+        self.num_examples = min(num_examples, len(tokenized_eval_ds))
 
     def sample_rows(self) -> list[dict[str, Any]]:
-        idx = random.sample(range(len(self.raw_eval_ds)), self.num_examples)
-        return [self.raw_eval_ds[i] for i in idx]
+        idx = random.sample(range(len(self.tokenized_eval_ds)), self.num_examples)
+        return [self.tokenized_eval_ds[i] for i in idx]
 
     def generate_completion_for_prompt(
         self,
@@ -370,8 +369,8 @@ class EvalLoggerCallback(TrainerCallback):
         if model is None:
             return
         rows = self.sample_rows()
-        tokenized = self.tokenize_fn(rows)
-        input_prompts, preds = self.generate_predictions(model, tokenized)
+        print(rows)
+        input_prompts, preds = self.generate_predictions(model, rows)
         logger.info(
             f"Generated {len(input_prompts)} predictions.\nPrompts:\n{input_prompts}\nPreds:\n{preds}"
         )

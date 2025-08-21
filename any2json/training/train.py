@@ -105,7 +105,6 @@ def tokenize_splits(
 
 
 def create_trainer(
-    ds: DatasetDict,
     tokenized: DatasetDict,
     tokenizer: AutoTokenizer,
     model: AutoModelForCausalLM,
@@ -128,11 +127,14 @@ def create_trainer(
     )
     trainer.add_callback(
         EvalLoggerCallback(
-            tokenizer, ds["validation"], pad_to_multiple_of=pad_to_multiple_of
+            tokenizer=tokenizer,
+            tokenized_eval_ds=tokenized["validation"],
+            pad_to_multiple_of=pad_to_multiple_of,
+            max_new_tokens=500,
         )
     )
     if debug_tokens:
-        trainer.add_callback(DebugTokensCallback(tokenizer))
+        trainer.add_callback(DebugTokensCallback(tokenizer=tokenizer))
     return trainer
 
 
@@ -217,7 +219,6 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
 
     logger.info(f"Creating trainer")
     trainer = create_trainer(
-        ds=ds,
         tokenized=tokenized,
         tokenizer=tokenizer,
         model=model,
