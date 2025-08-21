@@ -34,11 +34,11 @@ def model():
 
 def test_format_example() -> None:
     s = format_example("input", "schema")
-    expected = "[SCHEMA]schema[INPUT]input[OUTPUT]"
+    expected = "Convert input data to json according to JSONSchema\n[SCHEMA]schema[INPUT]input[OUTPUT]"
     assert s == expected
 
     s = format_example("input", "schema", "output")
-    expected = "[SCHEMA]schema[INPUT]input[OUTPUT]output"
+    expected = "Convert input data to json according to JSONSchema\n[SCHEMA]schema[INPUT]input[OUTPUT]output"
     assert s == expected
 
 
@@ -154,7 +154,7 @@ class TestTokenization:
         input_ids = [l for l in out["input_ids"][0]]
         assert (
             tokenizer.decode(input_ids)
-            == f"{tokenizer.bos_token}[SCHEMA]{batch['schema'][0]}[INPUT]hello world[OUTPUT]{batch['output'][0]}{tokenizer.eos_token}"
+            == f"{tokenizer.bos_token}Convert input data to json according to JSONSchema\n[SCHEMA]{batch['schema'][0]}[INPUT]hello world[OUTPUT]{batch['output'][0]}{tokenizer.eos_token}"
         )
 
         target_ids = [l for l in out["labels"][0] if l != -100]
@@ -193,7 +193,7 @@ class TestTokenization:
             input_ids = [l for l in out["input_ids"][i]]
             assert (
                 tokenizer.decode(input_ids)
-                == f"{tokenizer.bos_token}[SCHEMA]{batch['schema'][i]}[INPUT]{batch['input_data'][i]}[OUTPUT]{batch['output'][i]}{tokenizer.eos_token}"
+                == f"{tokenizer.bos_token}Convert input data to json according to JSONSchema\n[SCHEMA]{batch['schema'][i]}[INPUT]{batch['input_data'][i]}[OUTPUT]{batch['output'][i]}{tokenizer.eos_token}"
             )
 
             target_ids = [l for l in out["labels"][i] if l != -100]
