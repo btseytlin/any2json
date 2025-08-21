@@ -105,7 +105,6 @@ def tokenize_splits(
 
 
 def create_trainer(
-    ds: DatasetDict,
     tokenized: DatasetDict,
     tokenizer: AutoTokenizer,
     model: AutoModelForCausalLM,
@@ -131,7 +130,6 @@ def create_trainer(
             tokenizer=tokenizer,
             collator=collator,
             tokenized_eval_ds=tokenized["validation"],
-            raw_eval_ds=ds["validation"],
             pad_to_multiple_of=pad_to_multiple_of,
             max_new_tokens=500,
         )
@@ -171,7 +169,7 @@ def prepare_dataset(
         pcfg.max_sequence_length,
     )
     logger.info(f"Filtered tokenized datasets: {tokenized}")
-    return ds, tokenized
+    return tokenized
 
 
 def prepare_model_and_tokenizer(
@@ -218,11 +216,10 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
     wandb.init(project=pcfg.wandb_project, config={"model": pcfg.model_name})
 
     logger.info(f"Preparing dataset")
-    ds, tokenized = prepare_dataset(pcfg, args, tokenizer)
+    tokenized = prepare_dataset(pcfg, args, tokenizer)
 
     logger.info(f"Creating trainer")
     trainer = create_trainer(
-        ds=ds,
         tokenized=tokenized,
         tokenizer=tokenizer,
         model=model,

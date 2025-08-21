@@ -252,7 +252,6 @@ class EvalLoggerCallback(TrainerCallback):
         tokenizer: AutoTokenizer,
         collator: CausalLMDataCollator,
         tokenized_eval_ds: Dataset,
-        raw_eval_ds: Dataset,
         num_examples: int = 3,
         pad_to_multiple_of: int = 8,
         max_new_tokens: int = 50,
@@ -260,7 +259,6 @@ class EvalLoggerCallback(TrainerCallback):
         self.tokenizer = tokenizer
         self.collator = collator
         self.tokenized_eval_ds = tokenized_eval_ds
-        self.raw_eval_ds = raw_eval_ds
         self.pad_to_multiple_of = pad_to_multiple_of
         self.max_new_tokens = max_new_tokens
         self.table = wandb.Table(
@@ -269,9 +267,7 @@ class EvalLoggerCallback(TrainerCallback):
                 "step",
                 "prompt",
                 "completion",
-                "input_data",
-                "schema",
-                "output",
+                "sample_sequence",
             ],
             log_mode="INCREMENTAL",
         )
@@ -279,9 +275,7 @@ class EvalLoggerCallback(TrainerCallback):
 
     def sample_rows(self) -> list[dict[str, Any]]:
         idx = random.sample(range(len(self.tokenized_eval_ds)), self.num_examples)
-        return [self.tokenized_eval_ds[i] for i in idx], [
-            self.raw_eval_ds[i] for i in idx
-        ]
+        return [self.tokenized_eval_ds[i] for i in idx]
 
     def generate_completion_for_prompt(
         self,
@@ -346,19 +340,22 @@ class EvalLoggerCallback(TrainerCallback):
     def log_examples(
         self,
         state: Any,
-        raw_rows: list[dict[str, Any]],
+        tokenized_rows: list[dict[str, Any]],
         input_prompts: list[str],
         preds: list[str],
     ) -> None:
-        for r, prompt, completion in zip(raw_rows, input_prompts, preds, strict=True):
+        for r, prompt, completion in zip(
+            tokenized_rows, input_prompts, preds, strict=True
+        ):
+            input_data = self.tokenizer.decode(
+                r["input_ids"], skip_special_tokens=False
+            )
             self.table.add_data(
                 state.epoch,
                 state.global_step,
                 prompt,
                 completion,
-                r["input_data"],
-                r["schema"],
-                r["output"],
+                input_data,
             )
         wandb.log({"eval_examples": self.table})
 
@@ -368,13 +365,13 @@ class EvalLoggerCallback(TrainerCallback):
         logger.info(f"Running eval example predictions callback")
         if model is None:
             return
-        tokenized_rows, raw_rows = self.sample_rows()
+        tokenized_rows = self.sample_rows()
         collated = self.collator(tokenized_rows)
         input_prompts, preds = self.generate_predictions(model, collated)
         logger.info(
             f"Generated {len(input_prompts)} predictions.\nPrompts:\n{input_prompts}\nPreds:\n{preds}"
         )
-        self.log_examples(state, raw_rows, input_prompts, preds)
+        self.log_examples(state, tokenized_rows, input_prompts, preds)
 
 
 class DebugTokensCallback(TrainerCallback):
