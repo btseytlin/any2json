@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import streamlit as st
 import json
 import httpx
@@ -7,22 +8,26 @@ import os
 
 from any2json.schema_utils import to_supported_json_schema
 from any2json.training.utils import format_example
+import fastjsonschema
 
 
-def validate_json_schema(schema_text: str) -> tuple[bool, Optional[dict], str]:
+def validate_json_schema(
+    schema_text: str,
+) -> tuple[bool, Optional[dict], str, Optional[Callable]]:
     if not schema_text.strip():
-        return True, None, ""
+        return True, None, "", None
 
     try:
         schema = json.loads(schema_text)
         processed_schema = to_supported_json_schema(schema)
-        return True, processed_schema, ""
+        validator = fastjsonschema.compile(processed_schema)
+        return True, processed_schema, "", validator
     except json.JSONDecodeError as e:
-        return False, None, f"Invalid JSON: {e}"
+        return False, None, f"Invalid JSON: {e}", None
     except ValueError as e:
-        return False, None, f"Schema error: {e}"
+        return False, None, f"Schema error: {e}", None
     except Exception as e:
-        return False, None, f"Unexpected error: {e}"
+        return False, None, f"Unexpected error: {e}", None
 
 
 def call_vllm_inference(formatted_example: str, endpoint_url: str) -> tuple[bool, str]:
@@ -98,7 +103,10 @@ def main():
             return
 
         with st.spinner("Processing..."):
-            is_valid, processed_schema, error_msg = validate_json_schema(schema_text)
+            print("Schema text", schema_text)
+            is_valid, processed_schema, error_msg, validator = validate_json_schema(
+                schema_text
+            )
 
             if not is_valid:
                 st.error(f"Schema validation failed: {error_msg}")
@@ -110,19 +118,43 @@ def main():
             formatted_example = format_example(input_data, schema_str)
 
             success, result = call_vllm_inference(formatted_example, endpoint_url)
-
             if success:
                 with output_placeholder.container():
+                    json_parsed = False
+                    schema_validation_passed = False
                     try:
                         parsed_json = json.loads(result.strip())
-                        st.json(parsed_json)
+                        json_parsed = True
 
-                        with st.expander("Raw Output"):
-                            st.code(result.strip(), language="json")
+                        if validator:
+                            try:
+                                print("Validating", parsed_json)
+                                val_result = validator(parsed_json)
+                                print("Validation result", val_result)
+                                schema_validation_passed = True
+                            except Exception as e:
+                                pass
 
                     except json.JSONDecodeError:
                         st.warning("Output is not valid JSON, showing raw result:")
                         st.code(result.strip(), language="text")
+
+                    if json_parsed:
+                        st.success("✅ Valid JSON")
+
+                        if validator:
+                            if schema_validation_passed:
+                                st.success("✅ Schema validation passed")
+                            else:
+                                st.warning("❌ Schema validation failed")
+
+                        st.json(parsed_json)
+
+                    else:
+                        st.warning("❌ Invalid JSON")
+
+                    with st.expander("Raw Output"):
+                        st.code(result.strip(), language="json")
 
             else:
                 with output_placeholder.container():
@@ -141,13 +173,28 @@ def main():
                 st.code(formatted_example, language="text")
 
     with st.sidebar:
-        st.markdown("### 💡 Tips")
-        st.markdown(
+        st.markdown("### Example input (TOML)")
+        st.code(
             """
-        - Input data can be XML, CSV, YAML, or any structured format
-        - Schema is optional but helps guide the conversion
-        - The model will attempt to extract structured information
-        - Make sure your vLLM server is running and accessible
+[[films]]
+title = "Memento"
+release_year = 2000
+budget = 10000000
+worldwide_gross = 46249333
+
+[[films]]
+title = "Insomnia"
+release_year = 2002
+budget = 58000000
+worldwide_gross = 113494737
+
+[[films]]
+title = "The Dark Knight"
+release_year = 2008
+budget = 185000000
+worldwide_gross = 1005197135
+
+
         """
         )
 
@@ -155,9 +202,18 @@ def main():
         example_schema = {
             "type": "object",
             "properties": {
-                "name": {"type": "string"},
-                "age": {"type": "number"},
-                "emails": {"type": "array", "items": {"type": "string"}},
+                "films": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "release_year": {"type": "number"},
+                            "budget": {"type": "number"},
+                            "worldwide_gross": {"type": "number"},
+                        },
+                    },
+                }
             },
         }
         st.json(example_schema)
