@@ -36,7 +36,8 @@ from any2json.training.callbacks import (
     RetokenizationCallback,
 )
 
-DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M"
+# DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M"
+DEFAULT_MODEL = "google/gemma-3-270m"
 
 
 @dataclass
