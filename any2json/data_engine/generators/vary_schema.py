@@ -26,14 +26,16 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         drop_field_proba: float = 0.2,
         stringify_number_proba: float = 0.3,
         num_fields_to_add: int | None = None,
+        rng: random.Random | None = None,
     ):
         self.drop_field_proba = drop_field_proba
         self.stringify_number_proba = stringify_number_proba
         self.num_fields_to_add = num_fields_to_add
+        self.rng = rng or random.Random()
 
     def setup(self):
         self.fake = Faker()
-        self.num_fields_to_add = random.randint(1, 3)
+        self.num_fields_to_add = self.rng.randint(1, 3)
 
     def get_state(self) -> dict:
         return {
@@ -51,7 +53,7 @@ class VaryJSONSchemaGenerator(SampleGenerator):
                 or isinstance(value.get("type"), list)
                 and value.get("type")[0] in ["integer"]
             ):
-                if random.random() <= self.stringify_number_proba:
+                if self.rng.random() <= self.stringify_number_proba:
                     value["type"] = "string"
                     changed_types[key] = "number_to_string"
         return new_schema, changed_types
@@ -67,14 +69,12 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         keys_to_drop = [
             key
             for key in list(new_schema["properties"].keys())
-            if random.random() < self.drop_field_proba
+            if self.rng.random() < self.drop_field_proba
         ]
 
         for key in keys_to_drop:
             if "properties" in new_schema and key in new_schema["properties"]:
                 del new_schema["properties"][key]
-            if "required" in new_schema and key in new_schema["required"]:
-                new_schema["required"].remove(key)
         return new_schema, keys_to_drop
 
     def add_schema_keys(self, schema: dict) -> tuple[dict, list[str]]:
@@ -88,10 +88,8 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         keys_to_add = []
 
         for _ in range(self.num_fields_to_add):
-            key = self.fake.word()
-            type = self.fake.random_element(
-                elements=("string", "integer", "number", "boolean")
-            )
+            key = self.rng.choice(self.fake.words())
+            type = self.rng.choice(["string", "integer", "number", "boolean"])
             new_schema["properties"][key] = {"type": [type, "null"]}
             keys_to_add.append(key)
 
@@ -190,6 +188,14 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         source_data: dict,
         source_schema: dict,
     ) -> tuple[dict, dict, dict, dict, dict]:
+
+        print(
+            f"Generating new schema and data for source data: {source_data} and source schema: {source_schema}"
+        )
+
+        if "properties" not in source_schema:
+            raise NotImplementedError("Generator only supports objects for now")
+
         new_schema, changes = self.get_new_schema(source_schema)
 
         new_data = self.get_new_data(source_data, new_schema, changes)

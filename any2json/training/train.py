@@ -290,6 +290,7 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--pad-to-multiple-of", default=8, type=int)
 @click.option("--debug-tokens", is_flag=True)
 @click.option("--unsloth", is_flag=True)
+@click.option("--dataloader-num-proc", default=0, type=int)
 def train_cmd(
     ctx: click.Context,
     dataset_path: str,
@@ -305,6 +306,7 @@ def train_cmd(
     pad_to_multiple_of: int,
     debug_tokens: bool,
     unsloth: bool,
+    dataloader_num_proc: int,
 ):
     parser = HfArgumentParser(TrainingArguments)
     hf_args_list = list(ctx.args)
@@ -324,6 +326,7 @@ def train_cmd(
         debug_tokens=debug_tokens,
         unsloth=unsloth,
         hf_args=args,
+        dataloader_num_proc=dataloader_num_proc,
     )
     if not args.output_dir:
         args.output_dir = "checkpoints"

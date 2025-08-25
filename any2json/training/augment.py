@@ -1,8 +1,10 @@
 from dataclasses import dataclass, field
+import json
 from typing import Any, Callable
 from datasets import Dataset
 import random
 
+from any2json.data_engine.generators.vary_schema import VaryJSONSchemaGenerator
 from any2json.training.constants import SCHEMA_MISSING_TOKEN
 from any2json.utils import logger
 
@@ -14,10 +16,8 @@ def aug_drop_schema(
     augmentor: "Augmentor",
     rng: random.Random,
     schema_missing_token: str = SCHEMA_MISSING_TOKEN,
-):
-    if rng.random() < augmentor.drop_schema_proba:
-        return input_data, schema_missing_token, output
-    return input_data, schema, output
+) -> tuple[str, str, str]:
+    return input_data, schema_missing_token, output
 
 
 def aug_vary_schema_and_output(
@@ -26,10 +26,64 @@ def aug_vary_schema_and_output(
     output: str,
     augmentor: "Augmentor",
     rng: random.Random,
-):
-    if rng.random() < augmentor.vary_schema_proba:
+) -> tuple[str, str, str]:
+    if schema == SCHEMA_MISSING_TOKEN:
         return input_data, schema, output
-    return input_data, schema, output
+
+    vary_schema_generator = VaryJSONSchemaGenerator(rng=rng)
+    vary_schema_generator.setup()
+    try:
+        source_schema, source_data, new_schema, new_data, changes = (
+            vary_schema_generator.generate(
+                source_data=json.loads(output),
+                source_schema=json.loads(schema),
+            )
+        )
+    except NotImplementedError:
+        return input_data, schema, output
+
+    new_schema = json.dumps(new_schema)
+    new_data = json.dumps(new_data)
+
+    return input_data, new_schema, new_data
+
+
+# def get_random_json_dumps_kwargs(
+#     rng: random.Random,
+# ) -> dict[str, Any]:
+#     separators = rng.choice([(",", ":"), (",", ": "), (", ", ": "), (", ", ":")])
+#     indent = rng.choice([None, 1, 2, 3, 4, 5])
+#     sort_keys = rng.choice([True, False])
+#     ensure_ascii = rng.choice([True, False])
+
+#     return dict(
+#         separators=separators,
+#         indent=indent,
+#         sort_keys=sort_keys,
+#         ensure_ascii=ensure_ascii,
+#     )
+
+
+# def aug_vary_json_presentation(
+#     input_data: str,
+#     schema: str,
+#     output: str,
+#     augmentor: "Augmentor",
+#     rng: random.Random,
+# ) -> tuple[str, str, str]:
+#     if (
+#         rng.random() > augmentor.vary_json_presentation_proba
+#         or schema == SCHEMA_MISSING_TOKEN
+#     ):
+#         return input_data, schema, output
+
+#     schema = json.loads(schema)
+#     output = json.loads(output)
+
+#     schema = json.dumps(schema, **get_random_json_dumps_kwargs(rng))
+#     output = json.dumps(output, **get_random_json_dumps_kwargs(rng))
+
+#     return input_data, schema, output
 
 
 def aug_corrupt_input(
@@ -38,24 +92,41 @@ def aug_corrupt_input(
     output: str,
     augmentor: "Augmentor",
     rng: random.Random,
-):
-    if rng.random() < augmentor.corrupt_input_proba:
-        return input_data, schema, output
+    corruption_symbols: list[str] = [
+        "!",
+        "\t",
+        "|",
+        "-",
+        "—",
+        "_",
+        ".",
+        "'",
+        '"',
+        " ",
+        "_",
+    ],
+    max_num_corruptions: int = 5,
+) -> tuple[str, str, str]:
+    """Insert a few junk symbols into the input data"""
+    num_corruptions = rng.randint(1, max_num_corruptions)
+
+    for _ in range(num_corruptions):
+        corruption_symbol = rng.choice(corruption_symbols)
+        input_data = list(input_data)
+        input_data.insert(
+            rng.choice(range(len(input_data))),
+            corruption_symbol,
+        )
+        input_data = "".join(input_data)
     return input_data, schema, output
 
 
-@dataclass
 class Augmentor:
-    drop_schema_proba: float = 0.05
-    vary_schema_proba: float = 0.2
-    corrupt_input_proba: float = 0.2
-    augmentations: list[Callable] = field(
-        default_factory=lambda: [
-            aug_drop_schema,
-            aug_vary_schema_and_output,
-            aug_corrupt_input,
-        ]
-    )
+    augmentations: dict[Callable, float] = {
+        aug_drop_schema: 0.05,
+        aug_vary_schema_and_output: 0.2,
+        aug_corrupt_input: 1.0,
+    }
 
     def apply(
         self,
@@ -64,14 +135,22 @@ class Augmentor:
         output: str,
         rng: random.Random,
     ) -> tuple[str, str, str]:
-        for fn in self.augmentations:
-            input_data, schema, output = fn(
-                input_data,
-                schema,
-                output,
-                self,
-                rng,
-            )
+        logger.info(
+            f"Applying augmentations.\n\nInput_data: {input_data}\nSchema: {schema}\nOutput: {output}"
+        )
+        for fn, proba in self.augmentations.items():
+            if rng.random() < proba:
+                logger.info(f"Applying augmentor: {fn.__name__}")
+                input_data, schema, output = fn(
+                    input_data,
+                    schema,
+                    output,
+                    self,
+                    rng,
+                )
+        logger.info(
+            f"Augmented example.\n\nInput_data: {input_data}\nSchema: {schema}\nOutput: {output}"
+        )
         return input_data, schema, output
 
 
@@ -91,9 +170,6 @@ def build_augment_fn(
         ):
             new_input_data, new_schema, new_output = augmentor.apply(
                 input_data, schema, output, rng
-            )
-            logger.info(
-                f"Augmented example:\n{new_input_data=}\n{new_schema=}\n{new_output=}"
             )
             inputs.append(new_input_data)
             schemas.append(new_schema)
