@@ -1,59 +1,123 @@
-from dataclasses import dataclass
-from importlib import import_module
-from typing import Callable, Iterable
+from dataclasses import dataclass, field
+from typing import Any, Callable
+from datasets import Dataset
+import random
+
+from any2json.training.constants import SCHEMA_MISSING_TOKEN
+from any2json.utils import logger
 
 
-InputAugmentation = Callable[[str], str]
-OutputAugmentation = Callable[[str], str]
+def aug_drop_schema(
+    input_data: str,
+    schema: str,
+    output: str,
+    augmentor: "Augmentor",
+    rng: random.Random,
+    schema_missing_token: str = SCHEMA_MISSING_TOKEN,
+):
+    if rng.random() < augmentor.drop_schema_proba:
+        return input_data, schema_missing_token, output
+    return input_data, schema, output
 
 
-def load_callable(path: str) -> Callable[..., object]:
-    if ":" in path:
-        module_path, func_name = path.split(":", 1)
-    else:
-        module_path, func_name = path.rsplit(".", 1)
-    module = import_module(module_path)
-    return getattr(module, func_name)
+def aug_vary_schema_and_output(
+    input_data: str,
+    schema: str,
+    output: str,
+    augmentor: "Augmentor",
+    rng: random.Random,
+):
+    if rng.random() < augmentor.vary_schema_proba:
+        return input_data, schema, output
+    return input_data, schema, output
+
+
+def aug_corrupt_input(
+    input_data: str,
+    schema: str,
+    output: str,
+    augmentor: "Augmentor",
+    rng: random.Random,
+):
+    if rng.random() < augmentor.corrupt_input_proba:
+        return input_data, schema, output
+    return input_data, schema, output
 
 
 @dataclass
 class Augmentor:
-    drop_schema_proba: float
-    schema_missing_token: str
-    input_augmentations: list[InputAugmentation]
-    output_augmentations: list[OutputAugmentation]
-
-
-def build_augmentor(
-    drop_schema_proba: float = 0.01,
-    schema_missing_token: str = "[MISSING]",
-    input_aug_paths: Iterable[str] | None = None,
-    output_aug_paths: Iterable[str] | None = None,
-) -> Augmentor:
-    input_fns = [load_callable(p) for p in (input_aug_paths or [])]
-    output_fns = [load_callable(p) for p in (output_aug_paths or [])]
-    return Augmentor(
-        drop_schema_proba=drop_schema_proba,
-        schema_missing_token=schema_missing_token,
-        input_augmentations=list(input_fns),
-        output_augmentations=list(output_fns),
+    drop_schema_proba: float = 0.05
+    vary_schema_proba: float = 0.2
+    corrupt_input_proba: float = 0.2
+    augmentations: list[Callable] = field(
+        default_factory=lambda: [
+            aug_drop_schema,
+            aug_vary_schema_and_output,
+            aug_corrupt_input,
+        ]
     )
 
+    def apply(
+        self,
+        input_data: str,
+        schema: str,
+        output: str,
+        rng: random.Random,
+    ) -> tuple[str, str, str]:
+        for fn in self.augmentations:
+            input_data, schema, output = fn(
+                input_data,
+                schema,
+                output,
+                self,
+                rng,
+            )
+        return input_data, schema, output
 
-def apply_augmentations(
-    input_data: str,
-    schema: str,
-    output: str,
+
+def build_augment_fn(
     augmentor: Augmentor,
-    rng_callable: Callable[[], float] | None,
-) -> tuple[str, str, str]:
-    new_input = input_data
-    new_output = output
-    new_schema = schema
-    for fn in augmentor.input_augmentations:
-        new_input = fn(new_input)
-    for fn in augmentor.output_augmentations:
-        new_output = fn(new_output)
-    if rng_callable is not None and rng_callable() < augmentor.drop_schema_proba:
-        new_schema = augmentor.schema_missing_token
-    return new_input, new_schema, new_output
+    seed: int,
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    rng = random.Random(seed)
+
+    def augment_fn(batch: dict[str, Any]) -> dict[str, Any]:
+        inputs, schemas, outputs = [], [], []
+        for input_data, schema, output in zip(
+            batch["input_data"],
+            batch["schema"],
+            batch["output"],
+            strict=True,
+        ):
+            new_input_data, new_schema, new_output = augmentor.apply(
+                input_data, schema, output, rng
+            )
+            logger.info(
+                f"Augmented example:\n{new_input_data=}\n{new_schema=}\n{new_output=}"
+            )
+            inputs.append(new_input_data)
+            schemas.append(new_schema)
+            outputs.append(new_output)
+        return {
+            "input_data": inputs,
+            "schema": schemas,
+            "output": outputs,
+            "meta": batch.get("meta"),
+        }
+
+    return augment_fn
+
+
+def augment_dataset(
+    dataset: Dataset,
+    augmentor: Augmentor,
+    seed: int = 0,
+    num_proc: int = 8,
+) -> Dataset:
+    logger.info(f"Augmenting dataset with:\n{augmentor=} and {seed=}")
+    augment_fn = build_augment_fn(
+        augmentor=augmentor,
+        seed=seed,
+    )
+    augmented = dataset.map(augment_fn, batched=True, num_proc=num_proc)
+    return augmented
