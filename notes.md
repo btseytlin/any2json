@@ -452,10 +452,9 @@ Other notes:
 
 Next actions:
 
-1. Add augmentation
-1. Obtain schemas from https://github.com/SchemaStore/schemastore/tree/master/src/schemas/json and data https://github.com/SchemaStore/schemastore/blob/master/src/test/abc-supply-plan-10.1.0/abc-supply-plan.json, https://www.schemastore.org/api/json/catalog.json
 2. Add JSON 2 JSON
 3. Add gemma3n
+1. Obtain schemas from https://github.com/SchemaStore/schemastore/tree/master/src/schemas/json and data https://github.com/SchemaStore/schemastore/blob/master/src/test/abc-supply-plan-10.1.0/abc-supply-plan.json, https://www.schemastore.org/api/json/catalog.json
 4. Change handling of schemas with refs
 5. Read https://json-schema.org/draft/2020-12/json-schema-core
 6. Maybe integrate: https://github.com/python-jsonschema/hypothesis-jsonschema
@@ -465,4 +464,6 @@ Next actions:
 10. Add XSD, XSD schemas can be converted to json schemas
 11. QUICKTYPE! https://app.quicktype.io/
 12. Add the latest draft link of jsonschema to the output
+
+
 

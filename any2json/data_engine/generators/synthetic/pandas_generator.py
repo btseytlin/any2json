@@ -124,13 +124,17 @@ class PandasGenerator(SampleGenerator):
             "string",
             "html",
             "latex",
+            "json",
         ]
         self.input_format = random.choice(conversion_options)
         self.input_orient = None
-        if self.input_format in ("json", "yaml", "python_string"):
+        if self.input_format in ("yaml", "python_string"):
             self.input_orient = random.choice(
                 ["dict", "list", "split", "tight", "index", "columns"]
             )
+        if self.input_format == "json":
+            self.input_orient = random.choice(["split", "index", "columns"])
+
         if self.input_orient in ("values", "split"):
             self.column_name_format = "numbered"
 
@@ -328,3 +332,15 @@ class PandasGenerator(SampleGenerator):
         validate(json.loads(json_output_data))
 
         return formatted_str, inferred_schema, json_output_data
+
+
+if __name__ == "__main__":
+    generator = PandasGenerator()
+    generator.setup()
+    input_data, schema, output_data = generator.generate_triplet()
+    print("Input data:")
+    print(input_data)
+    print("Schema:")
+    print(schema)
+    print("Output data:")
+    print(output_data)

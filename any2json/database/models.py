@@ -14,7 +14,7 @@ Base = declarative_base()
 
 class SourceDocument(Base):
     __tablename__ = "source_documents"
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     source = Column(String, nullable=False)
     content = Column(Text, nullable=True)
     content_type = Column(String, nullable=False)
@@ -30,7 +30,7 @@ class SourceDocument(Base):
 
 class JsonSchema(Base):
     __tablename__ = "json_schemas"
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     content = Column(JSON, nullable=False, unique=False)
     is_synthetic = Column(Boolean, default=False, nullable=False)
 
@@ -45,7 +45,7 @@ class JsonSchema(Base):
 
 class Chunk(Base):
     __tablename__ = "chunks"
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     content = Column(Text, nullable=False)
     content_type = Column(Text, nullable=False)
     is_synthetic = Column(Boolean, default=False, nullable=False)
@@ -86,7 +86,7 @@ class SchemaConversion(Base):
     """
 
     __tablename__ = "schema_conversions"
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
 
     input_chunk_id = Column(Integer, ForeignKey("chunks.id"), nullable=False)
     schema_id = Column(Integer, ForeignKey("json_schemas.id"), nullable=False)
