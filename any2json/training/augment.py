@@ -125,7 +125,7 @@ class Augmentor:
     augmentations: dict[Callable, float] = {
         aug_drop_schema: 0.05,
         aug_vary_schema_and_output: 0.2,
-        aug_corrupt_input: 1.0,
+        aug_corrupt_input: 0.1,
     }
 
     def apply(
@@ -152,6 +152,12 @@ class Augmentor:
             f"Augmented example.\n\nInput_data: {input_data}\nSchema: {schema}\nOutput: {output}"
         )
         return input_data, schema, output
+
+    def __repr__(self) -> str:
+        return f"Augmentor(augmentations={self.augmentations})"
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
 
 def build_augment_fn(
