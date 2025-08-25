@@ -452,7 +452,6 @@ Other notes:
 
 Next actions:
 
-2. Add JSON 2 JSON
 3. Add gemma3n
 1. Obtain schemas from https://github.com/SchemaStore/schemastore/tree/master/src/schemas/json and data https://github.com/SchemaStore/schemastore/blob/master/src/test/abc-supply-plan-10.1.0/abc-supply-plan.json, https://www.schemastore.org/api/json/catalog.json
 4. Change handling of schemas with refs

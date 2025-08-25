@@ -201,7 +201,10 @@ def prepare_model_and_tokenizer(
             max_seq_length=pcfg.max_sequence_length,
         )
     else:
-        model = AutoModelForCausalLM.from_pretrained(pcfg.model_name)
+        model = AutoModelForCausalLM.from_pretrained(
+            pcfg.model_name,
+            attn_implementation="eager" if "gemma" in pcfg.model_name else "sdpa",
+        )
         model.config.use_cache = False
         if getattr(args, "gradient_checkpointing", False):
             model.gradient_checkpointing_enable()

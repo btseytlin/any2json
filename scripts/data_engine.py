@@ -10,6 +10,7 @@ import time
 import click
 from datasets import Dataset, DatasetDict, load_dataset
 from dotenv import load_dotenv
+import git
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from any2json.agents.schema_generator import JSONSchemaGeneratorAgent
@@ -158,6 +159,8 @@ def download_datasets(output_dir, max_records, overwrite):
         # },
     }
 
+    githubrepos = ["SchemaStore/schemastore"]
+
     for dataset_id, dataset_info in datasets.items():
         args, kwargs = dataset_info["args"], dataset_info["kwargs"]
         dataset_org, dataset_name = dataset_id.split("/")
@@ -189,6 +192,18 @@ def download_datasets(output_dir, max_records, overwrite):
         except Exception as e:
             logger.error(f"Error downloading dataset {dataset_id}: {e}")
         time.sleep(3)
+
+    for github_repo in githubrepos:
+        repo_path = f"{output_dir}/{github_repo}"
+        if os.path.exists(repo_path) and not overwrite:
+            logger.info("Already exists, skipping")
+            continue
+
+        logger.info(f"Downloading github repo {github_repo} to {output_dir}")
+        os.makedirs(repo_path, exist_ok=True)
+        github_url = f"https://github.com/{github_repo}"
+        repo = git.Repo.clone_from(github_url, repo_path)
+        logger.info(f"Saved github repo {github_repo} to {repo_path}")
 
 
 # Step 1.2: Process all source datasets, extract inputs from them

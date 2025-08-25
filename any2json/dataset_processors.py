@@ -9,12 +9,15 @@ import os
 import json
 from datasets import Dataset
 from dataclasses import asdict
+import toml
 from tqdm import tqdm
+import yaml
 
 from any2json.containers import InputJSONChunk
 from any2json.data_engine.helpers import deduplicate_chunks
 from any2json.database.client import create_tables, get_db_session
-from any2json.database.models import Chunk, JsonSchema, SourceDocument
+from any2json.database.models import Chunk, JsonSchema, SchemaConversion, SourceDocument
+from any2json.encoder import DateTimeEncoder
 from any2json.enums import ContentType
 from any2json.utils import logger
 from any2json.schema_utils import to_supported_json_schema
@@ -386,6 +389,185 @@ def processor_dataunitylab_json_schema(
     db_session.add_all(source_documents)
 
 
+def processor_schemastore_schemastore(
+    db_session: Session,
+    dataset_dir: str,
+    num_samples_per_dataset: int | None = None,
+) -> None:
+    schemas_dir = os.path.join(dataset_dir, "src", "schemas", "json")
+    test_dir = os.path.join(dataset_dir, "src", "test")
+
+    schemas_created = 0
+    chunks_created = 0
+    schema_conversions_created = 0
+
+    total = num_samples_per_dataset or len(os.listdir(schemas_dir))
+
+    pbar = tqdm(
+        os.listdir(schemas_dir),
+        total=total,
+        desc="Processing schemas",
+    )
+
+    for schema_file in pbar:
+        try:
+            schema_name = schema_file.split(".json")[0]
+            schema_path = os.path.join(schemas_dir, schema_file)
+
+            with open(schema_path, "r") as f:
+                schema = json.load(f)
+
+            validator_original = fastjsonschema.compile(
+                schema,
+                detailed_exceptions=False,
+                use_formats=False,
+            )
+
+            schema = to_supported_json_schema(schema)
+
+            validator_processed = fastjsonschema.compile(
+                schema,
+                detailed_exceptions=False,
+                use_formats=False,
+            )
+
+            if not validate_schema_quality(schema):
+                logger.debug(f"Skipping schema {schema_name} because it is low quality")
+                continue
+
+            meta = {
+                "source_dataset": dirname_to_dataset_id(dataset_dir),
+                "schema_name": schema_name,
+            }
+
+            json_schema = JsonSchema(
+                content=schema,
+                is_synthetic=False,
+                meta=meta,
+            )
+            db_session.add(json_schema)
+            schemas_created += 1
+
+            tests_dir = os.path.join(test_dir, schema_name)
+            if not os.path.exists(tests_dir):
+                logger.debug(
+                    f"Skipping schema {schema_name} tests because dir {tests_dir} does not exist"
+                )
+                continue
+
+            for test_file in os.listdir(tests_dir):
+                test_path = os.path.join(tests_dir, test_file)
+
+                chunk_meta = meta.copy()
+                chunk_meta["file_path"] = test_path
+
+                if test_file.endswith(".json"):
+                    with open(test_path, "r") as f:
+                        test_data = json.load(f)
+
+                    validator_original(test_data)
+                    validator_processed(test_data)
+
+                    chunk = Chunk(
+                        content=json.dumps(test_data),
+                        content_type=ContentType.JSON.value,
+                        is_synthetic=False,
+                        meta=chunk_meta,
+                    )
+                    json_schema.chunks.append(chunk)
+                    chunks_created += 1
+                elif test_file.endswith(".yaml") or test_file.endswith(".yml"):
+                    with open(test_path, "r") as f:
+                        test_data = f.read()
+
+                    chunk = Chunk(
+                        content=test_data,
+                        content_type=ContentType.YAML.value,
+                        is_synthetic=False,
+                        meta=chunk_meta,
+                    )
+                    json_schema.chunks.append(chunk)
+                    chunks_created += 1
+                    json_chunk = yaml.safe_load(test_data)
+
+                    validator_original(json_chunk)
+                    validator_processed(json_chunk)
+
+                    json_chunk = json.dumps(json_chunk, cls=DateTimeEncoder)
+
+                    json_chunk_chunk = Chunk(
+                        content=json_chunk,
+                        content_type=ContentType.JSON.value,
+                        is_synthetic=False,
+                        meta=chunk_meta,
+                    )
+                    json_schema.chunks.append(json_chunk_chunk)
+                    chunks_created += 1
+                    schema_conversion = SchemaConversion(
+                        input_chunk=chunk,
+                        schema=json_schema,
+                        output_chunk=json_chunk_chunk,
+                    )
+                    db_session.add(schema_conversion)
+                    schema_conversions_created += 1
+                elif test_file.endswith(".toml"):
+                    with open(test_path, "r") as f:
+                        test_data = f.read()
+
+                    chunk = Chunk(
+                        content=test_data,
+                        content_type=ContentType.TOML.value,
+                        is_synthetic=False,
+                        meta=chunk_meta,
+                    )
+                    json_schema.chunks.append(chunk)
+                    chunks_created += 1
+                    json_chunk = toml.loads(test_data)
+
+                    validator_original(json_chunk)
+                    validator_processed(json_chunk)
+
+                    json_chunk = json.dumps(json_chunk, cls=DateTimeEncoder)
+
+                    json_chunk_chunk = Chunk(
+                        content=json_chunk,
+                        content_type=ContentType.JSON.value,
+                        is_synthetic=False,
+                        meta=chunk_meta,
+                    )
+                    json_schema.chunks.append(json_chunk_chunk)
+                    chunks_created += 1
+                    schema_conversion = SchemaConversion(
+                        input_chunk=chunk,
+                        schema=json_schema,
+                        output_chunk=json_chunk_chunk,
+                    )
+                    db_session.add(schema_conversion)
+                    schema_conversions_created += 1
+                else:
+                    raise RuntimeError(
+                        f"Dont know how to handle file type: {test_file}"
+                    )
+        except Exception as e:
+            logger.error(f"Error processing schema {schema_name}: {e}", exc_info=True)
+            # raise e
+
+        if num_samples_per_dataset and schemas_created >= num_samples_per_dataset:
+            break
+
+        pbar.set_postfix(
+            {
+                "schemas_created": schemas_created,
+                "chunks_created": chunks_created,
+                "schema_conversions_created": schema_conversions_created,
+            }
+        )
+
+    logger.info(
+        f"Processed {len(os.listdir(schemas_dir))} schemas, {schemas_created} schemas created, {chunks_created} chunks created, {schema_conversions_created} schema conversions created"
+    )
+
+
 def get_dataset_processor(input_dir: str) -> Callable:
     dataset_processors = {
         "wikimedia/structured-wikipedia": processor_wikimedia_structured_wikipedia,
@@ -400,6 +582,7 @@ def get_dataset_processor(input_dir: str) -> Callable:
         "dataunitylab/json-schema-descriptions": partial(
             processor_dataunitylab_json_schema, schema_key="object"
         ),
+        "schemastore/schemastore": processor_schemastore_schemastore,
     }
 
     dataset_id = dirname_to_dataset_id(input_dir)
