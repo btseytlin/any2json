@@ -826,7 +826,6 @@ def export_samples_command(output_file: str, num_samples: int | None, test_size:
 )
 @click.option(
     "--repo-id",
-    default="btseytlin/any2json",
     type=str,
     required=False,
 )

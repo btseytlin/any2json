@@ -50,42 +50,6 @@ python scripts/db_tools.py drop-duplicate-documents
 python scripts/db_tools.py drop-duplicate-chunks
 python scripts/db_tools.py vacuum
 python scripts/db_tools.py stats
-=== DATABASE STATISTICS ===
-
-SOURCE DOCUMENTS:
-  Total: 32852
-  Documents with no chunks: 0
-  By source dataset:
-    christianazinn/json-training: 14408
-    dataunitylab/json-schema: 2684
-    dataunitylab/json-schema-descriptions: 5800
-    interstellarninja/json-mode-agentic-reasoning: 140
-    interstellarninja/json-mode-reasoning: 2838
-    interstellarninja/json-mode-verifiable: 5655
-    interstellarninja/json-schema-store-reasoning: 127
-    wikimedia/structured-wikipedia: 1200
-
-CHUNKS:
-  Total: 15423
-  By content type:
-    JSON: 15423
-  By synthetic/real:
-    synthetic: 15423
-  JSON chunks:
-    With schema: 15305
-    Without schema: 118
-
-SCHEMAS:
-  Total: 19305
-  By synthetic/real:
-    synthetic: 19305
-  Usage:
-    With chunks: 14989
-    Without chunks: 4316
-
-SCHEMA CONVERSIONS:
-  Total: 0
-  By input type:
 ```
 
 
@@ -99,62 +63,6 @@ python scripts/db_tools.py drop-duplicate-schemas
 python scripts/db_tools.py drop-duplicate-chunks
 python scripts/db_tools.py vacuum
 python scripts/db_tools.py stats
-=== DATABASE STATISTICS ===
-
-SOURCE DOCUMENTS:
-  Total: 34154
-  Documents with no chunks: 0
-  By source dataset:
-    christianazinn/json-training: 14408
-    dataunitylab/json-schema: 2684
-    dataunitylab/json-schema-descriptions: 5800
-    infinigram: 1302
-    interstellarninja/json-mode-agentic-reasoning: 140
-    interstellarninja/json-mode-reasoning: 2838
-    interstellarninja/json-mode-verifiable: 5655
-    interstellarninja/json-schema-store-reasoning: 127
-    wikimedia/structured-wikipedia: 1200
-
-CHUNKS:
-  Total: 39060
-  By content type:
-    CSV: 563
-    HTML: 561
-    JSON: 34330
-    LATEX: 554
-    MARKDOWN: 552
-    PYTHON_STRING: 276
-    SQL: 574
-    STRING: 584
-    XML: 520
-    YAML: 546
-  By synthetic/real:
-    real: 14177
-    synthetic: 24883
-  JSON chunks:
-    With schema: 20035
-    Without schema: 14295
-
-SCHEMAS:
-  Total: 23753
-  By synthetic/real:
-    synthetic: 23753
-  Usage:
-    With chunks: 19437
-    Without chunks: 4316
-
-SCHEMA CONVERSIONS:
-  Total: 4730
-  By input type:
-    CSV: 563
-    HTML: 561
-    LATEX: 554
-    MARKDOWN: 552
-    PYTHON_STRING: 276
-    SQL: 574
-    STRING: 584
-    XML: 520
-    YAML: 546
 ```
 
 Stage 3: mapping chunks to schemas, generating schemas and chunks
@@ -177,125 +85,23 @@ python scripts/db_tools.py drop-duplicate-chunks
 python scripts/db_tools.py drop-dangling-schemas
 python scripts/db_tools.py vacuum
 python scripts/db_tools.py stats
-
-SOURCE DOCUMENTS:
-  Total: 34154
-  Documents with no chunks: 0
-  By source dataset:
-    christianazinn/json-training: 14408
-    dataunitylab/json-schema: 2684
-    dataunitylab/json-schema-descriptions: 5800
-    infinigram: 1302
-    interstellarninja/json-mode-agentic-reasoning: 140
-    interstellarninja/json-mode-reasoning: 2838
-    interstellarninja/json-mode-verifiable: 5655
-    interstellarninja/json-schema-store-reasoning: 127
-    wikimedia/structured-wikipedia: 1200
-
-CHUNKS:
-  Total: 41728
-  By content type:
-    CSV: 563
-    HTML: 561
-    JSON: 37518
-    LATEX: 554
-    MARKDOWN: 552
-    PYTHON_STRING: 276
-    SQL: 574
-    STRING: 584
-    YAML: 546
-  By synthetic/real:
-    real: 14177
-    synthetic: 27551
-  JSON chunks:
-    With schema: 36984
-    Without schema: 534
-
-SCHEMAS:
-  Total: 25349
-  By synthetic/real:
-    real: 2325
-    synthetic: 23024
-  Usage:
-    With chunks: 25349
-    Without chunks: 0
-
-SCHEMA CONVERSIONS:
-  Total: 4210
-  By input type:
-    CSV: 563
-    HTML: 561
-    LATEX: 554
-    MARKDOWN: 552
-    PYTHON_STRING: 276
-    SQL: 574
-    STRING: 584
-    YAML: 546
 ```
 
 Stage 4: making format conversions
 ```
-python scripts/data_engine.py --preview generate-synthetic-format-conversions
+python scripts/data_engine.py generate-synthetic-format-conversions
 python scripts/db_tools.py drop-duplicate-chunks
-=== DATABASE STATISTICS ===
+python scripts/db_tools.py vacuum
+python scripts/db_tools.py stats
+```
 
-SOURCE DOCUMENTS:
-  Total: 34154
-  Documents with no chunks: 0
-  By source dataset:
-    christianazinn/json-training: 14408
-    dataunitylab/json-schema: 2684
-    dataunitylab/json-schema-descriptions: 5800
-    infinigram: 1302
-    interstellarninja/json-mode-agentic-reasoning: 140
-    interstellarninja/json-mode-reasoning: 2838
-    interstellarninja/json-mode-verifiable: 5655
-    interstellarninja/json-schema-store-reasoning: 127
-    wikimedia/structured-wikipedia: 1200
+Stage 5: export
+```
+python scripts/data_engine.py assign-groups
+python scripts/data_engine.py export-samples --test-size=5000
+python scripts/data_engine.py export-hf-dataset --repo-id btseytlin/any2json
 
-CHUNKS:
-  Total: 226422
-  By content type:
-    CSV: 9109
-    HTML: 4203
-    JSON: 37518
-    LATEX: 554
-    MARKDOWN: 3616
-    PYTHON_STRING: 36923
-    SQL: 26544
-    STRING: 584
-    TOML: 36347
-    XML: 34060
-    YAML: 36964
-  By synthetic/real:
-    real: 14177
-    synthetic: 212245
-  JSON chunks:
-    With schema: 36984
-    Without schema: 534
 
-SCHEMAS:
-  Total: 25349
-  By synthetic/real:
-    real: 2325
-    synthetic: 23024
-  Usage:
-    With chunks: 25349
-    Without chunks: 0
-
-SCHEMA CONVERSIONS:
-  Total: 188983
-  By input type:
-    CSV: 9109
-    HTML: 4203
-    LATEX: 554
-    MARKDOWN: 3616
-    PYTHON_STRING: 36923
-    SQL: 26544
-    STRING: 584
-    TOML: 36347
-    XML: 34060
-    YAML: 36964
 ```
 
 # Benchmarks
@@ -452,7 +258,6 @@ Other notes:
 
 Next actions:
 
-3. Add gemma3n
 1. Obtain schemas from https://github.com/SchemaStore/schemastore/tree/master/src/schemas/json and data https://github.com/SchemaStore/schemastore/blob/master/src/test/abc-supply-plan-10.1.0/abc-supply-plan.json, https://www.schemastore.org/api/json/catalog.json
 4. Change handling of schemas with refs
 5. Read https://json-schema.org/draft/2020-12/json-schema-core
