@@ -315,6 +315,7 @@ def train_cmd(
     unsloth: bool,
     dataloader_num_proc: int,
     augment: bool,
+    attn_implementation: str,
 ):
     parser = HfArgumentParser(TrainingArguments)
     hf_args_list = list(ctx.args)
