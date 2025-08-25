@@ -135,12 +135,12 @@ class Augmentor:
         output: str,
         rng: random.Random,
     ) -> tuple[str, str, str]:
-        logger.info(
+        logger.debug(
             f"Applying augmentations.\n\nInput_data: {input_data}\nSchema: {schema}\nOutput: {output}"
         )
         for fn, proba in self.augmentations.items():
             if rng.random() < proba:
-                logger.info(f"Applying augmentor: {fn.__name__}")
+                logger.debug(f"Applying augmentor: {fn.__name__}")
                 input_data, schema, output = fn(
                     input_data,
                     schema,
@@ -148,7 +148,7 @@ class Augmentor:
                     self,
                     rng,
                 )
-        logger.info(
+        logger.debug(
             f"Augmented example.\n\nInput_data: {input_data}\nSchema: {schema}\nOutput: {output}"
         )
         return input_data, schema, output
