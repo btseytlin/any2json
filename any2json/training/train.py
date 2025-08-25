@@ -58,6 +58,7 @@ class PipelineConfig:
     hf_args: TrainingArguments
     dataloader_num_proc: int
     augment: bool
+    attn_implementation: str
 
 
 def validate_pipeline_config(cfg: PipelineConfig) -> None:
@@ -204,7 +205,7 @@ def prepare_model_and_tokenizer(
     else:
         model = AutoModelForCausalLM.from_pretrained(
             pcfg.model_name,
-            attn_implementation="eager" if "gemma" in pcfg.model_name else "sdpa",
+            attn_implementation=pcfg.attn_implementation,
         )
         model.config.use_cache = False
         if getattr(args, "gradient_checkpointing", False):
@@ -296,6 +297,7 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--unsloth", is_flag=True)
 @click.option("--dataloader-num-proc", default=8, type=int)
 @click.option("--augment", is_flag=True)
+@click.option("--attn-implementation", default="sdpa", type=str)
 def train_cmd(
     ctx: click.Context,
     dataset_path: str,
@@ -334,6 +336,7 @@ def train_cmd(
         hf_args=args,
         dataloader_num_proc=dataloader_num_proc,
         augment=augment,
+        attn_implementation=attn_implementation,
     )
     if not args.output_dir:
         args.output_dir = "checkpoints"
