@@ -1,8 +1,3 @@
-try:
-    import unsloth
-except ImportError:
-    pass
-
 import os
 from dataclasses import dataclass
 
@@ -206,6 +201,13 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "False")
 
     logger.info(f"Pipeline config: {pcfg}")
+
+    if pcfg.unsloth:
+        try:
+            import unsloth
+        except ImportError:
+            logger.warning("Unsloth is not installed. Not using it")
+            pcfg.unsloth = False
 
     logger.info(f"Loading model and tokenizer")
     model, tokenizer = prepare_model_and_tokenizer(pcfg, args)
