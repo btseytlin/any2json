@@ -6,6 +6,7 @@ from torch.utils.data import Dataset as TorchDataset
 from transformers import AutoTokenizer
 from any2json.training.augment import Augmentor
 from any2json.training.utils import build_tokenize_fn
+from any2json.utils import logger
 
 
 class AugmentTokenizeDataset(TorchDataset):
@@ -82,6 +83,7 @@ class AugmentTokenizeDataset(TorchDataset):
                 output,
                 self.rng,
             )
+
         batch = {"input_data": [input_data], "schema": [schema], "output": [output]}
         tokenized = tokenize_fn(batch)
         return {

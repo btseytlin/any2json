@@ -141,13 +141,17 @@ class Augmentor:
         for fn, proba in self.augmentations.items():
             if rng.random() < proba:
                 logger.debug(f"Applying augmentation: {fn.__name__}")
-                input_data, schema, output = fn(
-                    input_data,
-                    schema,
-                    output,
-                    self,
-                    rng,
-                )
+                try:
+                    input_data, schema, output = fn(
+                        input_data,
+                        schema,
+                        output,
+                        self,
+                        rng,
+                    )
+                except Exception as e:
+                    logger.debug(f"Error augmenting example: {e}")
+                    pass
         logger.debug(
             f"Augmented example.\n\nInput_data: {repr(input_data)}\nSchema: {repr(schema)}\nOutput: {repr(output)}"
         )
@@ -158,33 +162,3 @@ class Augmentor:
 
     def __str__(self) -> str:
         return self.__repr__()
-
-
-def build_augment_fn(
-    augmentor: Augmentor,
-    seed: int,
-) -> Callable[[dict[str, Any]], dict[str, Any]]:
-    rng = random.Random(seed)
-
-    def augment_fn(batch: dict[str, Any]) -> dict[str, Any]:
-        inputs, schemas, outputs = [], [], []
-        for input_data, schema, output in zip(
-            batch["input_data"],
-            batch["schema"],
-            batch["output"],
-            strict=True,
-        ):
-            new_input_data, new_schema, new_output = augmentor.apply(
-                input_data, schema, output, rng
-            )
-            inputs.append(new_input_data)
-            schemas.append(new_schema)
-            outputs.append(new_output)
-        return {
-            "input_data": inputs,
-            "schema": schemas,
-            "output": outputs,
-            "meta": batch.get("meta"),
-        }
-
-    return augment_fn
