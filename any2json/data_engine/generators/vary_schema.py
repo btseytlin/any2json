@@ -189,10 +189,6 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         source_schema: dict,
     ) -> tuple[dict, dict, dict, dict, dict]:
 
-        print(
-            f"Generating new schema and data for source data: {source_data} and source schema: {source_schema}"
-        )
-
         if "properties" not in source_schema:
             raise NotImplementedError("Generator only supports objects for now")
 
