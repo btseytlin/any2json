@@ -17,46 +17,6 @@ from any2json.utils import logger
 from any2json.training.augment import Augmentor
 
 
-class RetokenizationCallback(TrainerCallback):
-    def __init__(
-        self,
-        raw_train_dataset: Dataset,
-        tokenize_fn: Callable[[dict[str, Any]], dict[str, Any]],
-        filter_fn: Callable[[dict[str, Any]], bool],
-        augmentor: Augmentor | None,
-        seed: int,
-        num_proc: int = 8,
-    ):
-        self.raw_train_dataset = raw_train_dataset
-        self.tokenize_fn = tokenize_fn
-        self.filter_fn = filter_fn
-        self.augmentor = augmentor
-        self.seed = seed
-        self.current_epoch = 0
-        self.num_proc = num_proc
-
-    def on_epoch_begin(self, args, state, control, model=None, **kwargs):
-        new_epoch = int(state.epoch)
-        if new_epoch != self.current_epoch and new_epoch > 0:
-            new_seed = self.seed + new_epoch
-
-            logger.info(f"Retokenizing dataset for epoch {new_epoch}")
-
-            new_tokenized = process_raw_to_tokenized(
-                dataset=self.raw_train_dataset,
-                tokenize_fn=self.tokenize_fn,
-                filter_fn=self.filter_fn,
-                augmentor=self.augmentor,
-                seed=new_seed,
-                num_proc=self.num_proc,
-            )
-
-            state.train_dataset = new_tokenized
-            logger.info(f"Updated train dataset: {len(new_tokenized)} samples")
-
-            self.current_epoch = new_epoch
-
-
 class EvalLoggerCallback(TrainerCallback):
     def __init__(
         self,

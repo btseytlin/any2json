@@ -7,10 +7,6 @@ from datasets import load_from_disk, load_dataset, DatasetDict, Dataset
 import torch
 from transformers import AutoTokenizer
 
-from any2json.training.augment import (
-    augment_dataset,
-    Augmentor,
-)
 from any2json.training.constants import SCHEMA_MISSING_TOKEN, SYSTEM_PROMPT
 from any2json.utils import logger
 from any2json.grouping import train_test_split_groups
@@ -117,7 +113,6 @@ def build_train_sequence(
 
 def build_tokenize_fn(
     tokenizer: AutoTokenizer,
-    debug: bool = False,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     eos = tokenizer.eos_token_id
     if eos is None:
@@ -142,18 +137,6 @@ def build_tokenize_fn(
             input_ids.append(ids)
             labels.append(lbs)
             lengths.append(len(ids))
-            if debug and idx == 0:
-                logger.debug(f"DEBUG TOKENIZATION - Example {idx}:")
-                logger.debug(f"  Input prompt: {repr(prompts[idx])}")
-                logger.debug(f"  Input tokens: {prompt_ids}")
-                logger.debug(f"  Input decoded: {repr(tokenizer.decode(prompt_ids))}")
-                logger.debug(f"  Target tokens: {target_ids}")
-                logger.debug(f"  Target decoded: {repr(tokenizer.decode(target_ids))}")
-                logger.debug(f"  Output: {repr(batch['output'][idx])}")
-                logger.debug(f"  EOS token: {eos}")
-                logger.debug(f"  Final input_ids: {ids}")
-                logger.debug(f"  Final labels: {lbs}")
-                logger.debug(f"  Final length: {len(ids)}")
         return {"input_ids": input_ids, "labels": labels, "length": lengths}
 
     return tokenize
@@ -238,26 +221,13 @@ def process_raw_to_tokenized(
     dataset: Dataset,
     tokenize_fn: Callable[[dict[str, Any]], dict[str, Any]],
     filter_fn: Callable[[dict[str, Any]], bool],
-    augmentor: Augmentor | None = None,
-    seed: int = 0,
     num_proc: int = 8,
 ) -> Dataset:
-
-    if augmentor:
-        dataset = augment_dataset(
-            dataset=dataset,
-            augmentor=augmentor,
-            seed=seed,
-            num_proc=num_proc,
-        )
-
     tokenized = dataset.map(
         tokenize_fn,
         batched=True,
         remove_columns=dataset.column_names,
         num_proc=num_proc,
     )
-
     filtered = tokenized.filter(filter_fn, batched=True, num_proc=num_proc)
-
     return filtered

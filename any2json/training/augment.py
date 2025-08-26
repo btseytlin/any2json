@@ -136,11 +136,11 @@ class Augmentor:
         rng: random.Random,
     ) -> tuple[str, str, str]:
         logger.debug(
-            f"Applying augmentations.\n\nInput_data: {input_data}\nSchema: {schema}\nOutput: {output}"
+            f"Applying augmentations.\n\nInput_data: {repr(input_data)}\nSchema: {repr(schema)}\nOutput: {repr(output)}"
         )
         for fn, proba in self.augmentations.items():
             if rng.random() < proba:
-                logger.debug(f"Applying augmentor: {fn.__name__}")
+                logger.debug(f"Applying augmentation: {fn.__name__}")
                 input_data, schema, output = fn(
                     input_data,
                     schema,
@@ -149,7 +149,7 @@ class Augmentor:
                     rng,
                 )
         logger.debug(
-            f"Augmented example.\n\nInput_data: {input_data}\nSchema: {schema}\nOutput: {output}"
+            f"Augmented example.\n\nInput_data: {repr(input_data)}\nSchema: {repr(schema)}\nOutput: {repr(output)}"
         )
         return input_data, schema, output
 
@@ -188,18 +188,3 @@ def build_augment_fn(
         }
 
     return augment_fn
-
-
-def augment_dataset(
-    dataset: Dataset,
-    augmentor: Augmentor,
-    seed: int = 0,
-    num_proc: int = 8,
-) -> Dataset:
-    logger.info(f"Augmenting dataset with:\n{augmentor=} and {seed=}")
-    augment_fn = build_augment_fn(
-        augmentor=augmentor,
-        seed=seed,
-    )
-    augmented = dataset.map(augment_fn, batched=True, num_proc=num_proc)
-    return augmented

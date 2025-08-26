@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import click
 from dotenv import load_dotenv
 import wandb
-from datasets import DatasetDict
+from datasets import Dataset, DatasetDict
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -33,8 +33,8 @@ from any2json.training.utils import (
 from any2json.training.callbacks import (
     EvalLoggerCallback,
     DebugTokensCallback,
-    RetokenizationCallback,
 )
+from any2json.training.dataset import AugmentTokenizeDataset
 
 # DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M"
 DEFAULT_MODEL = "google/gemma-3-270m"
@@ -89,13 +89,13 @@ def prepare_splits(ds: DatasetDict, seed: int, test_size: int = 5000) -> Dataset
 
 
 def create_trainer(
-    tokenized: DatasetDict,
+    train_dataset: AugmentTokenizeDataset,
+    eval_dataset: Dataset,
     tokenizer: AutoTokenizer,
     model: AutoModelForCausalLM,
     args: TrainingArguments,
     pad_to_multiple_of: int = 8,
     debug_tokens: bool = False,
-    retokenization_callback: RetokenizationCallback = None,
 ):
     collator = CausalLMDataCollator(
         tokenizer=tokenizer,
@@ -105,8 +105,8 @@ def create_trainer(
     trainer = Trainer(
         model=model,
         args=args,
-        train_dataset=tokenized["train"],
-        eval_dataset=tokenized["validation"],
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=collator,
     )
@@ -114,15 +114,13 @@ def create_trainer(
         EvalLoggerCallback(
             tokenizer=tokenizer,
             collator=collator,
-            tokenized_eval_ds=tokenized["validation"],
+            tokenized_eval_ds=eval_dataset,
             pad_to_multiple_of=pad_to_multiple_of,
             max_new_tokens=500,
         )
     )
     if debug_tokens:
         trainer.add_callback(DebugTokensCallback(tokenizer=tokenizer))
-    if retokenization_callback:
-        trainer.add_callback(retokenization_callback)
     return trainer
 
 
@@ -130,7 +128,7 @@ def prepare_dataset(
     pcfg: PipelineConfig,
     args: TrainingArguments,
     tokenizer: AutoTokenizer,
-) -> tuple[DatasetDict, RetokenizationCallback]:
+) -> tuple[AugmentTokenizeDataset, Dataset]:
     raw = load_hf_dataset(pcfg.dataset_path)
     logger.info(f"Loaded {len(raw['train'])} train samples")
 
@@ -145,46 +143,32 @@ def prepare_dataset(
 
     raw_train = ds["train"]
 
-    tokenize_fn = build_tokenize_fn(tokenizer, debug=pcfg.debug_tokens)
+    tokenize_fn = build_tokenize_fn(tokenizer)
     filter_fn = build_tokenized_length_filter_fn(pcfg.max_sequence_length)
 
-    augmentor = None
-    if pcfg.augment:
-        augmentor = Augmentor()
+    augmentor = Augmentor() if pcfg.augment else None
 
-    logger.info("Processing initial tokenized dataset")
-    train_tokenized = process_raw_to_tokenized(
+    logger.info("Preparing train dataset")
+
+    train_dataset = AugmentTokenizeDataset.from_raw_dataset(
         dataset=raw_train,
-        tokenize_fn=tokenize_fn,
+        tokenizer=tokenizer,
         filter_fn=filter_fn,
+        dataloader_num_proc=pcfg.dataloader_num_proc,
         augmentor=augmentor,
         seed=args.seed,
-        num_proc=pcfg.dataloader_num_proc,
     )
 
-    logger.info("Tokenizing validation dataset")
+    logger.info("Preparing validation dataset")
 
     val_tokenized = process_raw_to_tokenized(
         dataset=ds["validation"],
         tokenize_fn=tokenize_fn,
         filter_fn=filter_fn,
-        augmentor=None,
         num_proc=pcfg.dataloader_num_proc,
     )
-
-    tokenized = DatasetDict({"train": train_tokenized, "validation": val_tokenized})
-
-    callback = RetokenizationCallback(
-        raw_train_dataset=raw_train,
-        tokenize_fn=tokenize_fn,
-        filter_fn=filter_fn,
-        augmentor=augmentor,
-        seed=args.seed,
-        num_proc=pcfg.dataloader_num_proc,
-    )
-
-    logger.info(f"Prepared datasets: {tokenized}")
-    return tokenized, callback
+    logger.info("Prepared datasets")
+    return train_dataset, val_tokenized
 
 
 def prepare_model_and_tokenizer(
@@ -235,17 +219,17 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
     wandb.init(project=pcfg.wandb_project, config={"model": pcfg.model_name})
 
     logger.info(f"Preparing dataset")
-    tokenized, retokenization_callback = prepare_dataset(pcfg, args, tokenizer)
+    train_dataset, eval_dataset = prepare_dataset(pcfg, args, tokenizer)
 
     logger.info(f"Creating trainer")
     trainer = create_trainer(
-        tokenized=tokenized,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         model=model,
         args=args,
         pad_to_multiple_of=pcfg.pad_to_multiple_of,
         debug_tokens=pcfg.debug_tokens,
-        retokenization_callback=retokenization_callback,
     )
 
     logger.info(f"Training")
@@ -296,8 +280,8 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--debug-tokens", is_flag=True)
 @click.option("--unsloth", is_flag=True)
 @click.option("--dataloader-num-proc", default=8, type=int)
-@click.option("--augment", is_flag=True)
-@click.option("--attn-implementation", default="sdpa", type=str)
+@click.option("--augment/--no-augment", default=True)
+@click.option("--attn-implementation", default="eager", type=str)
 def train_cmd(
     ctx: click.Context,
     dataset_path: str,
