@@ -28,7 +28,7 @@ class VLLMServerModel:
     server_startup_timeout: float = 180.0
     server_log_path: str | None = "vllm_server.log"
     server_log_handle: TextIO | None = field(default=None, init=False)
-    timeout: float = 120.0
+    request_timeout: float = 180.0
 
     def get_state(self) -> dict:
         return vars(self)
@@ -156,7 +156,7 @@ class VLLMServerModel:
         if json_schema:
             payload["guided_json"] = json_schema
 
-        with httpx.Client(timeout=120) as client:
+        with httpx.Client(timeout=self.request_timeout) as client:
             t0 = time.perf_counter()
             response = client.post(
                 f"{self.base_url}/completions",
