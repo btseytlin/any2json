@@ -11,14 +11,14 @@ from any2json.benchmarks.models.qwen import QwenModel
 from tqdm.auto import tqdm
 import fastjsonschema
 
-from any2json.benchmarks.models.vllm_model import VLLMServerModel
+from any2json.benchmarks.models.vllm_custom import VLLMServerModel
 from any2json.utils import configure_loggers, logger
 
 
 model_types = {
     "qwen": QwenModel,
     "gemini": GeminiModel,
-    "vllm": VLLMServerModel,
+    "vllm_custom": VLLMServerModel,
 }
 
 
