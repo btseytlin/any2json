@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import os
 import traceback
 from tqdm import tqdm
 from dataclasses import dataclass, field
@@ -25,7 +26,7 @@ class VLLMServerModel:
     batch_size: int = 16
     server_process: subprocess.Popen | None = field(default=None, init=False)
     server_startup_timeout: float = 180.0
-    server_log_path: str | None = None
+    server_log_path: str | None = "vllm_server.log"
     server_log_handle: TextIO | None = field(default=None, init=False)
     timeout: float = 120.0
 
@@ -73,6 +74,8 @@ class VLLMServerModel:
 
     def open_log_file(self) -> None:
         if self.server_log_path:
+            if os.path.exists(self.server_log_path):
+                os.remove(self.server_log_path)
             self.server_log_handle = open(self.server_log_path, "ab", buffering=0)
 
     def close_log_file(self) -> None:
@@ -156,7 +159,7 @@ class VLLMServerModel:
         with httpx.Client(timeout=120) as client:
             t0 = time.perf_counter()
             response = client.post(
-                f"{self.base_url}/v1/completions",
+                f"{self.base_url}/completions",
                 json=payload,
             )
             t1 = time.perf_counter()
