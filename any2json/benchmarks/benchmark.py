@@ -109,7 +109,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
             results[i]["metrics"]["correct"] = False
 
     if len(results) == 0:
-        return {
+        return results, {
             "percentage_json_errors": 0,
             "percentage_correct": 0,
             "percentage_schema_errors": 0,
