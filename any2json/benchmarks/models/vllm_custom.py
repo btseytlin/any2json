@@ -18,7 +18,7 @@ from tqdm.asyncio import tqdm as tqdm_asyncio
 @dataclass
 class VLLMServerModel:
     model_name: str | None = None
-    max_tokens: int = 2048
+    max_tokens: int = 8096
     temperature: float = 0.0
     guided_json: bool = False
     base_url: str = "http://localhost:8000/v1"
