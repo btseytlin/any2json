@@ -270,4 +270,16 @@ Next actions:
 12. Add the latest draft link of jsonschema to the output
 
 
+### Gemma 270m notes
 
+1. Json2json now works. But putting json and no schema breaks.
+2. Guided decoding works well if the schema is well defined and data maps to schema well. Otherwise breaks down, sometimes very bad.
+3. Simple schema manipulations still dont work reliably. For example: changing a field from string to number.
+4. Doesnt handle unknown types of text
+5. Large sequences seem slow on cpu
+
+Ideas: 
+
+1. Try a run with very high augmentations and train for long
+2. Time to benchmark everything for real
+3. 

@@ -11,16 +11,18 @@ from any2json.benchmarks.models.qwen import QwenModel
 from tqdm.auto import tqdm
 import fastjsonschema
 
+from any2json.benchmarks.models.vllm_model import VLLMServerModel
 from any2json.utils import configure_loggers, logger
 
 
 model_types = {
     "qwen": QwenModel,
     "gemini": GeminiModel,
+    "vllm": VLLMServerModel,
 }
 
 
-def run_benchmark(model, samples: list[dict]) -> list[dict]:
+def run_benchmark(model, samples: list[dict]) -> tuple[list[dict], list[dict]]:
     results: list[dict] = []
     errors: list[dict] = []
 
@@ -39,7 +41,7 @@ def run_benchmark(model, samples: list[dict]) -> list[dict]:
                     "schema": s["schema"],
                     "correct_answer": s["output"],
                     "answer": p["answer"],
-                    "meta": p.get("meta", {}),
+                    "meta": p.get("meta"),
                 }
             )
     for e in errs:
@@ -54,11 +56,10 @@ def run_benchmark(model, samples: list[dict]) -> list[dict]:
                 "input_data": input_data,
                 "schema": s.get("schema") if s else None,
                 "correct_answer": s.get("output") if s else None,
-                "error": e.get("error", "unknown error"),
-                "traceback": e.get("traceback", ""),
+                "error": e.get("error"),
+                "traceback": e.get("traceback"),
             }
         )
-    return results, errors
     return results, errors
 
 

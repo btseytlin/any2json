@@ -15,31 +15,37 @@ def validate_json_schema(
     schema_text: str,
 ) -> tuple[bool, Optional[dict], str, Optional[Callable]]:
     if not schema_text.strip():
-        return True, None, "", None
+        return True, None, None, "", None
 
     try:
         schema = json.loads(schema_text)
         processed_schema = to_supported_json_schema(schema)
         validator = fastjsonschema.compile(processed_schema)
-        return True, processed_schema, "", validator
+        return True, processed_schema, schema, "", validator
     except json.JSONDecodeError as e:
-        return False, None, f"Invalid JSON: {e}", None
+        return False, None, None, f"Invalid JSON: {e}", None
     except ValueError as e:
-        return False, None, f"Schema error: {e}", None
+        return False, None, None, f"Schema error: {e}", None
     except Exception as e:
-        return False, None, f"Unexpected error: {e}", None
+        return False, None, None, f"Unexpected error: {e}", None
 
 
-def call_vllm_inference(formatted_example: str, endpoint_url: str) -> tuple[bool, str]:
+def call_vllm_inference(
+    formatted_example: str,
+    endpoint_url: str,
+    json_schema: dict | None = None,
+) -> tuple[bool, str]:
     try:
         payload = {
             "prompt": formatted_example,
-            "max_tokens": 2048,
-            "temperature": 0.1,
-            "stop": ["[INPUT]", "[SCHEMA]"],
+            "max_tokens": 1024,
+            "temperature": 0,
         }
 
-        with httpx.Client() as client:
+        if json_schema:
+            payload["guided_json"] = json_schema
+
+        with httpx.Client(timeout=120) as client:
             response = client.post(
                 f"{endpoint_url}/v1/completions",
                 json=payload,
@@ -70,6 +76,7 @@ def main():
         value="http://localhost:8000",
         help="URL of your vLLM inference server",
     )
+    enable_guided_json = st.checkbox("Enable Guided Decoding", value=True)
 
     col1, col2 = st.columns(2)
 
@@ -103,9 +110,8 @@ def main():
             return
 
         with st.spinner("Processing..."):
-            print("Schema text", schema_text)
-            is_valid, processed_schema, error_msg, validator = validate_json_schema(
-                schema_text
+            is_valid, processed_schema, original_schema, error_msg, validator = (
+                validate_json_schema(schema_text)
             )
 
             if not is_valid:
@@ -117,7 +123,13 @@ def main():
             )
             formatted_example = format_example(input_data, schema_str)
 
-            success, result = call_vllm_inference(formatted_example, endpoint_url)
+            success, result = call_vllm_inference(
+                formatted_example,
+                endpoint_url,
+                json_schema=(
+                    original_schema if original_schema and enable_guided_json else None
+                ),
+            )
             if success:
                 with output_placeholder.container():
                     json_parsed = False
