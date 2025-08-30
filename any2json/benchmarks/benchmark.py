@@ -207,11 +207,17 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit):
         json.dump(
             run_info,
             f,
+            default=lambda o: f"<<non-serializable: {type(o).__qualname__}>>",
             indent=2,
         )
 
     with open(os.path.join(output_dir, "results.json"), "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(
+            results,
+            f,
+            indent=2,
+            default=lambda o: f"<<non-serializable: {type(o).__qualname__}>>",
+        )
 
 
 @cli.command(
