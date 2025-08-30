@@ -79,7 +79,7 @@ class VLLMServerModel(VLLMServerMixin):
                 traceback_str = "".join(
                     traceback.format_exception(exc_type, exc_value, exc_traceback)
                 )
-                result["error"] = str(e)
+                result["error"] = str(e.__class__.__name__)
                 result["traceback"] = traceback_str
             return result
 
