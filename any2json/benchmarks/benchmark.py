@@ -41,6 +41,7 @@ def run_benchmark(model, samples: list[dict]) -> list[dict]:
                 "input_data": input_data,
                 "schema": sample["schema"],
                 "correct_answer": sample["output"],
+                "completion": prediction.get("completion"),
                 "answer": prediction.get("answer"),
                 "meta": prediction.get("meta"),
                 "error": prediction.get("error"),

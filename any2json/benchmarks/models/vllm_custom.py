@@ -66,7 +66,7 @@ class VLLMServerModel(VLLMServerMixin):
             try:
                 async with semaphore:
                     completion, meta = await self.request_completion(payload)
-                answer = None
+
                 result["completion"] = completion
                 result["meta"] = meta
 
@@ -74,7 +74,7 @@ class VLLMServerModel(VLLMServerMixin):
                 result["answer"] = answer
 
             except Exception as e:
-                logger.error(e)
+                logger.error(e, exc_info=True)
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 traceback_str = "".join(
                     traceback.format_exception(exc_type, exc_value, exc_traceback)
