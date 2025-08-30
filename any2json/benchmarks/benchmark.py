@@ -58,19 +58,28 @@ def postprocess_answer(answer: str) -> dict | str | list | int | float | bool | 
 
 
 def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
-    correct = []
+    details_list = []
 
+    if not results:
+        return details_list, {
+            "percentage_json_errors": 0,
+            "percentage_correct": 0,
+            "percentage_schema_errors": 0,
+            "percentage_request_errors": 0,
+        }
+
+    correct = []
     request_error = []
     json_error = []
     schema_error = []
     for i, result in enumerate(results):
-        results[i]["metrics"] = {}
+        details = {}
 
         if result.get("error"):
             request_error.append(i)
-            results[i]["metrics"]["error_type"] = "request_error"
-            results[i]["metrics"]["error"] = result["error"]
-            results[i]["metrics"]["traceback"] = result["error"]["traceback"]
+            details["error_type"] = "request_error"
+            details["error"] = result["error"]
+            details["traceback"] = result["error"]["traceback"]
             continue
 
         if isinstance(result["schema"], str):
@@ -86,9 +95,9 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
             traceback_str = "".join(
                 traceback.format_exception(exc_type, exc_value, exc_traceback)
             )
-            results[i]["metrics"]["error_type"] = "schema_error"
-            results[i]["metrics"]["error"] = str(e)
-            results[i]["metrics"]["traceback"] = traceback_str
+            details["error_type"] = "schema_error"
+            details["error"] = str(e)
+            details["traceback"] = traceback_str
             continue
         except Exception as e:
             json_error.append(i)
@@ -96,9 +105,9 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
             traceback_str = "".join(
                 traceback.format_exception(exc_type, exc_value, exc_traceback)
             )
-            results[i]["metrics"]["error_type"] = "json_error"
-            results[i]["metrics"]["error"] = str(e)
-            results[i]["metrics"]["traceback"] = traceback_str
+            details["error_type"] = "json_error"
+            details["error"] = str(e)
+            details["traceback"] = traceback_str
             continue
 
         correct_answer = result["correct_answer"]
@@ -108,19 +117,13 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
 
         if answer == correct_answer:
             correct.append(i)
-            results[i]["metrics"]["correct"] = True
+            details["correct"] = True
         else:
-            results[i]["metrics"]["correct"] = False
+            details["correct"] = False
 
-    if len(results) == 0:
-        return results, {
-            "percentage_json_errors": 0,
-            "percentage_correct": 0,
-            "percentage_schema_errors": 0,
-            "percentage_request_errors": 0,
-        }
+        details_list.append(details)
 
-    return results, {
+    return details_list, {
         "percentage_request_errors": round(len(request_error) / len(results), 3),
         "percentage_json_errors": round(len(json_error) / len(results), 3),
         "percentage_correct": round(len(correct) / len(results), 3),
@@ -250,12 +253,17 @@ def calculate_metrics_cmd(results_dir):
     with open(os.path.join(results_dir, "results.json"), "r") as f:
         results = json.load(f)
 
-    results, metrics = calculate_metrics(results)
+    details_list, metrics = calculate_metrics(results)
 
     logger.info(f"Metrics:\n{metrics}")
 
+    output = {
+        "metrics": metrics,
+        "details": details_list,
+    }
+
     with open(os.path.join(results_dir, "metrics.json"), "w") as f:
-        json_dump_safe(metrics, f, indent=2)
+        json_dump_safe(output, f, indent=2)
 
 
 if __name__ == "__main__":
