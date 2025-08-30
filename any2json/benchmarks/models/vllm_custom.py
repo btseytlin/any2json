@@ -53,38 +53,31 @@ class VLLMServerModel(VLLMServerMixin):
         async def task(
             i: int, sample: dict
         ) -> tuple[str, dict] | tuple[Exception, str]:
-            async with semaphore:
-                prompt = format_example(sample["input_data"], sample["schema"])
-                payload = {
-                    "prompt": prompt,
-                    "max_tokens": self.max_tokens,
-                    "temperature": self.temperature,
-                }
-                if self.guided_json and isinstance(sample["schema"], dict):
-                    payload["guided_json"] = sample["schema"]
-                try:
+            prompt = format_example(sample["input_data"], sample["schema"])
+            payload = {
+                "prompt": prompt,
+                "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
+            }
+            if self.guided_json and isinstance(sample["schema"], dict):
+                payload["guided_json"] = sample["schema"]
 
+            result = {"id": i}
+            try:
+                async with semaphore:
                     completion, meta = await self.request_completion(payload)
-                    answer = None
-                    try:
-                        answer = completion["choices"][0]["text"]
-                    except Exception as e:
-                        logger.error(e)
-                        answer = None
+                answer = None
+                result["completion"] = completion
+                result["meta"] = meta
 
-                    return {
-                        "id": i,
-                        "answer": answer,
-                        "completion": completion,
-                        "meta": meta,
-                    }
-                except Exception as e:
-                    logger.error(e)
-                    return {
-                        "id": i,
-                        "error": str(e),
-                        "traceback": traceback.format_exc(),
-                    }
+                answer = completion["choices"][0]["text"]
+                result["answer"] = answer
+
+            except Exception as e:
+                logger.error(e)
+                result["error"] = str(e)
+                result["traceback"] = traceback.format_exc()
+            return result
 
         tasks = [task(i, sample) for i, sample in enumerate(samples)]
         results = await tqdm_asyncio.gather(*tasks, desc="Executing requests")
