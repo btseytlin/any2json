@@ -1,19 +1,18 @@
 from __future__ import annotations
+import asyncio
 import traceback
 from tqdm import tqdm
 import json
 import torch
 from dataclasses import dataclass, field
-from typing import Iterator, Callable, Any, TextIO
+from typing import Iterator, Callable, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from openai import OpenAI
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from any2json.utils import logger
-import subprocess
+from any2json.benchmarks.models.vllm_custom import VLLMServerModel
+from tqdm.asyncio import tqdm as tqdm_asyncio
 import sys
 import time
-import httpx
-from urllib.parse import urlparse
 
 
 def to_text(x: str | dict) -> str:
@@ -271,204 +270,87 @@ class BaseQwen:
 
 
 @dataclass
-class QwenVLLMServer(BaseQwen):
-    model_name: str | None = None
+class QwenVLLMServer(VLLMServerModel):
     enable_thinking: bool = False
-    max_tokens: int = 8000
-    base_url: str = "http://localhost:8000/v1"
-    api_key: str = "EMPTY"
-    tokenizer: AutoTokenizer = field(init=False)
-    client: OpenAI = field(init=False)
     batch_size: int = 16
-    server_process: subprocess.Popen | None = field(default=None, init=False)
-    server_startup_timeout: float = 180.0
-    server_log_path: str | None = None
-    server_log_handle: TextIO | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
-        name = self.resolved_model_name
-        self.tokenizer = AutoTokenizer.from_pretrained(name)
-        self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
-
-    def parse_host_port(self) -> tuple[str, int]:
-        u = urlparse(self.base_url)
-        return (u.hostname or "127.0.0.1", u.port or 8000)
-
-    def health_url(self) -> str:
-        return f"{self.base_url}/models"
-
-    def is_server_alive(self) -> bool:
-        try:
-            r = httpx.get(self.health_url(), timeout=2.0)
-            logger.info(f"Health check response: {r.status_code} {r.text}")
-            return r.status_code == 200
-        except Exception as e:
-            return False
-
-    def build_server_command(self) -> list[str]:
-        host, port = self.parse_host_port()
-
-        args = []
         if self.enable_thinking:
-            args += ["--reasoning-parser", "deepseek_r1"]
+            self.vllm_serve_args = ["--reasoning-parser", "deepseek_r1"]
+        else:
+            self.vllm_serve_args = []
 
-        return [
-            sys.executable,
-            "-u",
-            "-m",
-            "vllm.entrypoints.openai.api_server",
-            "--model",
-            self.resolved_model_name,
-            "--host",
-            host,
-            "--port",
-            str(port),
-            *args,
-        ]
-
-    def open_log_file(self) -> None:
-        if self.server_log_path:
-            self.server_log_handle = open(self.server_log_path, "ab", buffering=0)
-
-    def close_log_file(self) -> None:
-        if self.server_log_handle:
-            try:
-                self.server_log_handle.flush()
-            except Exception:
-                pass
-            try:
-                self.server_log_handle.close()
-            except Exception:
-                pass
-            self.server_log_handle = None
-
-    def spawn_server(self, cmd: list[str]) -> None:
-        try:
-            self.open_log_file()
-            out = self.server_log_handle or subprocess.DEVNULL
-            err = self.server_log_handle or subprocess.DEVNULL
-            self.server_process = subprocess.Popen(cmd, stdout=out, stderr=err)
-        except Exception as e:
-            raise RuntimeError(f"Failed to start vLLM server: {e}")
-
-    def wait_for_server_ready(self) -> None:
-        deadline = time.time() + self.server_startup_timeout
-        while time.time() < deadline:
-            if self.is_server_alive():
-                return
-            if self.server_process:
-                process_status = self.server_process.poll()
-                if process_status is not None:
-                    raise RuntimeError(
-                        f"vLLM server exited early with status {process_status}"
-                    )
-            time.sleep(1)
-        raise TimeoutError("Timed out waiting for vLLM server to start")
-
-    def ensure_server_started(self) -> bool:
-        logger.info("Checking if server is alive")
-        if self.is_server_alive():
-            logger.warning("VLLM server is already running")
-            raise RuntimeError("VLLM server is already running")
-        cmd = self.build_server_command()
-        logger.info(f"Starting server with command: {' '.join(cmd)}")
-        self.spawn_server(cmd)
-        logger.info("Waiting for server to be ready")
-        self.wait_for_server_ready()
-        logger.info("VLLM server is ready")
-        return True
-
-    def stop_server(self) -> None:
-        logger.info("Stopping server")
-        if self.server_process is None:
-            return
-        try:
-            self.server_process.terminate()
-            try:
-                self.server_process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                logger.info("Server process timed out, killing it")
-                self.server_process.kill()
-        finally:
-            self.server_process = None
-        logger.info("Server stopped")
-        self.close_log_file()
+    @property
+    def resolved_model_name(self) -> str:
+        return self.model_name or "Qwen/Qwen3-0.6B"
 
     def get_state(self) -> dict:
-        s = super().get_state()
-        s.update({"base_url": self.base_url})
-        return s
-
-    def convert_to_json(self, input_text: str, schema: dict) -> tuple[str, dict]:
-        prompt = make_prompt(input_text, schema)
-        return self.generate(prompt)
-
-    def generate(self, prompt: str) -> tuple[str, dict]:
-        params = get_sampling_params(self.enable_thinking, self.max_tokens)
-        main_params = {
-            "top_p": params["top_p"],
-            "temperature": params["temperature"],
-            "max_completion_tokens": params["max_tokens"],
+        return {
+            "model_name": self.resolved_model_name,
+            "class_name": str(self.__class__.__name__),
+            "enable_thinking": self.enable_thinking,
+            "max_tokens": self.max_tokens,
+            "base_url": self.base_url,
         }
-        extra_params = {
-            "top_k": params["top_k"],
-            "min_p": params["min_p"],
-        }
-        t0 = time.perf_counter()
-        resp = self.client.chat.completions.create(
-            model=self.resolved_model_name,
-            messages=messages(prompt),
-            **main_params,
-            extra_body=extra_params,
-        )
-        t1 = time.perf_counter()
-        m = resp.choices[0].message
-        content = m.content or ""
-        reasoning = getattr(m, "reasoning_content", "") or ""
-        if not reasoning:
-            content, reasoning = parse_think(content)
-        content = normalize_output_text(content)
-        meta = {"thinking_content": reasoning, "inference_ms": (t1 - t0) * 1000.0}
-        return content, meta
 
     def get_predictions(
         self, samples: list[dict], workers: int = 8
     ) -> tuple[list[dict], list[dict]]:
-        started = False
-        try:
-            started = self.ensure_server_started()
-            return self.execute_parallel_requests(samples, workers)
-        finally:
-            if started:
-                self.stop_server()
+        self.max_concurrent_requests = workers
+        return super().get_predictions(samples)
 
-    def execute_parallel_requests(
-        self, samples: list[dict], workers: int
+    async def async_get_predictions(
+        self, samples: list[dict]
     ) -> tuple[list[dict], list[dict]]:
         results: list[dict] = []
-        errors: list[dict] = []
 
         logger.info(
-            f"Executing {len(samples)} requests in parallel with {workers} workers"
+            f"Executing {len(samples)} requests concurrently with {self.max_concurrent_requests=}"
         )
 
-        def task(_: int, s: dict) -> tuple[str, dict]:
-            x = to_text(s["input_data"])
-            prompt = make_prompt(x, s["schema"])
-            answer, meta = self.generate(prompt)
-            return answer, meta
+        semaphore = asyncio.Semaphore(self.max_concurrent_requests)
 
-        items = [(i, s) for i, s in enumerate(samples)]
-        ok, err = parallel_map(task, items, workers)
-        for i, (answer, meta) in ok:
-            results.append({"id": i, "answer": answer, "meta": meta})
-        for i, (exception, traceback_str) in err:
-            errors.append(
-                {
-                    "id": i,
-                    "error": str(exception),
-                    "traceback": traceback_str.strip(),
+        async def task(i: int, sample: dict) -> dict:
+            async with semaphore:
+                x = to_text(sample["input_data"])
+                prompt = make_prompt(x, sample["schema"])
+
+                params = get_sampling_params(self.enable_thinking, self.max_tokens)
+                payload = {
+                    "prompt": prompt,
+                    "max_tokens": params["max_tokens"],
+                    "temperature": params["temperature"],
+                    "top_p": params["top_p"],
+                    "top_k": params["top_k"],
+                    "min_p": params["min_p"],
                 }
-            )
-        logger.info(f"Obtained {len(results)} results and {len(errors)} errors")
-        return results, errors
+
+                try:
+                    result, meta = await self.request_completion(payload)
+                    answer = result["choices"][0]["text"]
+                    content, reasoning = parse_think(answer)
+                    content = normalize_output_text(content)
+                    meta.update({"thinking_content": reasoning})
+                    return {
+                        "id": i,
+                        "answer": content,
+                        "meta": meta,
+                    }
+                except Exception as e:
+                    logger.error(e)
+                    return {
+                        "id": i,
+                        "error": str(e),
+                        "traceback": traceback.format_exc(),
+                    }
+
+        tasks = [task(i, sample) for i, sample in enumerate(samples)]
+        results = await tqdm_asyncio.gather(*tasks, desc="Executing requests")
+
+        errors = [result for result in results if "error" in result]
+        success_results = [result for result in results if "error" not in result]
+
+        logger.info(
+            f"Obtained {len(success_results)} successful results and {len(errors)} errors"
+        )
+        return success_results, errors

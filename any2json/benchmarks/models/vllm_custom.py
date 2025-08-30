@@ -33,9 +33,7 @@ class VLLMServerModel(VLLMServerMixin):
         started = False
         try:
             started = self.ensure_server_started()
-            return asyncio.run(
-                self.async_get_predictions(samples, self.max_concurrent_requests)
-            )
+            return asyncio.run(self.async_get_predictions(samples))
         finally:
             if started:
                 self.stop_server()
