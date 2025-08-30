@@ -5,6 +5,7 @@ import sys
 import time
 from typing import TextIO
 from urllib.parse import urlparse
+import asyncio
 
 import httpx
 
@@ -138,6 +139,9 @@ class VLLMServerMixin:
             self.server_process = None
         logger.info("Server stopped")
         self.close_log_file()
+
+        if self.http_client is not None:
+            asyncio.create_task(self.close_http_client())
 
     async def request_completion(
         self,
