@@ -142,7 +142,11 @@ class VLLMServerMixin:
         ms = (t1 - t0) * 1000.0
         logger.info(f"Request completed in {ms:.2f}ms")
 
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except Exception as e:
+            logger.error(f"Request failed: {response.text}")
+            raise e
 
         result = response.json()
         return result, {"inference_ms": ms}
@@ -161,7 +165,11 @@ class VLLMServerMixin:
         ms = (t1 - t0) * 1000.0
         logger.info(f"Chat completion request completed in {ms:.2f}ms")
 
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except Exception as e:
+            logger.error(f"Request failed: {response.text}")
+            raise e
 
         result = response.json()
         return result, {"inference_ms": ms}
