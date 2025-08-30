@@ -26,18 +26,6 @@ class VLLMServerModel(VLLMServerMixin):
     def get_state(self) -> dict:
         return vars(self)
 
-    def get_predictions(
-        self,
-        samples: list[dict],
-    ) -> tuple[list[dict], list[dict]]:
-        started = False
-        try:
-            started = self.ensure_server_started()
-            return asyncio.run(self.async_get_predictions(samples))
-        finally:
-            if started:
-                self.stop_server()
-
     async def async_get_predictions(
         self,
         samples: list[dict],

@@ -5,14 +5,12 @@ from tqdm import tqdm
 import json
 import torch
 from dataclasses import dataclass, field
-from typing import Iterator, Callable, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
+from any2json.benchmarks.models.vllm_server_mixin import VLLMServerMixin
 from any2json.utils import logger
-from any2json.benchmarks.models.vllm_custom import VLLMServerModel
 from tqdm.asyncio import tqdm as tqdm_asyncio
 import sys
-import time
 
 
 def to_text(x: str | dict) -> str:
@@ -170,36 +168,24 @@ def messages(prompt: str) -> list[dict]:
 
 
 @dataclass
-class QwenVLLMServer(VLLMServerModel):
+class QwenVLLMServer(VLLMServerMixin):
     model_name: str = "Qwen/Qwen3-0.6B"
     enable_thinking: bool = False
     guided_json: bool = False
     tokenizer: AutoTokenizer = field(init=False)
+
+    max_tokens: int = 4096
+    temperature: float = 0.0
+
+    def get_state(self) -> dict:
+        return vars(self)
 
     def __post_init__(self) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         if self.enable_thinking:
             self.vllm_serve_args += ["--reasoning-parser", "deepseek_r1"]
 
-    def get_state(self) -> dict:
-        return {
-            "model_name": self.model_name,
-            "class_name": str(self.__class__.__name__),
-            "enable_thinking": self.enable_thinking,
-            "guided_json": self.guided_json,
-            "max_tokens": self.max_tokens,
-            "base_url": self.base_url,
-        }
-
-    def get_predictions(
-        self, samples: list[dict], workers: int = 8
-    ) -> tuple[list[dict], list[dict]]:
-        self.max_concurrent_requests = workers
-        return super().get_predictions(samples)
-
-    async def async_get_predictions(
-        self, samples: list[dict]
-    ) -> tuple[list[dict], list[dict]]:
+    async def async_get_predictions(self, samples: list[dict]) -> list[dict]:
         results: list[dict] = []
 
         logger.info(
