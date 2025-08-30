@@ -80,12 +80,13 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
             details["error_type"] = "request_error"
             details["error"] = result["error"]
             details["traceback"] = result["error"]["traceback"]
+            details_list.append(details)
             continue
 
         if isinstance(result["schema"], str):
             result["schema"] = json.loads(result["schema"])
-
         schema = fastjsonschema.compile(result["schema"])
+
         try:
             answer = postprocess_answer(result["answer"])
             schema(answer)
@@ -98,6 +99,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
             details["error_type"] = "schema_error"
             details["error"] = str(e)
             details["traceback"] = traceback_str
+            details_list.append(details)
             continue
         except Exception as e:
             json_error.append(i)
@@ -108,6 +110,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
             details["error_type"] = "json_error"
             details["error"] = str(e)
             details["traceback"] = traceback_str
+            details_list.append(details)
             continue
 
         correct_answer = result["correct_answer"]
