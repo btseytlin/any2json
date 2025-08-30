@@ -64,10 +64,18 @@ class VLLMServerModel(VLLMServerMixin):
                     payload["guided_json"] = sample["schema"]
                 try:
 
-                    answer, meta = await self.request_completion(payload)
+                    completion, meta = await self.request_completion(payload)
+                    answer = None
+                    try:
+                        answer = completion["choices"][0]["text"]
+                    except Exception as e:
+                        logger.error(e)
+                        answer = None
+
                     return {
                         "id": i,
                         "answer": answer,
+                        "completion": completion,
                         "meta": meta,
                     }
                 except Exception as e:
