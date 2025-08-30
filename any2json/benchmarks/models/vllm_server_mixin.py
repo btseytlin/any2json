@@ -166,7 +166,7 @@ class VLLMServerMixin:
     async def request_chat_completions(
         self,
         payload: dict,
-    ) -> tuple[str, dict]:
+    ) -> tuple[dict, dict]:
         client = self.get_http_client()
         t0 = time.perf_counter()
         response = await client.post(
