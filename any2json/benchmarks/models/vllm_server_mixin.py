@@ -140,13 +140,6 @@ class VLLMServerMixin:
         logger.info("Server stopped")
         self.close_log_file()
 
-        if self.http_client is not None:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self.close_http_client())
-            except RuntimeError:
-                asyncio.run(self.close_http_client())
-
     async def request_completion(
         self,
         payload: dict,
