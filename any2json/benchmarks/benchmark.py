@@ -80,16 +80,6 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         try:
             answer = postprocess_answer(result["answer"])
             schema(answer)
-        except json.JSONDecodeError as e:
-            json_error.append(i)
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            traceback_str = "".join(
-                traceback.format_exception(exc_type, exc_value, exc_traceback)
-            )
-            results[i]["metrics"]["error_type"] = "json_error"
-            results[i]["metrics"]["error"] = str(e)
-            results[i]["metrics"]["traceback"] = traceback_str
-            continue
         except fastjsonschema.JsonSchemaException as e:
             schema_error.append(i)
             exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -97,6 +87,16 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
                 traceback.format_exception(exc_type, exc_value, exc_traceback)
             )
             results[i]["metrics"]["error_type"] = "schema_error"
+            results[i]["metrics"]["error"] = str(e)
+            results[i]["metrics"]["traceback"] = traceback_str
+            continue
+        except Exception as e:
+            json_error.append(i)
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            traceback_str = "".join(
+                traceback.format_exception(exc_type, exc_value, exc_traceback)
+            )
+            results[i]["metrics"]["error_type"] = "json_error"
             results[i]["metrics"]["error"] = str(e)
             results[i]["metrics"]["traceback"] = traceback_str
             continue
