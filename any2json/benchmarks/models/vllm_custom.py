@@ -19,7 +19,7 @@ from tqdm.asyncio import tqdm as tqdm_asyncio
 @dataclass
 class VLLMServerModel(VLLMServerMixin):
     model_name: str | None = None
-    max_tokens: int = 8096
+    max_tokens: int = 7000
     temperature: float = 0.0
     guided_json: bool = False
 

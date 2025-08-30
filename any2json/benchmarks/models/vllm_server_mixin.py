@@ -21,10 +21,21 @@ class VLLMServerMixin:
     server_log_handle: TextIO | None = field(default=None, init=False)
     request_timeout: float = 180.0
     max_concurrent_requests: int = 8
+    http_client: httpx.AsyncClient | None = field(default=None, init=False)
 
     def parse_host_port(self) -> tuple[str, int]:
         u = urlparse(self.base_url)
         return u.hostname, u.port
+
+    def get_http_client(self) -> httpx.AsyncClient:
+        if self.http_client is None:
+            self.http_client = httpx.AsyncClient(timeout=self.request_timeout)
+        return self.http_client
+
+    async def close_http_client(self) -> None:
+        if self.http_client is not None:
+            await self.http_client.aclose()
+            self.http_client = None
 
     def health_url(self) -> str:
         return f"{self.base_url}/models"
@@ -132,15 +143,15 @@ class VLLMServerMixin:
         self,
         payload: dict,
     ) -> tuple[str, dict]:
-        with httpx.Client(timeout=self.request_timeout) as client:
-            t0 = time.perf_counter()
-            response = client.post(
-                f"{self.base_url}/completions",
-                json=payload,
-            )
-            t1 = time.perf_counter()
+        client = self.get_http_client()
+        t0 = time.perf_counter()
+        response = await client.post(
+            f"{self.base_url}/completions",
+            json=payload,
+        )
+        t1 = time.perf_counter()
         ms = (t1 - t0) * 1000.0
-        logger.info(f"Request completed in {ms:.2f}ms")
+        logger.debug(f"Request completed in {ms:.2f}ms")
 
         try:
             response.raise_for_status()
@@ -155,15 +166,15 @@ class VLLMServerMixin:
         self,
         payload: dict,
     ) -> tuple[str, dict]:
-        with httpx.Client(timeout=self.request_timeout) as client:
-            t0 = time.perf_counter()
-            response = client.post(
-                f"{self.base_url}/chat/completions",
-                json=payload,
-            )
-            t1 = time.perf_counter()
+        client = self.get_http_client()
+        t0 = time.perf_counter()
+        response = await client.post(
+            f"{self.base_url}/chat/completions",
+            json=payload,
+        )
+        t1 = time.perf_counter()
         ms = (t1 - t0) * 1000.0
-        logger.info(f"Chat completion request completed in {ms:.2f}ms")
+        logger.debug(f"Chat completion request completed in {ms:.2f}ms")
 
         try:
             response.raise_for_status()
