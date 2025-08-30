@@ -210,13 +210,15 @@ class QwenVLLMServer(VLLMServerMixin):
 
             try:
                 async with semaphore:
-                    result, meta = await self.request_chat_completions(payload)
-                result["completion"] = result
+                    completion_messages, meta = await self.request_chat_completions(
+                        payload
+                    )
+                result["completion"] = completion_messages
                 result["meta"] = meta
 
-                message = result["choices"][0]["message"]
-                answer = message.get("content", "")
-                reasoning = message.get("reasoning_content", "")
+                message = completion_messages["choices"][0]["message"]
+                answer = message.get("content")
+                reasoning = message.get("reasoning_content")
 
                 if not reasoning:
                     answer, reasoning = parse_think(answer)
