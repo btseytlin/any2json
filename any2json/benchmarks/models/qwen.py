@@ -173,6 +173,7 @@ def messages(prompt: str) -> list[dict]:
 class QwenVLLMServer(VLLMServerModel):
     model_name: str = "Qwen/Qwen3-0.6B"
     enable_thinking: bool = False
+    guided_json: bool = False
     tokenizer: AutoTokenizer = field(init=False)
 
     def __post_init__(self) -> None:
@@ -207,44 +208,46 @@ class QwenVLLMServer(VLLMServerModel):
         semaphore = asyncio.Semaphore(self.max_concurrent_requests)
 
         async def task(i: int, sample: dict) -> dict:
-            async with semaphore:
-                x = to_text(sample["input_data"])
-                prompt = make_prompt(x, sample["schema"])
+            x = to_text(sample["input_data"])
+            prompt = make_prompt(x, sample["schema"])
 
-                params = get_sampling_params(self.enable_thinking, self.max_tokens)
-                payload = {
-                    "model": self.model_name,
-                    "messages": messages(prompt),
-                    **params,
-                }
+            params = get_sampling_params(self.enable_thinking, self.max_tokens)
+            payload = {
+                "model": self.model_name,
+                "messages": messages(prompt),
+                **params,
+            }
 
-                try:
+            if self.guided_json and isinstance(sample["schema"], dict):
+                payload["guided_json"] = sample["schema"]
+
+            result = {"id": i}
+
+            try:
+                async with semaphore:
                     result, meta = await self.request_chat_completions(payload)
-                    message = result["choices"][0]["message"]
-                    answer = message.get("content", "")
-                    reasoning = message.get("reasoning_content", "")
+                result["completion"] = result
+                result["meta"] = meta
 
-                    if not reasoning:
-                        answer, reasoning = parse_think(answer)
+                message = result["choices"][0]["message"]
+                answer = message.get("content", "")
+                reasoning = message.get("reasoning_content", "")
 
-                    content = normalize_output_text(answer)
-                    meta.update({"thinking_content": reasoning})
-                    return {
-                        "id": i,
-                        "answer": content,
-                        "meta": meta,
-                    }
-                except Exception as e:
-                    logger.error(e, exc_info=True)
-                    exc_type, exc_value, exc_traceback = sys.exc_info()
-                    traceback_str = "".join(
-                        traceback.format_exception(exc_type, exc_value, exc_traceback)
-                    )
-                    return {
-                        "id": i,
-                        "error": str(e),
-                        "traceback": traceback_str,
-                    }
+                if not reasoning:
+                    answer, reasoning = parse_think(answer)
+
+                content = normalize_output_text(answer)
+                result["meta"]["thinking_content"] = reasoning
+                result["answer"] = content
+            except Exception as e:
+                logger.error(e, exc_info=True)
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                traceback_str = "".join(
+                    traceback.format_exception(exc_type, exc_value, exc_traceback)
+                )
+                result["error"] = str(e)
+                result["traceback"] = traceback_str
+            return result
 
         tasks = [task(i, sample) for i, sample in enumerate(samples)]
         results = await tqdm_asyncio.gather(*tasks, desc="Executing requests")
@@ -255,4 +258,4 @@ class QwenVLLMServer(VLLMServerModel):
         logger.info(
             f"Obtained {len(success_results)} successful results and {len(errors)} errors"
         )
-        return success_results, errors
+        return results
