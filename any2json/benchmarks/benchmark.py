@@ -1,12 +1,10 @@
 from datetime import datetime
 import json
 import os
-import logging
 import sys
-import time
+import numpy as np
 import traceback
 import click
-from datasets import DatasetDict, load_dataset
 from dotenv import load_dotenv
 from any2json.benchmarks.models.gemini import GeminiModel
 from any2json.benchmarks.models.qwen import QwenVLLMServer
@@ -67,12 +65,14 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
             "percentage_correct": 0,
             "percentage_schema_errors": 0,
             "percentage_request_errors": 0,
+            "mean_inference_ms": 0,
         }
 
     correct = []
     request_error = []
     json_error = []
     schema_error = []
+    inference_ms = []
     for i, result in enumerate(results):
         details = {}
 
@@ -125,6 +125,10 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         else:
             details["correct"] = False
 
+        inference_ms = result.get("meta", {}).get("inference_ms")
+        if inference_ms:
+            inference_ms.append(inference_ms)
+
         details_list.append(details)
 
     return details_list, {
@@ -132,6 +136,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         "percentage_json_errors": round(len(json_error) / len(results), 3),
         "percentage_correct": round(len(correct) / len(results), 3),
         "percentage_schema_errors": round(len(schema_error) / len(results), 3),
+        "mean_inference_ms": round(np.mean(inference_ms).item(), 3),
     }
 
 
