@@ -273,12 +273,12 @@ class BaseQwen:
 class QwenVLLMServer(VLLMServerModel):
     enable_thinking: bool = False
     batch_size: int = 16
+    tokenizer: AutoTokenizer = field(init=False)
 
     def __post_init__(self) -> None:
+        self.tokenizer = AutoTokenizer.from_pretrained(self.resolved_model_name)
         if self.enable_thinking:
-            self.vllm_serve_args = ["--reasoning-parser", "deepseek_r1"]
-        else:
-            self.vllm_serve_args = []
+            self.vllm_serve_args += ["--reasoning-parser", "deepseek_r1"]
 
     @property
     def resolved_model_name(self) -> str:
@@ -317,19 +317,27 @@ class QwenVLLMServer(VLLMServerModel):
 
                 params = get_sampling_params(self.enable_thinking, self.max_tokens)
                 payload = {
-                    "prompt": prompt,
+                    "model": self.resolved_model_name,
+                    "messages": messages(prompt),
                     "max_tokens": params["max_tokens"],
                     "temperature": params["temperature"],
                     "top_p": params["top_p"],
-                    "top_k": params["top_k"],
-                    "min_p": params["min_p"],
+                    "extra_body": {
+                        "top_k": params["top_k"],
+                        "min_p": params["min_p"],
+                    },
                 }
 
                 try:
-                    result, meta = await self.request_completion(payload)
-                    answer = result["choices"][0]["text"]
-                    content, reasoning = parse_think(answer)
-                    content = normalize_output_text(content)
+                    result, meta = await self.request_chat_completions(payload)
+                    message = result["choices"][0]["message"]
+                    answer = message.get("content", "")
+                    reasoning = message.get("reasoning_content", "")
+
+                    if not reasoning:
+                        answer, reasoning = parse_think(answer)
+
+                    content = normalize_output_text(answer)
                     meta.update({"thinking_content": reasoning})
                     return {
                         "id": i,

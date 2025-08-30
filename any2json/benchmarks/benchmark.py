@@ -188,6 +188,8 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit):
         "limit": limit,
     }
 
+    errors = [r for r in results if "error" in r]
+
     run_info = {
         "config": run_config,
         "model_state": model.get_state(),

@@ -146,3 +146,22 @@ class VLLMServerMixin:
 
         result = response.json()
         return result, {"inference_ms": ms}
+
+    async def request_chat_completions(
+        self,
+        payload: dict,
+    ) -> tuple[str, dict]:
+        with httpx.Client(timeout=self.request_timeout) as client:
+            t0 = time.perf_counter()
+            response = client.post(
+                f"{self.base_url}/chat/completions",
+                json=payload,
+            )
+            t1 = time.perf_counter()
+        ms = (t1 - t0) * 1000.0
+        logger.info(f"Chat completion request completed in {ms:.2f}ms")
+
+        response.raise_for_status()
+
+        result = response.json()
+        return result, {"inference_ms": ms}
