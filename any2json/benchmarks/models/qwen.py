@@ -170,123 +170,19 @@ def messages(prompt: str) -> list[dict]:
 
 
 @dataclass
-class BaseQwen:
-    model_name: str | None = None
-    enable_thinking: bool = False
-    max_tokens: int = 8000
-    batch_size: int = 16
-
-    @property
-    def resolved_model_name(self) -> str:
-        return self.model_name or "Qwen/Qwen3-0.6B"
-
-    def get_state(self) -> dict:
-        return {
-            "model_name": self.resolved_model_name,
-            "class_name": str(self.__class__.__name__),
-            "enable_thinking": self.enable_thinking,
-            "max_tokens": self.max_tokens,
-        }
-
-    def convert_to_json(self, input_text: str, schema: dict) -> tuple[str, dict]:
-        prompt = make_prompt(input_text, schema)
-        return self.generate(prompt)
-
-    def to_answer_meta(self, text: str) -> tuple[str, dict]:
-        content, reasoning = parse_think(text)
-        content = normalize_output_text(content)
-        return content, {"thinking_content": reasoning}
-
-    def iter_batches(
-        self, samples: list[dict], batch_size: int
-    ) -> Iterator[tuple[list[int], list[dict]]]:
-        for start in range(0, len(samples), batch_size):
-            batch = samples[start : start + batch_size]
-            ids = list(range(start, start + len(batch)))
-            yield ids, batch
-
-    def collect_batch_outputs(
-        self,
-        samples: list[dict],
-        batch_size: int,
-        run_batch_fn: Callable[[list[dict]], tuple[object, Any]],
-    ) -> tuple[list[object], list[Any], list[list[int]]]:
-        outputs: list[object] = []
-        aux_list: list[Any] = []
-        id_list: list[list[int]] = []
-        pbar = tqdm(total=len(samples), desc="Generating predictions")
-        for ids, batch in self.iter_batches(samples, batch_size):
-            try:
-                out, aux = run_batch_fn(batch)
-                outputs.append(out)
-                aux_list.append(aux)
-                id_list.append(ids)
-                pbar.update(len(batch))
-            except KeyboardInterrupt:
-                logger.error("Keyboard interrupt")
-                break
-        return outputs, aux_list, id_list
-
-    def decode_and_build_results(
-        self,
-        outputs: list[object],
-        aux_list: list[Any],
-        id_list: list[list[int]],
-        decode_batch_fn: Callable[[object, Any], list[str]],
-    ) -> list[dict]:
-        results: list[dict] = []
-        for out, aux, ids in tqdm(
-            zip(outputs, aux_list, id_list, strict=True),
-            total=len(outputs),
-            desc="Decoding outputs",
-        ):
-            texts = decode_batch_fn(out, aux)
-            ms_list = []
-            if isinstance(aux, dict) and "inference_ms_list" in aux:
-                ms_list = aux["inference_ms_list"]
-            else:
-                ms_list = [None] * len(ids)
-            for j, idx in enumerate(ids):
-                content, meta = self.to_answer_meta(texts[j])
-                if j < len(ms_list) and ms_list[j] is not None:
-                    meta.update({"inference_ms": ms_list[j]})
-                results.append({"id": idx, "answer": content, "meta": meta})
-        return results
-
-    def run_batched_inference(
-        self,
-        samples: list[dict],
-        batch_size: int,
-        run_batch_fn: Callable[[list[dict]], tuple[object, Any]],
-        decode_batch_fn: Callable[[object, Any], list[str]],
-    ) -> tuple[list[dict], list[dict]]:
-        outputs, aux_list, id_list = self.collect_batch_outputs(
-            samples, batch_size, run_batch_fn
-        )
-        results = self.decode_and_build_results(
-            outputs, aux_list, id_list, decode_batch_fn
-        )
-        return results, []
-
-
-@dataclass
 class QwenVLLMServer(VLLMServerModel):
+    model_name: str = "Qwen/Qwen3-0.6B"
     enable_thinking: bool = False
-    batch_size: int = 16
     tokenizer: AutoTokenizer = field(init=False)
 
     def __post_init__(self) -> None:
-        self.tokenizer = AutoTokenizer.from_pretrained(self.resolved_model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         if self.enable_thinking:
             self.vllm_serve_args += ["--reasoning-parser", "deepseek_r1"]
 
-    @property
-    def resolved_model_name(self) -> str:
-        return self.model_name or "Qwen/Qwen3-0.6B"
-
     def get_state(self) -> dict:
         return {
-            "model_name": self.resolved_model_name,
+            "model_name": self.model_name,
             "class_name": str(self.__class__.__name__),
             "enable_thinking": self.enable_thinking,
             "max_tokens": self.max_tokens,
@@ -317,7 +213,7 @@ class QwenVLLMServer(VLLMServerModel):
 
                 params = get_sampling_params(self.enable_thinking, self.max_tokens)
                 payload = {
-                    "model": self.resolved_model_name,
+                    "model": self.model_name,
                     "messages": messages(prompt),
                     "max_tokens": params["max_tokens"],
                     "temperature": params["temperature"],
