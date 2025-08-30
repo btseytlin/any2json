@@ -186,8 +186,6 @@ class QwenVLLMServer(VLLMServerMixin):
             self.vllm_serve_args += ["--reasoning-parser", "deepseek_r1"]
 
     async def async_get_predictions(self, samples: list[dict]) -> list[dict]:
-        results: list[dict] = []
-
         logger.info(
             f"Executing {len(samples)} requests concurrently with {self.max_concurrent_requests=}"
         )
@@ -239,10 +237,5 @@ class QwenVLLMServer(VLLMServerMixin):
         tasks = [task(i, sample) for i, sample in enumerate(samples)]
         results = await tqdm_asyncio.gather(*tasks, desc="Executing requests")
 
-        errors = [result for result in results if result.get("error")]
-        success_results = [result for result in results if not result.get("error")]
-
-        logger.info(
-            f"Obtained {len(success_results)} successful results and {len(errors)} errors"
-        )
+        logger.info(f"Obtained {len(results)} results")
         return results
