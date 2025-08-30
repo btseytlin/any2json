@@ -57,11 +57,20 @@ def postprocess_answer(answer: str) -> dict | str | list | int | float | bool | 
 
 
 def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
-    error = []
     correct = []
+
+    request_error = []
+    json_error = []
     schema_error = []
     for i, result in enumerate(results):
         results[i]["metrics"] = {}
+
+        if "error" in result:
+            request_error.append(i)
+            results[i]["metrics"]["error_type"] = "request_error"
+            results[i]["metrics"]["error_message"] = result["error"]
+            continue
+
         if isinstance(result["schema"], str):
             result["schema"] = json.loads(result["schema"])
 
@@ -70,9 +79,9 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
             answer = postprocess_answer(result["answer"])
             schema(answer)
         except json.JSONDecodeError as e:
-            error.append(i)
+            json_error.append(i)
             logger.error(e, exc_info=True)
-            results[i]["metrics"]["error_type"] = "json_decode_error"
+            results[i]["metrics"]["error_type"] = "json_error"
             results[i]["metrics"]["error_message"] = str(e)
             continue
         except fastjsonschema.JsonSchemaException as e:
@@ -98,10 +107,12 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
             "percentage_json_errors": 0,
             "percentage_correct": 0,
             "percentage_schema_errors": 0,
+            "percentage_request_errors": 0,
         }
 
     return results, {
-        "percentage_json_errors": round(len(error) / len(results), 3),
+        "percentage_request_errors": round(len(request_error) / len(results), 3),
+        "percentage_json_errors": round(len(json_error) / len(results), 3),
         "percentage_correct": round(len(correct) / len(results), 3),
         "percentage_schema_errors": round(len(schema_error) / len(results), 3),
     }
@@ -221,8 +232,8 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit):
 @cli.command(
     name="metrics",
 )
-@click.option(
-    "--results-dir",
+@click.argument(
+    "results_dir",
     type=click.Path(exists=True, dir_okay=True, file_okay=False),
     required=True,
     help="Results directory to load the results from",
@@ -230,8 +241,6 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit):
 def calculate_metrics_cmd(results_dir):
     with open(os.path.join(results_dir, "results.json"), "r") as f:
         results = json.load(f)
-    with open(os.path.join(results_dir, "errors.json"), "r") as f:
-        errors = json.load(f)
 
     results, metrics = calculate_metrics(results)
 
