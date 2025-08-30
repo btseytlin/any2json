@@ -17,47 +17,6 @@ def to_text(x: str | dict) -> str:
     return json.dumps(x) if isinstance(x, dict) else str(x)
 
 
-def build_chat_text(
-    tokenizer: AutoTokenizer, enable_thinking: bool, input_text: str, schema: dict
-) -> str:
-    return tokenizer.apply_chat_template(
-        messages(make_prompt(input_text, schema)),
-        tokenize=False,
-        add_generation_prompt=True,
-        enable_thinking=enable_thinking,
-    )
-
-
-def build_chat_texts(
-    tokenizer: AutoTokenizer, enable_thinking: bool, batch_samples: list[dict]
-) -> list[str]:
-    return [
-        build_chat_text(
-            tokenizer, enable_thinking, to_text(s["input_data"]), s["schema"]
-        )
-        for s in batch_samples
-    ]
-
-
-def hf_tokenize_to_device(
-    tokenizer: AutoTokenizer, texts: list[str], device_obj: torch.device
-) -> object:
-    enc = tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
-    return enc.to(device_obj)
-
-
-def hf_decode_batch(
-    tokenizer: AutoTokenizer, outputs: object, input_lengths: list[int]
-) -> list[str]:
-    decoded: list[str] = []
-    for i in range(len(input_lengths)):
-        t = tokenizer.decode(
-            outputs[i][int(input_lengths[i]) :], skip_special_tokens=True
-        ).strip()
-        decoded.append(t)
-    return decoded
-
-
 def get_sampling_params(enable_thinking: bool, max_tokens: int) -> dict:
     if enable_thinking:
         temperature = 0.6
@@ -77,42 +36,6 @@ def get_sampling_params(enable_thinking: bool, max_tokens: int) -> dict:
         min_p=min_p,
         max_tokens=max_tokens,
     )
-
-
-def parallel_map(
-    fn, items: list, max_workers: int
-) -> tuple[list[tuple[int, object]], list[tuple[int, tuple[Exception, str]]]]:
-    results: list[tuple[int, object]] = []
-    errors: list[tuple[int, Exception]] = []
-    pbar = tqdm(total=len(items), desc="Executing tasks")
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futs = {ex.submit(fn, i, item): i for i, item in items}
-        for f in as_completed(futs):
-            try:
-                i = futs[f]
-                try:
-                    results.append((i, f.result()))
-                except Exception as e:
-                    exc_type, exc_value, exc_traceback = sys.exc_info()
-                    traceback_str = "".join(
-                        traceback.format_exception(exc_type, exc_value, exc_traceback)
-                    )
-                    logger.error(f"Error during inference: {e}")
-                    errors.append((i, (e, traceback_str)))
-                pbar.update(1)
-
-            except KeyboardInterrupt:
-                logger.error("Keyboard interrupt")
-                for f in futs.values():
-                    f.cancel()
-                break
-    results.sort(key=lambda x: x[0])
-    errors.sort(key=lambda x: x[0])
-    return results, errors
-
-
-device = "mps" if torch.backends.mps.is_available() else "cpu"
-device = "cuda" if torch.cuda.is_available() else device
 
 
 def system_prompt() -> str:
