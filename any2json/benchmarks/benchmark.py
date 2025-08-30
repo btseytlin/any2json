@@ -2,65 +2,50 @@ from datetime import datetime
 import json
 import os
 import logging
+import sys
 import time
 import click
 from datasets import DatasetDict, load_dataset
 from dotenv import load_dotenv
 from any2json.benchmarks.models.gemini import GeminiModel
-from any2json.benchmarks.models.qwen import QwenModel
+from any2json.benchmarks.models.qwen import QwenVLLMServer
 from tqdm.auto import tqdm
 import fastjsonschema
 
 from any2json.benchmarks.models.vllm_custom import VLLMServerModel
+from any2json.training.utils import load_hf_dataset
 from any2json.utils import configure_loggers, logger
 
 
 model_types = {
-    "qwen": QwenModel,
+    "qwen": QwenVLLMServer,
     "gemini": GeminiModel,
     "vllm_custom": VLLMServerModel,
 }
 
 
-def run_benchmark(model, samples: list[dict]) -> tuple[list[dict], list[dict]]:
+def run_benchmark(model, samples: list[dict]) -> list[dict]:
     results: list[dict] = []
-    errors: list[dict] = []
 
-    preds, errs = model.get_predictions(samples)
+    preds = model.get_predictions(samples)
     id_to_pred = {p["id"]: p for p in preds}
-    for i, s in enumerate(samples):
-        p = id_to_pred.get(i)
-        if p:
-            input_data = s["input_data"]
-            if isinstance(input_data, dict):
-                input_data = json.dumps(input_data)
-            results.append(
-                {
-                    "id": i,
-                    "input_data": input_data,
-                    "schema": s["schema"],
-                    "correct_answer": s["output"],
-                    "answer": p["answer"],
-                    "meta": p.get("meta"),
-                }
-            )
-    for e in errs:
-        i = e.get("id")
-        s = samples[i] if i is not None and i < len(samples) else {}
-        input_data = s.get("input_data") if s else None
+    for i, sample in enumerate(samples):
+        prediction = id_to_pred[i]
+        input_data = sample["input_data"]
         if isinstance(input_data, dict):
             input_data = json.dumps(input_data)
-        errors.append(
+        results.append(
             {
                 "id": i,
                 "input_data": input_data,
-                "schema": s.get("schema") if s else None,
-                "correct_answer": s.get("output") if s else None,
-                "error": e.get("error"),
-                "traceback": e.get("traceback"),
+                "schema": sample["schema"],
+                "correct_answer": sample["output"],
+                "answer": prediction["answer"],
+                "meta": prediction.get("meta"),
+                "error": None,
             }
         )
-    return results, errors
+    return results
 
 
 def postprocess_answer(answer: str) -> dict | str | list | int | float | bool | None:
@@ -122,12 +107,13 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
     }
 
 
-@click.command()
-@click.option(
-    "--hf-dataset-dir",
-    type=click.Path(exists=True, dir_okay=True, file_okay=False),
-    required=False,
-    help="HF dataset directory to benchmark",
+@click.group()
+def cli():
+    pass
+
+
+@cli.command(
+    name="run",
 )
 @click.option(
     "--hf-dataset",
@@ -165,25 +151,19 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
     type=int,
     help="Limit the number of prompts to benchmark",
 )
-def run(hf_dataset_dir, hf_dataset, split, model_type, model_kwargs, output_dir, limit):
+def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit):
+    command = " ".join(sys.argv)
     model_kwargs = json.loads(model_kwargs) if model_kwargs else {}
 
     logger.info(
-        f"Benchmarking with inputs: {hf_dataset_dir=}, {hf_dataset=}, {split=}, {model_type=}, {model_kwargs=}, {limit=}"
+        f"Benchmarking with inputs: {hf_dataset=}, {split=}, {model_type=}, {model_kwargs=}, {limit=}"
     )
     model_type = model_types[model_type]
     model = model_type(**model_kwargs)
 
     logger.info(f"Model state: {model.get_state()}")
 
-    if hf_dataset_dir:
-        dataset_dict = DatasetDict.load_from_disk(hf_dataset_dir)
-        samples = dataset_dict[split].to_list()
-    elif hf_dataset:
-        dataset = load_dataset(hf_dataset, split=split)
-        samples = dataset.to_list()
-    else:
-        raise ValueError("Either hf_dataset_dir or hf_dataset must be provided")
+    samples = load_hf_dataset(hf_dataset)[split].to_list()
 
     if limit:
         samples = samples[:limit]
@@ -191,30 +171,39 @@ def run(hf_dataset_dir, hf_dataset, split, model_type, model_kwargs, output_dir,
     logger.info(f"Running benchmark with {len(samples)} samples")
 
     start_dt = datetime.now()
-    results, errors = run_benchmark(model, samples)
+    results = run_benchmark(model, samples)
     end_dt = datetime.now()
-    logger.info(f"Benchmarking took {end_dt - start_dt}")
+    duration_s = (end_dt - start_dt).total_seconds()
+    logger.info(f"Benchmarking took {duration_s} seconds")
 
-    logger.info(f"Obtained {len(results)} results, {len(errors)} errors")
-    results, metrics = calculate_metrics(results)
+    logger.info(f"Obtained {len(results)} results")
 
-    logger.info(f"Metrics: {metrics}")
+    run_config = {
+        "command": command,
+        "hf_dataset": hf_dataset,
+        "split": split,
+        "model_type": model_type,
+        "model_kwargs": model_kwargs,
+        "output_dir": output_dir,
+        "limit": limit,
+    }
+
+    run_info = {
+        "config": run_config,
+        "model_state": model.get_state(),
+        "num_samples": len(samples),
+        "num_results": len(results),
+        "num_errors": len(errors),
+        "start_dt": start_dt.isoformat(),
+        "end_dt": end_dt.isoformat(),
+        "duration_s": duration_s,
+    }
 
     os.makedirs(output_dir, exist_ok=True)
 
-    config = {
-        "hf_dataset_dir": hf_dataset_dir,
-        "split": split,
-        "model_state": model.get_state(),
-        "limit": limit,
-        "actual_samples": len(samples),
-        "start_dt": start_dt.isoformat(),
-        "end_dt": end_dt.isoformat(),
-        "duration_s": (end_dt - start_dt).total_seconds(),
-    }
-    with open(os.path.join(output_dir, "config.json"), "w") as f:
+    with open(os.path.join(output_dir, "info.json"), "w") as f:
         json.dump(
-            config,
+            run_info,
             f,
             indent=2,
         )
@@ -222,10 +211,27 @@ def run(hf_dataset_dir, hf_dataset, split, model_type, model_kwargs, output_dir,
     with open(os.path.join(output_dir, "results.json"), "w") as f:
         json.dump(results, f, indent=2)
 
-    with open(os.path.join(output_dir, "errors.json"), "w") as f:
-        json.dump(errors, f, indent=2)
 
-    with open(os.path.join(output_dir, "metrics.json"), "w") as f:
+@cli.command(
+    name="metrics",
+)
+@click.option(
+    "--results-dir",
+    type=click.Path(exists=True, dir_okay=True, file_okay=False),
+    required=True,
+    help="Results directory to load the results from",
+)
+def calculate_metrics_cmd(results_dir):
+    with open(os.path.join(results_dir, "results.json"), "r") as f:
+        results = json.load(f)
+    with open(os.path.join(results_dir, "errors.json"), "r") as f:
+        errors = json.load(f)
+
+    results, metrics = calculate_metrics(results)
+
+    logger.info(f"Metrics:\n{metrics}")
+
+    with open(os.path.join(results_dir, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
 
 
