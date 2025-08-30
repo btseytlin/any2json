@@ -345,11 +345,15 @@ class QwenVLLMServer(VLLMServerModel):
                         "meta": meta,
                     }
                 except Exception as e:
-                    logger.error(e)
+                    logger.error(e, exc_info=True)
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    traceback_str = "".join(
+                        traceback.format_exception(exc_type, exc_value, exc_traceback)
+                    )
                     return {
                         "id": i,
                         "error": str(e),
-                        "traceback": traceback.format_exc(),
+                        "traceback": traceback_str,
                     }
 
         tasks = [task(i, sample) for i, sample in enumerate(samples)]

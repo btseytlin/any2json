@@ -75,8 +75,12 @@ class VLLMServerModel(VLLMServerMixin):
 
             except Exception as e:
                 logger.error(e)
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                traceback_str = "".join(
+                    traceback.format_exception(exc_type, exc_value, exc_traceback)
+                )
                 result["error"] = str(e)
-                result["traceback"] = traceback.format_exc()
+                result["traceback"] = traceback_str
             return result
 
         tasks = [task(i, sample) for i, sample in enumerate(samples)]

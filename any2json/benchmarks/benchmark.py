@@ -4,6 +4,7 @@ import os
 import logging
 import sys
 import time
+import traceback
 import click
 from datasets import DatasetDict, load_dataset
 from dotenv import load_dotenv
@@ -65,10 +66,11 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
     for i, result in enumerate(results):
         results[i]["metrics"] = {}
 
-        if "error" in result:
+        if result.get("error"):
             request_error.append(i)
             results[i]["metrics"]["error_type"] = "request_error"
-            results[i]["metrics"]["error_message"] = result["error"]
+            results[i]["metrics"]["error"] = result["error"]
+            results[i]["metrics"]["traceback"] = result["error"]["traceback"]
             continue
 
         if isinstance(result["schema"], str):
@@ -80,15 +82,23 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
             schema(answer)
         except json.JSONDecodeError as e:
             json_error.append(i)
-            logger.error(e, exc_info=True)
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            traceback_str = "".join(
+                traceback.format_exception(exc_type, exc_value, exc_traceback)
+            )
             results[i]["metrics"]["error_type"] = "json_error"
-            results[i]["metrics"]["error_message"] = str(e)
+            results[i]["metrics"]["error"] = str(e)
+            results[i]["metrics"]["traceback"] = traceback_str
             continue
         except fastjsonschema.JsonSchemaException as e:
             schema_error.append(i)
-            logger.error(e, exc_info=True)
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            traceback_str = "".join(
+                traceback.format_exception(exc_type, exc_value, exc_traceback)
+            )
             results[i]["metrics"]["error_type"] = "schema_error"
-            results[i]["metrics"]["error_message"] = str(e)
+            results[i]["metrics"]["error"] = str(e)
+            results[i]["metrics"]["traceback"] = traceback_str
             continue
 
         correct_answer = result["correct_answer"]
