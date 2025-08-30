@@ -27,6 +27,7 @@ def run_benchmark(model, samples: list[dict]) -> list[dict]:
     results: list[dict] = []
 
     preds = model.get_predictions(samples)
+    print(preds[:3])
     id_to_pred = {p["id"]: p for p in preds}
     for i, sample in enumerate(samples):
         try:
