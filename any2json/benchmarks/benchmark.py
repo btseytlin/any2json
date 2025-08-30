@@ -14,7 +14,7 @@ import fastjsonschema
 
 from any2json.benchmarks.models.vllm_custom import VLLMServerModel
 from any2json.training.utils import load_hf_dataset
-from any2json.utils import configure_loggers, logger
+from any2json.utils import configure_loggers, json_dump_safe, logger
 
 
 model_types = {
@@ -204,19 +204,17 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit):
     os.makedirs(output_dir, exist_ok=True)
 
     with open(os.path.join(output_dir, "info.json"), "w") as f:
-        json.dump(
+        json_dump_safe(
             run_info,
             f,
-            default=lambda o: f"<<non-serializable: {type(o).__qualname__}>>",
             indent=2,
         )
 
     with open(os.path.join(output_dir, "results.json"), "w") as f:
-        json.dump(
+        json_dump_safe(
             results,
             f,
             indent=2,
-            default=lambda o: f"<<non-serializable: {type(o).__qualname__}>>",
         )
 
 
@@ -240,7 +238,7 @@ def calculate_metrics_cmd(results_dir):
     logger.info(f"Metrics:\n{metrics}")
 
     with open(os.path.join(results_dir, "metrics.json"), "w") as f:
-        json.dump(metrics, f, indent=2)
+        json_dump_safe(metrics, f, indent=2)
 
 
 if __name__ == "__main__":

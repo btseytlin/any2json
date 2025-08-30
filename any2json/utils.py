@@ -22,6 +22,14 @@ from any2json.enums import ContentType
 logger = logging.getLogger("any2json")
 
 
+def json_dump_safe(*args, **kwargs) -> None:
+    return json.dump(
+        *args,
+        **kwargs,
+        default=lambda o: f"<<non-serializable: {type(o).__qualname__}>>",
+    )
+
+
 def configure_loggers(level: str = "WARNING", basic_level: str = "WARNING"):
     global logger
     logging.basicConfig(level=basic_level, force=True)
