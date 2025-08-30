@@ -72,7 +72,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
     request_error = []
     json_error = []
     schema_error = []
-    inference_ms = []
+    all_inference_ms = []
     for i, result in enumerate(results):
         details = {}
 
@@ -127,7 +127,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
 
         inference_ms = result.get("meta", {}).get("inference_ms")
         if inference_ms:
-            inference_ms.append(inference_ms)
+            all_inference_ms.append(inference_ms)
 
         details_list.append(details)
 
@@ -136,7 +136,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         "percentage_json_errors": round(len(json_error) / len(results), 3),
         "percentage_correct": round(len(correct) / len(results), 3),
         "percentage_schema_errors": round(len(schema_error) / len(results), 3),
-        "mean_inference_ms": round(np.mean(inference_ms).item(), 3),
+        "mean_inference_ms": round(np.mean(all_inference_ms).item(), 3),
     }
 
 
