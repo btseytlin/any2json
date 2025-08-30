@@ -61,11 +61,12 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
 
     if not results:
         return details_list, {
-            "percentage_json_errors": 0,
-            "percentage_correct": 0,
-            "percentage_schema_errors": 0,
-            "percentage_request_errors": 0,
-            "mean_inference_ms": 0,
+            "percentage_json_errors": None,
+            "percentage_correct": None,
+            "percentage_schema_errors": None,
+            "percentage_request_errors": None,
+            "mean_inference_ms": None,
+            "median_inference_ms": None,
         }
 
     correct = []
@@ -137,6 +138,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         "percentage_correct": round(len(correct) / len(results), 3),
         "percentage_schema_errors": round(len(schema_error) / len(results), 3),
         "mean_inference_ms": round(np.mean(all_inference_ms).item(), 3),
+        "median_inference_ms": round(np.median(all_inference_ms).item(), 3),
     }
 
 
