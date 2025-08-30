@@ -186,6 +186,7 @@ class QwenVLLMServer(VLLMServerModel):
             "model_name": self.model_name,
             "class_name": str(self.__class__.__name__),
             "enable_thinking": self.enable_thinking,
+            "guided_json": self.guided_json,
             "max_tokens": self.max_tokens,
             "base_url": self.base_url,
         }
