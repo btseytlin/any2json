@@ -215,13 +215,7 @@ class QwenVLLMServer(VLLMServerModel):
                 payload = {
                     "model": self.model_name,
                     "messages": messages(prompt),
-                    "max_tokens": params["max_tokens"],
-                    "temperature": params["temperature"],
-                    "top_p": params["top_p"],
-                    "extra_body": {
-                        "top_k": params["top_k"],
-                        "min_p": params["min_p"],
-                    },
+                    **params,
                 }
 
                 try:
