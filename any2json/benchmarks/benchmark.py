@@ -235,8 +235,6 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit):
 @click.argument(
     "results_dir",
     type=click.Path(exists=True, dir_okay=True, file_okay=False),
-    required=True,
-    help="Results directory to load the results from",
 )
 def calculate_metrics_cmd(results_dir):
     with open(os.path.join(results_dir, "results.json"), "r") as f:
