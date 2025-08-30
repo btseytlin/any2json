@@ -247,4 +247,4 @@ if __name__ == "__main__":
         level=os.getenv("LOG_LEVEL", "INFO"),
         basic_level=os.getenv("LOG_LEVEL_BASIC", "WARNING"),
     )
-    run()
+    cli()
