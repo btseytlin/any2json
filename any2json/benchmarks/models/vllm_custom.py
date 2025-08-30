@@ -86,7 +86,7 @@ class VLLMServerModel(VLLMServerMixin):
         tasks = [task(i, sample) for i, sample in enumerate(samples)]
         results = await tqdm_asyncio.gather(*tasks, desc="Executing requests")
 
-        errors = [result for result in results if "error" in result]
+        errors = [result for result in results if result.get("error")]
 
         logger.info(
             f"Obtained {len(results)} total results: {len(results) - len(errors)} successful results, {len(errors)} errors"

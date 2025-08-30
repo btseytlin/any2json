@@ -359,8 +359,8 @@ class QwenVLLMServer(VLLMServerModel):
         tasks = [task(i, sample) for i, sample in enumerate(samples)]
         results = await tqdm_asyncio.gather(*tasks, desc="Executing requests")
 
-        errors = [result for result in results if "error" in result]
-        success_results = [result for result in results if "error" not in result]
+        errors = [result for result in results if result.get("error")]
+        success_results = [result for result in results if not result.get("error")]
 
         logger.info(
             f"Obtained {len(success_results)} successful results and {len(errors)} errors"
