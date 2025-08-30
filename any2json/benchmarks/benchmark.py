@@ -29,22 +29,28 @@ def run_benchmark(model, samples: list[dict]) -> list[dict]:
     preds = model.get_predictions(samples)
     id_to_pred = {p["id"]: p for p in preds}
     for i, sample in enumerate(samples):
-        prediction = id_to_pred[i]
-        input_data = sample["input_data"]
-        if isinstance(input_data, dict):
-            input_data = json.dumps(input_data)
-        results.append(
-            {
-                "id": i,
-                "input_data": input_data,
-                "schema": sample["schema"],
-                "correct_answer": sample["output"],
-                "completion": prediction.get("completion"),
-                "answer": prediction.get("answer"),
-                "meta": prediction.get("meta"),
-                "error": prediction.get("error"),
-            }
-        )
+        try:
+            prediction = id_to_pred[i]
+            input_data = sample["input_data"]
+            if isinstance(input_data, dict):
+                input_data = json.dumps(input_data)
+            results.append(
+                {
+                    "id": i,
+                    "input_data": input_data,
+                    "schema": sample["schema"],
+                    "correct_answer": sample["output"],
+                    "completion": prediction.get("completion"),
+                    "answer": prediction.get("answer"),
+                    "meta": prediction.get("meta"),
+                    "error": prediction.get("error"),
+                }
+            )
+        except Exception as e:
+            logger.error(
+                f"Error processing prediction for sample {i}: {e}", exc_info=True
+            )
+            continue
     return results
 
 
