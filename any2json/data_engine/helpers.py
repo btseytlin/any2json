@@ -216,21 +216,32 @@ def get_schemas_with_no_chunks(db_session: Session) -> list[JsonSchema]:
 def check_if_schema_for_json_exists_in_db(
     json_content: dict | list | str | int | float | bool | None,
     index: IndexedJsonSet,
-) -> bool:
-    result = index.query(json_content, k=1)
-    schema, schema_id, score = result[0]
-    fastjsonschema.validate(json_content, schema, detailed_exceptions=False)
-    return schema_id
+    k: int = 3,
+) -> int | None:
+    results = index.query(json_content, k=k)
+    last_error = None
+    for schema, schema_id, score in results:
+        try:
+            compiled_schema = fastjsonschema.compile(schema, detailed_exceptions=False)
+            compiled_schema(json_content)
+            return schema_id
+        except Exception as e:
+            last_error = e
+            continue
+    raise last_error
 
 
 def map_chunks_to_existing_schemas(
     db_session: Session,
     chunks: list[Chunk],
-) -> list[int | None]:
+) -> list[Chunk]:
     existing_schemas = db_session.query(JsonSchema).all()
-    index = IndexedJsonSet([(e.content, e.id) for e in existing_schemas])
+    index = IndexedJsonSet(
+        json_contents=[e.content for e in existing_schemas],
+        ids=[e.id for e in existing_schemas],
+    )
 
-    results = []
+    updated_chunks = []
 
     for chunk in tqdm(chunks):
         json_content = json.loads(chunk.content)
@@ -239,11 +250,12 @@ def map_chunks_to_existing_schemas(
                 json_content,
                 index,
             )
-            results.append(schema_id)
+            chunk.schema_id = schema_id
+            updated_chunks.append(chunk)
         except Exception as e:
-            results.append(None)
+            logger.debug(f"Error mapping chunk {chunk.id} to existing schema: {e}")
 
-    return results
+    return updated_chunks
 
 
 async def generate_schema_for_json(

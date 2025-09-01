@@ -4,6 +4,7 @@ import json
 import os
 from dotenv import load_dotenv
 import click
+import fastjsonschema
 from sqlalchemy import (
     String,
     cast,
@@ -17,6 +18,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.orm import Session
+from tqdm import tqdm
 
 from any2json.database.client import create_tables, db_session_scope, get_db_session
 from any2json.database.helpers import get_dangling_schema_ids
@@ -527,6 +529,62 @@ def drop_xml():
                 SchemaConversion.id.in_(schema_conversion_ids_to_delete)
             )
         )
+
+
+@cli.command()
+def validate_schema_mappings():
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        chunks = (
+            db_session.execute(
+                select(Chunk)
+                .where(Chunk.schema_id.is_not(None))
+                .where(Chunk.content_type == ContentType.JSON.value)
+            )
+            .scalars()
+            .all()
+        )
+        total_errors = 0
+        for chunk in tqdm(chunks):
+            schema = chunk.schema
+            if schema is None:
+                logger.warning(
+                    f"Chunk {chunk.id} has no schema even though {chunk.schema_id=}"
+                )
+                total_errors += 1
+                continue
+
+            try:
+                compiled_schema = fastjsonschema.compile(
+                    schema.content, detailed_exceptions=False
+                )
+                compiled_schema(json.loads(chunk.content))
+            except Exception as e:
+                logger.warning(
+                    f"Chunk {chunk.id} has schema {schema.id} but validation failed: {e}"
+                )
+                total_errors += 1
+        logger.info(f"Total errors: {total_errors}")
+
+
+@cli.command()
+def fix_schema_conversions():
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        schema_conversions = (
+            db_session.execute(
+                select(SchemaConversion, Chunk)
+                .where(SchemaConversion.schema_id != Chunk.schema_id)
+                .join(Chunk, SchemaConversion.output_chunk_id == Chunk.id)
+            )
+            .scalars()
+            .all()
+        )
+        for schema_conversion in tqdm(schema_conversions):
+            schema_conversion.schema = schema_conversion.output_chunk.schema
+            db_session.add(schema_conversion)
+            logger.info(
+                f"Updated schema conversion {schema_conversion.id} with to have schema id {schema_conversion.output_chunk.schema_id}"
+            )
+        logger.info(f"Total schema conversions updated: {len(schema_conversions)}")
 
 
 if __name__ == "__main__":

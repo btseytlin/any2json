@@ -36,9 +36,11 @@ def format_json_for_indexing(
 class IndexedJsonSet:
     def __init__(
         self,
-        json_contents: list[tuple[json_dtype, int]] | None = None,
+        json_contents: list[json_dtype] | None = None,
+        ids: list[int] | None = None,
     ) -> None:
-        self.json_contents: list[tuple[json_dtype, int]] = json_contents or []
+        self.json_contents: list[json_dtype] = json_contents or []
+        self.ids: list[int] = ids or []
         self.corpus_text: list[str] = [
             format_json_for_indexing(json_content)
             for json_content in self.json_contents
@@ -62,12 +64,14 @@ class IndexedJsonSet:
         )
 
     def add(self, json_content: json_dtype, id: int) -> None:
-        self.json_contents.append((json_content, id))
+        self.json_contents.append(json_content)
+        self.ids.append(id)
         json_text = format_json_for_indexing(json_content)
         self.corpus_text.append(json_text)
         self.build_index()
 
-    def add_many(self, json_contents: list[tuple[json_dtype, int]]) -> None:
+    def add_many(self, json_contents: list[json_dtype], ids: list[int]) -> None:
+        self.ids.extend(ids)
         self.json_contents.extend(json_contents)
         json_texts = [
             format_json_for_indexing(json_content) for json_content in json_contents
@@ -92,12 +96,12 @@ class IndexedJsonSet:
             n_threads=n_threads,
         )
 
-        ranked_json_contents: list[tuple[json_dtype, float]] = []
+        ranked_json_contents: list[tuple[json_dtype, int, float]] = []
         seen_ids = set()
         for i in range(json_idxs.shape[1]):
             json_idx = json_idxs[0, i]
             score = scores[0, i]
-            json_content, json_id = self.json_contents[json_idx]
+            json_content, json_id = self.json_contents[json_idx], self.ids[json_idx]
             if json_id not in seen_ids:
                 seen_ids.add(json_id)
                 ranked_json_contents.append((json_content, json_id, score))

@@ -137,8 +137,8 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         try:
             model_instance = DynamicModel(**input_data)
             transformed_data = model_instance.model_dump(exclude_unset=False)
-
-            fastjsonschema.validate(new_schema, transformed_data)
+            compiled_schema = fastjsonschema.compile(new_schema)
+            compiled_schema(transformed_data)
 
             assert any(
                 [v is not None for v in transformed_data.values()]
@@ -181,7 +181,8 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         ), "Source schema must be provided and be a dictionary"
 
         assert source_schema["type"] == "object", "Source schema must be an object"
-        fastjsonschema.validate(source_schema, source_data)
+        compiled_schema = fastjsonschema.compile(source_schema)
+        compiled_schema(source_data)
 
     def generate(
         self,

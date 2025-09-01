@@ -441,16 +441,20 @@ def generate_pandas_chunks(num_chunks: int):
 def map_chunks_command():
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         chunks = get_json_chunks_with_no_schema(db_session)
-        results = map_chunks_to_existing_schemas(db_session, chunks)
+        updated_chunks = map_chunks_to_existing_schemas(db_session, chunks)
 
-        mapped = 0
-        for chunk, schema_id in zip(chunks, results, strict=True):
-            if schema_id:
-                chunk.schema_id = schema_id
-                mapped += 1
-        logger.info(f"Mapped {mapped} chunks to existing schemas")
+        db_session.add_all(updated_chunks)
 
-        db_session.add_all(chunks)
+        logger.info(f"Mapped {len(updated_chunks)} chunks to existing schemas")
+
+        if PREVIEW:
+            for chunk in updated_chunks:
+                print(f"{chunk.id=}")
+                print(f"{chunk.content=}")
+                print(f"{chunk.schema_id=}")
+                print()
+                print()
+                print()
 
 
 # Step 3.3: Generate schemas for json chunks with no schema

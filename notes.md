@@ -277,9 +277,19 @@ Next actions:
 3. Simple schema manipulations still dont work reliably. For example: changing a field from string to number.
 4. Doesnt handle unknown types of text
 5. Large sequences seem slow on cpu
+6. Broken samples in dataset. E.g. in test set sample 324: schema doesnt match correct output. I am afraid I will have to recreate the dataset.
+7. Most test errors seem to be with large sequences.
+
 
 Ideas: 
 
-1. Try a run with very high augmentations and train for long
-2. Time to benchmark everything for real
-3. 
+1. Trace the source of broken samples
+  - There might be a bug in the matching step. Or in the checking. Chunk 29077 (json) comes from infinigram and is assigned to schema 16707 which doesnt match it at all.
+  - The matching is ok. Probably the foreign keys in the db are all wrong.
+  - How about I destroy all the schema mappings and then run the mapping algo?
+  - Yeah there is a bug in matching, it gets matched to this wrong thing again
+2. Have multiple inputs and outputs per schema so the model can not guess the output from either the input or the schema 
+3. Apply chat templates for both smollm and gemma
+4. Retrain smollm with chat template, high augmentations and train for long
+5. Benchmark against gemili flash lite
+6. Train gemma
