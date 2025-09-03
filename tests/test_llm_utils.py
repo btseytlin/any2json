@@ -4,6 +4,9 @@ import pytest
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+
+from transformers import AutoTokenizer
+from any2json.training.utils import format_chat_messages, build_tokenize_fn
 from any2json.training.utils import (
     format_example,
     pad_to_multiple,
@@ -11,25 +14,27 @@ from any2json.training.utils import (
     build_tokenize_fn,
     CausalLMDataCollator,
     resolve_pad_id,
-    # build_gen_toks,
     build_tokenized_length_filter_fn,
     ids_to_token_str,
     encode_prompt_ids,
     encode_target_ids,
-    EvalLoggerCallback,
+    load_tokenizer,
 )
+from any2json.training.callbacks import EvalLoggerCallback
+
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 @pytest.fixture
 def tokenizer():
-    return AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM2-135M")
+    tokenizer = load_tokenizer("google/gemma-3-270m", use_chat_template=True)
+    return tokenizer
 
 
 @pytest.fixture
 def model():
-    return AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM2-135M")
+    return AutoModelForCausalLM.from_pretrained("google/gemma-3-270m")
 
 
 def test_format_example() -> None:
@@ -40,6 +45,43 @@ def test_format_example() -> None:
     s = format_example("input", "schema", "output")
     expected = "Convert input data to json according to JSONSchema\n[SCHEMA]schema[INPUT]input[OUTPUT]output"
     assert s == expected
+
+
+def test_format_chat_messages() -> None:
+    messages = format_chat_messages("input", "schema")
+    expected = [
+        {
+            "role": "system",
+            "content": "Convert input data to json according to JSONSchema",
+        },
+        {"role": "user", "content": "[SCHEMA]schema[INPUT]input"},
+    ]
+    assert messages == expected
+
+    messages = format_chat_messages("input", "schema", "output")
+    expected = [
+        {
+            "role": "system",
+            "content": "Convert input data to json according to JSONSchema",
+        },
+        {"role": "user", "content": "[SCHEMA]schema[INPUT]input"},
+        {"role": "assistant", "content": "output"},
+    ]
+    assert messages == expected
+
+    input_dict = {"name": "John", "age": 30}
+    schema_dict = {"type": "object", "properties": {"name": {"type": "string"}}}
+    output_dict = {"name": "John", "age": 30}
+
+    messages = format_chat_messages(input_dict, schema_dict, output_dict)
+    assert (
+        messages[1]["content"]
+        == '[SCHEMA]{"type":"object","properties":{"name":{"type":"string"}}}[INPUT]{"name":"John","age":30}'
+    )
+    assert messages[2]["content"] == '{"name":"John","age":30}'
+
+    messages = format_chat_messages("input", None, "output")
+    assert "[MISSING]" == messages[1]["content"]
 
 
 def test_resolve_pad_id(tokenizer) -> None:
@@ -152,14 +194,14 @@ class TestTokenization:
         assert out["labels"][0][-1] == tokenizer.eos_token_id
 
         input_ids = [l for l in out["input_ids"][0]]
-        assert (
-            tokenizer.decode(input_ids)
-            == f"{tokenizer.bos_token}Convert input data to json according to JSONSchema\n[SCHEMA]{batch['schema'][0]}[INPUT]hello world[OUTPUT]{batch['output'][0]}{tokenizer.eos_token}"
-        )
+        decoded = tokenizer.decode(input_ids)
+        expected_input = f"{tokenizer.bos_token}<start_of_turn>model\nConvert input data to json according to JSONSchema<end_of_turn>\n<start_of_turn>user\n[SCHEMA]{batch['schema'][0]}[INPUT]hello world<end_of_turn>\n<start_of_turn>model\n{batch['output'][0]}<end_of_turn>\n{tokenizer.eos_token}"
+        assert decoded == expected_input
 
         target_ids = [l for l in out["labels"][0] if l != -100]
-        expected_target = f"{batch['output'][0]}{tokenizer.eos_token}"
-        assert tokenizer.decode(target_ids) == expected_target
+        target_decoded = tokenizer.decode(target_ids)
+        expected_target = f"{batch['output'][0]}<end_of_turn>\n{tokenizer.eos_token}"
+        assert target_decoded == expected_target
 
     def test_build_tokenize_fn_two_examples_in_batch(self, tokenizer) -> None:
         fn = build_tokenize_fn(tokenizer)
@@ -191,16 +233,19 @@ class TestTokenization:
 
         for i in range(2):
             input_ids = [l for l in out["input_ids"][i]]
-            assert (
-                tokenizer.decode(input_ids)
-                == f"{tokenizer.bos_token}Convert input data to json according to JSONSchema\n[SCHEMA]{batch['schema'][i]}[INPUT]{batch['input_data'][i]}[OUTPUT]{batch['output'][i]}{tokenizer.eos_token}"
-            )
+            decoded = tokenizer.decode(input_ids)
+            expected_input = f"{tokenizer.bos_token}<start_of_turn>model\nConvert input data to json according to JSONSchema<end_of_turn>\n<start_of_turn>user\n[SCHEMA]{batch['schema'][i]}[INPUT]{batch['input_data'][i]}<end_of_turn>\n<start_of_turn>model\n{batch['output'][i]}<end_of_turn>\n{tokenizer.eos_token}"
+            assert decoded == expected_input
 
             target_ids = [l for l in out["labels"][i] if l != -100]
-            expected_target = f"{batch['output'][i]}{tokenizer.eos_token}"
-            assert tokenizer.decode(target_ids) == expected_target
+            target_decoded = tokenizer.decode(target_ids)
+            expected_target = (
+                f"{batch['output'][i]}<end_of_turn>\n{tokenizer.eos_token}"
+            )
+            assert target_decoded == expected_target
 
     def test_causal_lm_data_collator_padding(self, tokenizer) -> None:
+        pad_id = resolve_pad_id(tokenizer)
         coll = CausalLMDataCollator(tokenizer, pad_to_multiple_of=4)
         features = [
             {"input_ids": [3, 4, 5, 0], "labels": [-100, -100, 7, 0], "length": 3},
@@ -218,23 +263,14 @@ class TestTokenization:
             4,
             5,
             0,
-            0,
-            0,
-            0,
-            0,
+            pad_id,
+            pad_id,
+            pad_id,
+            pad_id,
         ]
         assert out["attention_mask"][0].tolist() == [1, 1, 1, 1, 0, 0, 0, 0]
 
-        assert out["input_ids"][1].tolist() == [
-            6,
-            7,
-            8,
-            9,
-            10,
-            0,
-            0,
-            0,
-        ]
+        assert out["input_ids"][1].tolist() == [6, 7, 8, 9, 10, pad_id, pad_id, pad_id]
         assert out["attention_mask"][1].tolist() == [1, 1, 1, 1, 1, 0, 0, 0]
 
     def test_build_tokenized_length_filter_fn(self) -> None:
@@ -257,8 +293,9 @@ def test_ids_to_token_str_and_encoders(tokenizer) -> None:
         assert "-100" in s
 
     a = encode_prompt_ids(tokenizer, "in", "sch")
-    b = tokenizer(format_example("in", "sch"), add_special_tokens=False)["input_ids"]
-    assert a == b
+    expected_prompt = "<start_of_turn>model\nConvert input data to json according to JSONSchema<end_of_turn>\n<start_of_turn>user\n[SCHEMA]sch[INPUT]in<end_of_turn>\n<start_of_turn>model\n"
+    expected_ids = tokenizer(expected_prompt, add_special_tokens=False)["input_ids"]
+    assert a == expected_ids
 
     c = encode_target_ids(tokenizer, "out")
     d = tokenizer("out", add_special_tokens=False)["input_ids"]
@@ -312,35 +349,73 @@ def mock_eval_dataset():
 
 class TestEvalLoggerCallback:
     def test_init(self, tokenizer, mock_eval_dataset):
+        tokenize_fn = build_tokenize_fn(tokenizer)
+        batch = {
+            "input_data": [d["input_data"] for d in mock_eval_dataset],
+            "schema": [d["schema"] for d in mock_eval_dataset],
+            "output": [d["output"] for d in mock_eval_dataset],
+        }
+        tokenized_eval_ds = tokenize_fn(batch)
+        collator = CausalLMDataCollator(tokenizer, pad_to_multiple_of=8)
         callback = EvalLoggerCallback(
             tokenizer=tokenizer,
-            raw_eval_ds=mock_eval_dataset,
+            collator=collator,
+            tokenized_eval_ds=tokenized_eval_ds,
             num_examples=2,
             pad_to_multiple_of=8,
         )
         assert callback.tokenizer == tokenizer
-        assert callback.raw_eval_ds == mock_eval_dataset
+        assert callback.tokenized_eval_ds == tokenized_eval_ds
         assert callback.pad_to_multiple_of == 8
         assert callback.num_examples == 2
-        assert callback.tokenize_fn is not None
 
     def test_sample_rows(self, tokenizer, mock_eval_dataset):
+        tokenize_fn = build_tokenize_fn(tokenizer)
+        batch = {
+            "input_data": [d["input_data"] for d in mock_eval_dataset],
+            "schema": [d["schema"] for d in mock_eval_dataset],
+            "output": [d["output"] for d in mock_eval_dataset],
+        }
+        tokenized_result = tokenize_fn(batch)
+        # Create a mock dataset from the tokenized result
+        tokenized_eval_ds = [
+            {
+                "input_ids": tokenized_result["input_ids"][i],
+                "labels": tokenized_result["labels"][i],
+            }
+            for i in range(len(tokenized_result["input_ids"]))
+        ]
+        collator = CausalLMDataCollator(tokenizer, pad_to_multiple_of=8)
         callback = EvalLoggerCallback(
             tokenizer=tokenizer,
-            raw_eval_ds=mock_eval_dataset,
+            collator=collator,
+            tokenized_eval_ds=tokenized_eval_ds,
             num_examples=2,
         )
         rows = callback.sample_rows()
         assert len(rows) == 2
         assert all(isinstance(row, dict) for row in rows)
-        assert all("input_data" in row for row in rows)
-        assert all("schema" in row for row in rows)
-        assert all("output" in row for row in rows)
 
     def test_generate_completion_for_prompt(self, tokenizer, model, mock_eval_dataset):
+        tokenize_fn = build_tokenize_fn(tokenizer)
+        batch = {
+            "input_data": [d["input_data"] for d in mock_eval_dataset],
+            "schema": [d["schema"] for d in mock_eval_dataset],
+            "output": [d["output"] for d in mock_eval_dataset],
+        }
+        tokenized_result = tokenize_fn(batch)
+        tokenized_eval_ds = [
+            {
+                "input_ids": tokenized_result["input_ids"][i],
+                "labels": tokenized_result["labels"][i],
+            }
+            for i in range(len(tokenized_result["input_ids"]))
+        ]
+        collator = CausalLMDataCollator(tokenizer, pad_to_multiple_of=8)
         callback = EvalLoggerCallback(
             tokenizer=tokenizer,
-            raw_eval_ds=mock_eval_dataset,
+            collator=collator,
+            tokenized_eval_ds=tokenized_eval_ds,
             num_examples=1,
             max_new_tokens=10,
         )
@@ -356,20 +431,37 @@ class TestEvalLoggerCallback:
         assert pred == "\n\nThe prompt is a text box that you"
 
     def test_generate_predictions(self, tokenizer, model, mock_eval_dataset):
+        tokenize_fn = build_tokenize_fn(tokenizer)
+        batch = {
+            "input_data": [d["input_data"] for d in mock_eval_dataset],
+            "schema": [d["schema"] for d in mock_eval_dataset],
+            "output": [d["output"] for d in mock_eval_dataset],
+        }
+        tokenized_result = tokenize_fn(batch)
+        tokenized_eval_ds = [
+            {
+                "input_ids": tokenized_result["input_ids"][i],
+                "labels": tokenized_result["labels"][i],
+            }
+            for i in range(len(tokenized_result["input_ids"]))
+        ]
+        collator = CausalLMDataCollator(tokenizer, pad_to_multiple_of=8)
         callback = EvalLoggerCallback(
             tokenizer=tokenizer,
-            raw_eval_ds=mock_eval_dataset,
+            collator=collator,
+            tokenized_eval_ds=tokenized_eval_ds,
             num_examples=1,
             max_new_tokens=10,
         )
 
-        batch = {
-            "input_data": [mock_eval_dataset[0]["input_data"]],
-            "schema": [mock_eval_dataset[0]["schema"]],
-            "output": [mock_eval_dataset[0]["output"]],
-        }
-        tokenized = callback.tokenize_fn(batch)
-        inputs, preds = callback.generate_predictions(model, tokenized)
+        # Use the tokenized dataset directly
+        inputs, preds = callback.generate_predictions(
+            model,
+            {
+                "input_ids": [tokenized_result["input_ids"][0]],
+                "labels": [tokenized_result["labels"][0]],
+            },
+        )
 
         assert inputs == [
             '<|endoftext|>Convert input data to json according to JSONSchema\n[SCHEMA]{"type": "object", "properties": {"text": {"type": "string"}}}[INPUT]hello world[OUTPUT]'
@@ -385,29 +477,36 @@ class TestEvalLoggerCallback:
     def test_generate_predictions_multiple_examples(
         self, tokenizer, model, mock_eval_dataset
     ):
+        tokenize_fn = build_tokenize_fn(tokenizer)
+        batch = {
+            "input_data": [d["input_data"] for d in mock_eval_dataset],
+            "schema": [d["schema"] for d in mock_eval_dataset],
+            "output": [d["output"] for d in mock_eval_dataset],
+        }
+        tokenized_result = tokenize_fn(batch)
+        tokenized_eval_ds = [
+            {
+                "input_ids": tokenized_result["input_ids"][i],
+                "labels": tokenized_result["labels"][i],
+            }
+            for i in range(len(tokenized_result["input_ids"]))
+        ]
+        collator = CausalLMDataCollator(tokenizer, pad_to_multiple_of=8)
         callback = EvalLoggerCallback(
             tokenizer=tokenizer,
-            raw_eval_ds=mock_eval_dataset,
+            collator=collator,
+            tokenized_eval_ds=tokenized_eval_ds,
             num_examples=2,
             pad_to_multiple_of=8,
             max_new_tokens=10,
         )
 
-        batch = {
-            "input_data": [
-                mock_eval_dataset[0]["input_data"],
-                mock_eval_dataset[1]["input_data"],
-            ],
-            "schema": [
-                mock_eval_dataset[0]["schema"],
-                mock_eval_dataset[1]["schema"],
-            ],
-            "output": [mock_eval_dataset[0]["output"], mock_eval_dataset[1]["output"]],
-        }
-        tokenized = callback.tokenize_fn(batch)
         inputs, preds = callback.generate_predictions(
             model,
-            tokenized,
+            {
+                "input_ids": tokenized_result["input_ids"],
+                "labels": tokenized_result["labels"],
+            },
         )
 
         assert len(inputs) == 2

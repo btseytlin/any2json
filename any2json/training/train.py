@@ -19,6 +19,7 @@ from any2json.training.utils import (
     build_tokenized_length_filter_fn,
     load_hf_dataset,
     apply_debug_limit,
+    load_tokenizer,
     make_group_split,
     estimate_token_lengths,
     build_tokenize_fn,
@@ -31,7 +32,6 @@ from any2json.training.callbacks import (
 )
 from any2json.training.dataset import AugmentTokenizeDataset
 
-# DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M"
 DEFAULT_MODEL = "google/gemma-3-270m"
 
 
@@ -54,6 +54,7 @@ class PipelineConfig:
     dataloader_num_proc: int
     augment: bool
     attn_implementation: str
+    use_chat_template: bool
 
 
 def validate_pipeline_config(cfg: PipelineConfig) -> None:
@@ -189,7 +190,9 @@ def prepare_model_and_tokenizer(
         model.config.use_cache = False
         if getattr(args, "gradient_checkpointing", False):
             model.gradient_checkpointing_enable()
-        tokenizer = AutoTokenizer.from_pretrained(pcfg.model_name)
+        tokenizer = load_tokenizer(
+            pcfg.model_name, use_chat_template=pcfg.use_chat_template
+        )
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
     return model, tokenizer
@@ -284,6 +287,7 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--dataloader-num-proc", default=8, type=int)
 @click.option("--augment/--no-augment", default=True)
 @click.option("--attn-implementation", default="eager", type=str)
+@click.option("--use-chat-template/--no-use-chat-template", default=True)
 def train_cmd(
     ctx: click.Context,
     dataset_path: str,
@@ -302,6 +306,7 @@ def train_cmd(
     dataloader_num_proc: int,
     augment: bool,
     attn_implementation: str,
+    use_chat_template: bool,
 ):
     parser = HfArgumentParser(TrainingArguments)
     hf_args_list = list(ctx.args)
@@ -324,6 +329,7 @@ def train_cmd(
         dataloader_num_proc=dataloader_num_proc,
         augment=augment,
         attn_implementation=attn_implementation,
+        use_chat_template=use_chat_template,
     )
     if not args.output_dir:
         args.output_dir = "checkpoints"

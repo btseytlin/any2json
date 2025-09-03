@@ -12,6 +12,17 @@ from any2json.utils import logger
 from any2json.grouping import train_test_split_groups
 
 
+def load_tokenizer(model_name: str, use_chat_template: bool = False) -> AutoTokenizer:
+    chat_templates = {
+        "google/gemma-3-270m": "{% for message in messages %}{% if message['role'] == 'system' %}<start_of_turn>model\n{{ message['content'] }}<end_of_turn>\n{% elif message['role'] == 'user' %}<start_of_turn>user\n{{ message['content'] }}<end_of_turn>\n{% elif message['role'] == 'assistant' %}<start_of_turn>model\n{{ message['content'] }}<end_of_turn>\n{% endif %}{% endfor %}{% if add_generation_prompt %}<start_of_turn>model\n{% endif %}"
+    }
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if use_chat_template:
+        tokenizer.chat_template = chat_templates[model_name]
+    return tokenizer
+
+
 def resolve_pad_id(tokenizer: AutoTokenizer) -> int:
     return tokenizer.pad_token_id or tokenizer.eos_token_id or tokenizer.unk_token_id
 
@@ -34,6 +45,36 @@ def format_example(
         output = json.dumps(output, separators=(",", ":"), indent=None)
 
     return f"{system_prompt}[SCHEMA]{schema}[INPUT]{input_data}[OUTPUT]{output}"
+
+
+def format_chat_messages(
+    input_data: str | dict,
+    schema: str | dict | None = None,
+    output: str | dict = "",
+    missing_schema_token: str = SCHEMA_MISSING_TOKEN,
+    system_prompt: str = SYSTEM_PROMPT,
+) -> list[dict[str, str]]:
+    if isinstance(input_data, dict):
+        input_data = json.dumps(input_data, separators=(",", ":"), indent=None)
+
+    if schema is None:
+        schema = missing_schema_token
+    if isinstance(schema, dict):
+        schema = json.dumps(schema, separators=(",", ":"), indent=None)
+    if isinstance(output, dict):
+        output = json.dumps(output, separators=(",", ":"), indent=None)
+
+    user_content = f"[SCHEMA]{schema}[INPUT]{input_data}"
+
+    messages = [
+        {"role": "system", "content": system_prompt.strip()},
+        {"role": "user", "content": user_content},
+    ]
+
+    if output:
+        messages.append({"role": "assistant", "content": output})
+
+    return messages
 
 
 def percentile(values: list[int], q: float) -> int:
@@ -122,21 +163,41 @@ def build_tokenize_fn(
         input_data = batch["input_data"]
         schema = batch["schema"]
         output = batch["output"]
-        prompts = [
-            format_example(i, s) for i, s in zip(input_data, schema, strict=True)
-        ]
-        enc_in = tokenizer(prompts, add_special_tokens=False)
-        enc_out = tokenizer(output, add_special_tokens=False)
+
         input_ids: list[list[int]] = []
         labels: list[list[int]] = []
         lengths: list[int] = []
-        for idx, (prompt_ids, target_ids) in enumerate(
-            zip(enc_in["input_ids"], enc_out["input_ids"], strict=True)
-        ):
+
+        for i, s, o in zip(input_data, schema, output, strict=True):
+            messages = format_chat_messages(i, s, o)
+
+            prompt_messages = messages[:-1] if o else messages
+            prompt_text = tokenizer.apply_chat_template(
+                prompt_messages,
+                tokenize=False,
+                add_generation_prompt=True if o else False,
+            )
+
+            if o:
+                full_text = tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=False
+                )
+                prompt_ids = tokenizer(prompt_text, add_special_tokens=False)[
+                    "input_ids"
+                ]
+                full_ids = tokenizer(full_text, add_special_tokens=False)["input_ids"]
+                target_ids = full_ids[len(prompt_ids) :]
+            else:
+                prompt_ids = tokenizer(prompt_text, add_special_tokens=False)[
+                    "input_ids"
+                ]
+                target_ids = []
+
             ids, lbs = build_train_sequence(tokenizer, prompt_ids, target_ids)
             input_ids.append(ids)
             labels.append(lbs)
             lengths.append(len(ids))
+
         return {"input_ids": input_ids, "labels": labels, "length": lengths}
 
     return tokenize
@@ -186,9 +247,15 @@ class CausalLMDataCollator:
 
 
 def encode_prompt_ids(
-    tokenizer: AutoTokenizer, input_data: str, schema: str
+    tokenizer: AutoTokenizer,
+    input_data: str,
+    schema: str,
 ) -> list[int]:
-    enc = tokenizer(format_example(input_data, schema), add_special_tokens=False)
+    messages = format_chat_messages(input_data, schema)
+    prompt_text = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+    enc = tokenizer(prompt_text, add_special_tokens=False)
     return enc["input_ids"]
 
 
