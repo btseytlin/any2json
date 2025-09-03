@@ -42,18 +42,17 @@ class PipelineConfig:
     max_sequence_length: int
     drop_schema_proba: float
     schema_missing_token: str
-    input_aug: list[str]
-    output_aug: list[str]
     debug_limit: int | None
     val_size: int
     wandb_project: str
     pad_to_multiple_of: int
     debug_tokens: bool
     unsloth: bool
-    hf_args: TrainingArguments
     dataloader_num_proc: int
     augment: bool
     attn_implementation: str
+
+    hf_args: TrainingArguments
 
 
 def validate_pipeline_config(cfg: PipelineConfig) -> None:
@@ -291,8 +290,6 @@ def train_cmd(
     max_sequence_length: int | None,
     drop_schema_proba: float,
     schema_missing_token: str,
-    input_aug: tuple[str, ...],
-    output_aug: tuple[str, ...],
     debug_limit: int | None,
     val_size: int,
     wandb_project: str,
@@ -312,8 +309,6 @@ def train_cmd(
         max_sequence_length=max_sequence_length,
         drop_schema_proba=drop_schema_proba,
         schema_missing_token=schema_missing_token,
-        input_aug=list(input_aug),
-        output_aug=list(output_aug),
         debug_limit=debug_limit,
         val_size=val_size,
         wandb_project=wandb_project,
