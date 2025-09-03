@@ -208,8 +208,12 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
             logger.warning("Unsloth is not installed. Not using it")
             pcfg.unsloth = False
 
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else device
+
     logger.info(f"Loading model and tokenizer")
     model, tokenizer = prepare_model_and_tokenizer(pcfg, args)
+    model.to(device)
 
     pcfg.max_sequence_length = pcfg.max_sequence_length or tokenizer.model_max_length
     pcfg.max_sequence_length = min(pcfg.max_sequence_length, tokenizer.model_max_length)
