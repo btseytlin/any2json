@@ -272,8 +272,6 @@ def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: i
 @click.option("--max-sequence-length", default=None, type=int)
 @click.option("--drop-schema-proba", default=0.01, type=float)
 @click.option("--schema-missing-token", default="[MISSING]", type=str)
-@click.option("--input-aug", multiple=True, default=[], type=str)
-@click.option("--output-aug", multiple=True, default=[], type=str)
 @click.option("--debug-limit", default=None, type=int)
 @click.option("--val-size", default=5000, type=int)
 @click.option("--wandb-project", default="any2json", type=str)
