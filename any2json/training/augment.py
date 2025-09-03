@@ -48,42 +48,40 @@ def aug_vary_schema_and_output(
     return input_data, new_schema, new_data
 
 
-# def get_random_json_dumps_kwargs(
-#     rng: random.Random,
-# ) -> dict[str, Any]:
-#     separators = rng.choice([(",", ":"), (",", ": "), (", ", ": "), (", ", ":")])
-#     indent = rng.choice([None, 1, 2, 3, 4, 5])
-#     sort_keys = rng.choice([True, False])
-#     ensure_ascii = rng.choice([True, False])
+def get_random_json_dumps_kwargs(
+    rng: random.Random,
+) -> dict[str, Any]:
+    separators = rng.choice([(",", ":"), (",", ": "), (", ", ": "), (", ", ":")])
+    indent = rng.choice([None, 1, 2, 3, 4, 5])
+    sort_keys = rng.choice([True, False])
+    ensure_ascii = rng.choice([True, False])
 
-#     return dict(
-#         separators=separators,
-#         indent=indent,
-#         sort_keys=sort_keys,
-#         ensure_ascii=ensure_ascii,
-#     )
+    return dict(
+        separators=separators,
+        indent=indent,
+        sort_keys=sort_keys,
+        ensure_ascii=ensure_ascii,
+    )
 
 
-# def aug_vary_json_presentation(
-#     input_data: str,
-#     schema: str,
-#     output: str,
-#     augmentor: "Augmentor",
-#     rng: random.Random,
-# ) -> tuple[str, str, str]:
-#     if (
-#         rng.random() > augmentor.vary_json_presentation_proba
-#         or schema == SCHEMA_MISSING_TOKEN
-#     ):
-#         return input_data, schema, output
+def aug_vary_input_json_presentation(
+    input_data: str,
+    schema: str,
+    output: str,
+    augmentor: "Augmentor",
+    rng: random.Random,
+) -> tuple[str, str, str]:
 
-#     schema = json.loads(schema)
-#     output = json.loads(output)
+    if input_data.startswith("{") or input_data.startswith("["):
+        try:
+            input_data_json = json.loads(input_data)
+            input_data = json.dumps(
+                input_data_json, **get_random_json_dumps_kwargs(rng)
+            )
+        except json.JSONDecodeError:
+            pass
 
-#     schema = json.dumps(schema, **get_random_json_dumps_kwargs(rng))
-#     output = json.dumps(output, **get_random_json_dumps_kwargs(rng))
-
-#     return input_data, schema, output
+    return input_data, schema, output
 
 
 def aug_corrupt_input(
@@ -123,9 +121,10 @@ def aug_corrupt_input(
 
 class Augmentor:
     augmentations: dict[Callable, float] = {
-        aug_drop_schema: 0.05,
-        aug_vary_schema_and_output: 0.2,
-        aug_corrupt_input: 0.1,
+        aug_drop_schema: 0.1,
+        aug_vary_schema_and_output: 0.8,
+        aug_vary_input_json_presentation: 0.8,
+        aug_corrupt_input: 0.8,
     }
 
     def apply(
