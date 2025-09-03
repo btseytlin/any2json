@@ -283,13 +283,8 @@ Next actions:
 
 Ideas: 
 
-1. Trace the source of broken samples
-  - There might be a bug in the matching step. Or in the checking. Chunk 29077 (json) comes from infinigram and is assigned to schema 16707 which doesnt match it at all.
-  - The matching is ok. Probably the foreign keys in the db are all wrong.
-  - How about I destroy all the schema mappings and then run the mapping algo?
-  - Yeah there is a bug in matching, it gets matched to this wrong thing again
-2. Have multiple inputs and outputs per schema so the model can not guess the output from either the input or the schema 
-3. Apply chat templates for both smollm and gemma
-4. Retrain smollm with chat template, high augmentations and train for long
-5. Benchmark against gemili flash lite
-6. Train gemma
+1. Have multiple inputs and outputs per schema so the model can not guess the output from either the input or the schema 
+2. Apply chat templates for both smollm and gemma
+3. Retrain smollm with chat template, high augmentations and train for long
+4. Benchmark against gemili flash lite
+5. Train gemma
