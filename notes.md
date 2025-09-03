@@ -82,7 +82,8 @@ python scripts/data_engine.py map-chunks
 
 python scripts/data_engine.py generate-chunks
 python scripts/db_tools.py drop-duplicate-chunks
-python scripts/db_tools.py drop-dangling-schemas
+python scripts/data_engine.py generate-chunks --not-only-dangling --num-schemas 10000 
+python scripts/db_tools.py drop-duplicate-chunks
 python scripts/db_tools.py vacuum
 python scripts/db_tools.py stats
 ```
@@ -284,7 +285,6 @@ Next actions:
 Ideas: 
 
 1. Have multiple inputs and outputs per schema so the model can not guess the output from either the input or the schema 
-2. Apply chat templates for both smollm and gemma
-3. Retrain smollm with chat template, high augmentations and train for long
-4. Benchmark against gemili flash lite
-5. Train gemma
+2. Retrain smollm with chat template, high augmentations and train for long
+3. Benchmark against gemili flash lite
+4. Train gemma

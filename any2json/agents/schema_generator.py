@@ -150,17 +150,20 @@ class JSONSchemaGeneratorAgent:
         enable_thinking: bool = True,
         max_retries: int = 3,
         max_concurrent_tasks: int = 100,
+        timeout: int = 30,
     ):
 
         self.max_retries = max_retries
         self.enable_thinking = enable_thinking
         self.model_name = model_name
         self.semaphore = asyncio.Semaphore(max_concurrent_tasks)
+        self.timeout = timeout
 
         self.model = GoogleModel(
             model_name,
             settings=(
                 GoogleModelSettings(
+                    timeout=self.timeout,
                     google_thinking_config=(
                         {
                             "thinking_budget": 1024,
@@ -179,6 +182,7 @@ class JSONSchemaGeneratorAgent:
             self.fallback_model = GoogleModel(
                 fallback_model_name,
                 settings=GoogleModelSettings(
+                    timeout=self.timeout,
                     google_thinking_config=(
                         {
                             "thinking_budget": 1024,
@@ -212,9 +216,15 @@ class JSONSchemaGeneratorAgent:
             """
 
             if ctx.deps.previous_schema and ctx.deps.error_message:
+                prev_str = (
+                    json.dumps(ctx.deps.previous_schema, indent=1)
+                    if isinstance(ctx.deps.previous_schema, dict)
+                    else ctx.deps.previous_schema
+                )
+
                 prompt += f"""
                 Previously you generated this schema:
-                {json.dumps(ctx.deps.previous_schema, indent=1)}
+                {prev_str}
 
                 But it failed validation with the following error:
                 {ctx.deps.error_message}
@@ -272,6 +282,7 @@ class JSONSchemaGeneratorAgent:
                 logger.debug(f"Generated schema: {result.output.output_schema}")
                 previous_schema = result.output.output_schema
                 generated_schema = json.loads(result.output.output_schema)
+                previous_schema = generated_schema
 
                 await asyncio.to_thread(
                     self.validate_schema,

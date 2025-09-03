@@ -508,7 +508,7 @@ def generate_schemas_command(
         if num_chunks:
             chunks = chunks[:num_chunks]
 
-        logger.info(f"Loaded {len(chunks)} JSON chunks with no schema for processing")
+        logger.info(f"Loaded {len(chunks)} JSON chunks for processing")
 
         schema_agent = JSONSchemaGeneratorAgent(
             model_name=model_name,
@@ -559,22 +559,32 @@ def generate_schemas_command(
     type=int,
     required=False,
 )
+@click.option(
+    "--only-dangling/--not-only-dangling",
+    is_flag=True,
+    default=True,
+)
 def generate_chunks_command(
     num_schemas: int | None,
     model_name: str,
     enable_thinking: bool,
     max_retries: int,
+    only_dangling: bool,
 ):
     logger.warning(
         "This command commits after every generation and is not easily reversible!"
     )
-
     api_key = os.getenv("GEMINI_API_KEY")
 
     assert api_key, "GEMINI_API_KEY is not set"
 
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
-        schema_ids = get_dangling_schema_ids(db_session)
+        if only_dangling:
+            logger.info("Only generating chunks for schemas that have no chunks")
+            schema_ids = get_dangling_schema_ids(db_session)
+        else:
+            logger.info("Generating chunks for schemas with or without chunks")
+            schema_ids = db_session.execute(select(JsonSchema.id)).scalars().all()
         schemas = (
             db_session.query(JsonSchema).filter(JsonSchema.id.in_(schema_ids)).all()
         )
@@ -583,7 +593,7 @@ def generate_chunks_command(
         if num_schemas:
             schemas = schemas[:num_schemas]
 
-        logger.info(f"Loaded {len(schemas)} JSON schemas with no chunks for processing")
+        logger.info(f"Loaded {len(schemas)} JSON schemas for processing")
 
         agent = JSONChunkGeneratorAgent(
             model_name=model_name,
