@@ -770,6 +770,14 @@ def export_samples_command(output_file: str, num_samples: int | None, test_size:
         schema_conversions = (
             db_session.execute(schema_conversions_query).scalars().all()
         )
+        logger.info(f"Loaded {len(schema_conversions)} schema conversions")
+        schema_conversions = [
+            s
+            for s in schema_conversions
+            if s.input_chunk and s.output_chunk and s.schema and s.meta.get("group")
+        ]
+        logger.info(f"{len(schema_conversions)} schema conversions after filtering")
+
         groups = [
             schema_conversion.meta["group"] for schema_conversion in schema_conversions
         ]

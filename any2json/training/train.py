@@ -210,6 +210,7 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     device = "cuda" if torch.cuda.is_available() else device
+    logger.info(f"Using device: {device}")
 
     logger.info(f"Loading model and tokenizer")
     model, tokenizer = prepare_model_and_tokenizer(pcfg, args)

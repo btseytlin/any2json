@@ -422,20 +422,20 @@ def drop_duplicate_chunks():
 )
 def cull_chunks(min_length: int, max_length: int):
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
-        # Select chunks that have very short content
         query = select(Chunk).where(
             or_(
-                func.length(Chunk.content) < min_length,
-                func.length(Chunk.content) > max_length,
+                func.length(Chunk.content) <= min_length,
+                func.length(Chunk.content) >= max_length,
             )
         )
         chunks = db_session.execute(query).scalars().all()
         logger.info(f"Found {len(chunks)} chunks to cull: {[c.id for c in chunks]}")
-        if not PREVIEW:
-            for chunk in chunks:
-                db_session.delete(chunk)
-        else:
-            raise Exception("Preview mode, not deleting anything")
+
+        for chunk in chunks:
+            logger.info(f"Culling chunk {chunk.id}: {chunk.meta} {chunk.content}")
+
+        for chunk in chunks:
+            db_session.delete(chunk)
 
 
 @cli.command()

@@ -67,7 +67,7 @@ python scripts/db_tools.py stats
 
 Stage 3: mapping chunks to schemas, generating schemas and chunks
 ```
-python scripts/db_tools.py cull-chunks --min-length=10 --max-length=7000
+python scripts/db_tools.py cull-chunks --min-length=5 --max-length=8096
 
 python scripts/data_engine.py map-chunks
 python scripts/data_engine.py generate-schemas --num-chunks=1000
@@ -84,6 +84,7 @@ python scripts/data_engine.py generate-chunks
 python scripts/db_tools.py drop-duplicate-chunks
 python scripts/data_engine.py generate-chunks --not-only-dangling --num-schemas 10000 
 python scripts/db_tools.py drop-duplicate-chunks
+python scripts/db_tools.py cull-chunks --min-length=5 --max-length=8096
 python scripts/db_tools.py vacuum
 python scripts/db_tools.py stats
 ```
