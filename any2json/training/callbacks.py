@@ -1,3 +1,4 @@
+import difflib
 import os
 import random
 from typing import Any, Callable
@@ -25,7 +26,7 @@ class EvalLoggerCallback(TrainerCallback):
         tokenized_eval_ds: Dataset,
         num_examples: int = 3,
         pad_to_multiple_of: int = 8,
-        max_new_tokens: int = 50,
+        max_new_tokens: int = 8000,
     ):
         self.tokenizer = tokenizer
         self.collator = collator
@@ -38,6 +39,8 @@ class EvalLoggerCallback(TrainerCallback):
                 "step",
                 "prompt",
                 "completion",
+                "correct_completion",
+                "diff",
                 "sample_sequence",
             ],
             log_mode="INCREMENTAL",
@@ -121,11 +124,17 @@ class EvalLoggerCallback(TrainerCallback):
             input_data = self.tokenizer.decode(
                 r["input_ids"], skip_special_tokens=False
             )
+            correct_completion = input_data.split("[OUTPUT]")[1].strip()
+
+            diff = difflib.ndiff(correct_completion, completion)
+
             self.table.add_data(
                 state.epoch,
                 state.global_step,
                 prompt,
                 completion,
+                correct_completion,
+                diff,
                 input_data,
             )
         wandb.log({"eval_examples": self.table})
