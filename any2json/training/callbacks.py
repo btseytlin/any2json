@@ -126,7 +126,27 @@ class EvalLoggerCallback(TrainerCallback):
             )
             correct_completion = input_data.split("[OUTPUT]")[1].strip()
 
-            diff = difflib.ndiff(correct_completion, completion)
+            correct_completion = correct_completion.replace(
+                self.tokenizer.eos_token, ""
+            )
+            completion = completion.replace(self.tokenizer.eos_token, "")
+
+            diff_size = None
+            try:
+                correct_json = json.loads(correct_completion)
+                pred_json = json.loads(completion)
+                correct_json_dumped = json.dumps(correct_json, sort_keys=True, indent=1)
+                pred_json_dumped = json.dumps(pred_json, sort_keys=True, indent=1)
+                diff_lines = list(
+                    difflib.ndiff(
+                        correct_json_dumped.splitlines(), pred_json_dumped.splitlines()
+                    )
+                )
+                diff_size = sum(
+                    1 for line in diff_lines if line.startswith(("+", "-", "?"))
+                )
+            except Exception:
+                pass
 
             self.table.add_data(
                 state.epoch,
@@ -134,7 +154,7 @@ class EvalLoggerCallback(TrainerCallback):
                 prompt,
                 completion,
                 correct_completion,
-                diff,
+                diff_size,
                 input_data,
             )
         wandb.log({"eval_examples": self.table})
@@ -170,6 +190,15 @@ class DebugTokensCallback(TrainerCallback):
             def debug_forward(
                 input_ids=None, attention_mask=None, labels=None, **kwargs
             ):
+
+                if self.step_count >= 3 or not model.training:
+                    model.forward = original_forward
+                    return original_forward(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        labels=labels,
+                        **kwargs,
+                    )
                 if self.step_count <= 3:
                     logger.info(f"DEBUG FORWARD PASS - Step {self.step_count}:")
                     if input_ids is not None:
