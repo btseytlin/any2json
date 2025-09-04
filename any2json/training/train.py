@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from typing import Any
 
 import click
 from dotenv import load_dotenv
@@ -24,6 +25,8 @@ from any2json.training.utils import (
     build_tokenize_fn,
     CausalLMDataCollator,
     process_raw_to_tokenized,
+    format_example,
+    try_training,
 )
 from any2json.training.callbacks import (
     EvalLoggerCallback,
@@ -37,22 +40,22 @@ DEFAULT_MODEL = "google/gemma-3-270m"
 
 @dataclass
 class PipelineConfig:
-    dataset_path: str
-    model_name: str
-    max_sequence_length: int
-    drop_schema_proba: float
-    schema_missing_token: str
+    dataset_path: str | None
+    model_name: str | None
+    max_sequence_length: int | None
+    drop_schema_proba: float | None
+    schema_missing_token: str | None
     debug_limit: int | None
-    val_size: int
-    wandb_project: str
-    pad_to_multiple_of: int
-    debug_tokens: bool
-    unsloth: bool
-    dataloader_num_proc: int
-    augment: bool
-    attn_implementation: str
+    val_size: int | None
+    wandb_project: str | None
+    pad_to_multiple_of: int | None
+    debug_tokens: bool | None
+    unsloth: bool | None
+    dataloader_num_proc: int | None
+    augment: bool | None
+    attn_implementation: str | None
 
-    hf_args: TrainingArguments
+    hf_args: TrainingArguments | None
 
 
 def validate_pipeline_config(cfg: PipelineConfig) -> None:
@@ -333,6 +336,78 @@ def train_cmd(
     validate_pipeline_config(pcfg)
     validate_training_args(args)
     run_training(pcfg, args)
+
+
+@cli.command(
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
+@click.pass_context
+@click.option("--model-name", default=DEFAULT_MODEL, type=str)
+@click.option("--max-sequence-length", required=True, type=int)
+@click.option("--max-per-device-train-batch-size", default=16, type=int)
+@click.option("--batch-size-step", default=2, type=int)
+def find_batch_size(
+    ctx: click.Context,
+    model_name: str,
+    max_sequence_length: int,
+    max_per_device_train_batch_size: int,
+    batch_size_step: int,
+):
+    parser = HfArgumentParser(TrainingArguments)
+    hf_args_list = list(ctx.args)
+    (args,) = parser.parse_args_into_dataclasses(hf_args_list)
+    pcfg = PipelineConfig(
+        dataset_path=None,
+        model_name=model_name,
+        max_sequence_length=max_sequence_length,
+        drop_schema_proba=None,
+        schema_missing_token=None,
+        debug_limit=None,
+        val_size=None,
+        wandb_project=None,
+        pad_to_multiple_of=None,
+        debug_tokens=None,
+        unsloth=None,
+        dataloader_num_proc=None,
+        augment=None,
+        attn_implementation=None,
+        hf_args=args,
+    )
+
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else device
+    logger.info(f"Using device: {device}")
+
+    logger.info(f"Loading model and tokenizer")
+    model, tokenizer = prepare_model_and_tokenizer(pcfg, args)
+    model.to(device)
+
+    pcfg.max_sequence_length = pcfg.max_sequence_length or tokenizer.model_max_length
+    pcfg.max_sequence_length = min(pcfg.max_sequence_length, tokenizer.model_max_length)
+    logger.info(f"Model max length: {tokenizer.model_max_length}")
+    logger.info(f"Max sequence length: {pcfg.max_sequence_length}")
+
+    batch_size_options = [max_per_device_train_batch_size]
+    while True:
+        new_batch_size = batch_size_options[-1] - batch_size_step
+        if new_batch_size < batch_size_step:
+            new_batch_size = batch_size_options[-1] - 1
+        if new_batch_size < 1:
+            break
+        batch_size_options.append(new_batch_size)
+
+    for batch_size in batch_size_options:
+        logger.info(f"Trying batch size: {batch_size}")
+        try:
+            try_training(pcfg, args, batch_size)
+            break
+        except Exception as e:
+            logger.error(f"Error training with batch size {batch_size}: {e}")
+            continue
+    else:
+        raise RuntimeError("Training failed for all batch sizes")
+
+    logger.info(f"Largest batch size found: {batch_size}")
 
 
 if __name__ == "__main__":

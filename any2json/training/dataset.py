@@ -16,12 +16,14 @@ class AugmentTokenizeDataset(TorchDataset):
         dataset: HFDataset,
         lengths: list[int],
         tokenizer: AutoTokenizer,
-        augmentor: Augmentor | None,
-        seed: int,
+        tokenization_kwargs: dict[str, Any] = {},
+        augmentor: Augmentor | None = None,
+        seed: int = 42,
     ):
         self.dataset = dataset
         self.lengths = lengths
         self.tokenizer = tokenizer
+        self.tokenization_kwargs = tokenization_kwargs
         self.augmentor = augmentor
         self.seed = seed
 
@@ -33,11 +35,12 @@ class AugmentTokenizeDataset(TorchDataset):
         dataset: HFDataset,
         tokenizer: AutoTokenizer,
         filter_fn: Callable[[dict[str, Any]], bool],
-        dataloader_num_proc: int,
+        tokenization_kwargs: dict[str, Any] = {},
+        dataloader_num_proc: int = 8,
         **kwargs,
     ):
 
-        tokenize_fn = build_tokenize_fn(tokenizer)
+        tokenize_fn = build_tokenize_fn(tokenizer, **tokenization_kwargs)
 
         def tokenize_with_idx(batch):
             out = tokenize_fn(batch)
@@ -64,6 +67,7 @@ class AugmentTokenizeDataset(TorchDataset):
             dataset=filtered_raw,
             lengths=lengths,
             tokenizer=tokenizer,
+            tokenization_kwargs=tokenization_kwargs,
             **kwargs,
         )
 
@@ -71,7 +75,7 @@ class AugmentTokenizeDataset(TorchDataset):
         return len(self.dataset)
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
-        tokenize_fn = build_tokenize_fn(self.tokenizer)
+        tokenize_fn = build_tokenize_fn(self.tokenizer, **self.tokenization_kwargs)
         row = self.dataset[idx]
         input_data = row["input_data"]
         schema = row["schema"]

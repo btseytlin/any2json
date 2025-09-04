@@ -101,6 +101,7 @@ def build_train_sequence(
     tokenizer: AutoTokenizer,
     prompt_ids: list[int],
     target_ids: list[int],
+    pad_to: int | None = None,
 ) -> tuple[list[int], list[int]]:
     bos = tokenizer.bos_token_id
     eos = tokenizer.eos_token_id
@@ -108,11 +109,17 @@ def build_train_sequence(
         raise ValueError("Tokenizer must define eos_token_id")
     ids = [bos] + prompt_ids + target_ids + [eos]
     labels = ([-100] * (len(prompt_ids) + 1)) + target_ids + [eos]
+
+    if pad_to is not None:
+        ids = ids + [tokenizer.pad_token_id] * (pad_to - len(ids))
+        labels = labels + [-100] * (pad_to - len(labels))
     return ids, labels
 
 
 def build_tokenize_fn(
     tokenizer: AutoTokenizer,
+    tokenizer_kwargs: dict[str, Any] = {},
+    pad_to: int | None = None,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     eos = tokenizer.eos_token_id
     if eos is None:
@@ -125,15 +132,20 @@ def build_tokenize_fn(
         prompts = [
             format_example(i, s) for i, s in zip(input_data, schema, strict=True)
         ]
-        enc_in = tokenizer(prompts, add_special_tokens=False)
-        enc_out = tokenizer(output, add_special_tokens=False)
+        enc_in = tokenizer(prompts, add_special_tokens=False, **tokenizer_kwargs)
+        enc_out = tokenizer(output, add_special_tokens=False, **tokenizer_kwargs)
         input_ids: list[list[int]] = []
         labels: list[list[int]] = []
         lengths: list[int] = []
         for idx, (prompt_ids, target_ids) in enumerate(
             zip(enc_in["input_ids"], enc_out["input_ids"], strict=True)
         ):
-            ids, lbs = build_train_sequence(tokenizer, prompt_ids, target_ids)
+            ids, lbs = build_train_sequence(
+                tokenizer,
+                prompt_ids,
+                target_ids,
+                pad_to=pad_to,
+            )
             input_ids.append(ids)
             labels.append(lbs)
             lengths.append(len(ids))
@@ -231,3 +243,96 @@ def process_raw_to_tokenized(
     )
     filtered = tokenized.filter(filter_fn, batched=True, num_proc=num_proc)
     return filtered
+
+
+def prepare_stub_dataset(
+    pcfg: PipelineConfig,
+    args: TrainingArguments,
+    tokenizer: AutoTokenizer,
+) -> tuple[AugmentTokenizeDataset, Dataset]:
+    max_sequence_length = pcfg.max_sequence_length
+
+    stub_data = [
+        {
+            "input_data": '{"test": "value"}',
+            "schema": '{"type": "object"}',
+            "output": "output",
+        }
+    ] * args.per_device_train_batch_size
+
+    raw_ds = Dataset.from_list(stub_data)
+
+    tokenization_kwargs = {
+        "pad_to": max_sequence_length,
+    }
+
+    tokenize_fn = build_tokenize_fn(tokenizer, **tokenization_kwargs)
+
+    def pass_filter(batch: dict[str, Any]) -> list[bool]:
+        return [True for seq in batch["input_ids"]]
+
+    filter_fn = pass_filter
+
+    train_dataset = AugmentTokenizeDataset.from_raw_dataset(
+        dataset=raw_ds,
+        tokenizer=tokenizer,
+        tokenization_kwargs=tokenization_kwargs,
+        filter_fn=filter_fn,
+        dataloader_num_proc=1,
+        augmentor=None,
+        seed=args.seed,
+    )
+
+    eval_dataset = process_raw_to_tokenized(
+        dataset=raw_ds,
+        tokenize_fn=tokenize_fn,
+        filter_fn=filter_fn,
+        num_proc=1,
+    )
+    assert len(train_dataset) == args.per_device_train_batch_size
+    assert len(eval_dataset) == args.per_device_eval_batch_size
+    for i in range(len(train_dataset)):
+        assert train_dataset[i]["length"] == max_sequence_length
+        assert len(train_dataset[i]["input_ids"]) == max_sequence_length
+        assert eval_dataset[i]["length"] == max_sequence_length
+        assert len(eval_dataset[i]["input_ids"]) == max_sequence_length
+
+    return train_dataset, eval_dataset
+
+
+def try_training(
+    pcfg: PipelineConfig, args: TrainingArguments, batch_size: int
+) -> None:
+    args.per_device_train_batch_size = batch_size
+    args.per_device_eval_batch_size = batch_size
+    args.max_steps = 2
+    args.eval_steps = 1
+    args.save_steps = 1000
+    args.logging_steps = 1
+    args.output_dir = "/tmp/batch_size_test"
+    args.report_to = []
+    args.dataloader_num_workers = 0
+
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else device
+
+    model, tokenizer = prepare_model_and_tokenizer(pcfg, args)
+    model.to(device)
+
+    train_dataset, eval_dataset = prepare_stub_dataset(pcfg, args, tokenizer)
+
+    trainer = create_trainer(
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        tokenizer=tokenizer,
+        model=model,
+        args=args,
+        pad_to_multiple_of=8,
+        debug_tokens=False,
+    )
+
+    trainer.train()
+
+    del trainer
+    del model
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
