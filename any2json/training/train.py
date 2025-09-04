@@ -1,9 +1,11 @@
 import os
 from dataclasses import dataclass
 from typing import Any
-
+import json
 import click
 from dotenv import load_dotenv
+import numpy as np
+import pandas as pd
 import wandb
 from datasets import Dataset, DatasetDict
 from transformers import (
@@ -15,15 +17,20 @@ from transformers import (
 from transformers.hf_argparser import HfArgumentParser
 import torch
 from any2json.training.augment import Augmentor
-from any2json.utils import configure_loggers, logger
+from any2json.utils import (
+    configure_loggers,
+    logger,
+    try_minify_json_string,
+)
 from any2json.training.utils import (
     build_tokenized_length_filter_fn,
     load_hf_dataset,
     apply_debug_limit,
     make_group_split,
-    estimate_token_lengths,
     build_tokenize_fn,
     CausalLMDataCollator,
+    prepare_splits,
+    prepare_stub_dataset,
     process_raw_to_tokenized,
 )
 from any2json.training.callbacks import (
@@ -38,22 +45,22 @@ DEFAULT_MODEL = "google/gemma-3-270m"
 
 @dataclass
 class PipelineConfig:
-    dataset_path: str | None
-    model_name: str | None
-    max_sequence_length: int | None
-    drop_schema_proba: float | None
-    schema_missing_token: str | None
-    debug_limit: int | None
-    val_size: int | None
-    wandb_project: str | None
-    pad_to_multiple_of: int | None
-    debug_tokens: bool | None
-    unsloth: bool | None
-    dataloader_num_proc: int | None
-    augment: bool | None
-    attn_implementation: str | None
+    dataset_path: str | None = None
+    model_name: str | None = None
+    max_sequence_length: int | None = 8192
+    drop_schema_proba: float | None = None
+    schema_missing_token: str | None = None
+    debug_limit: int | None = None
+    val_size: int | None = 5000
+    wandb_project: str | None = None
+    pad_to_multiple_of: int | None = None
+    debug_tokens: bool | None = None
+    unsloth: bool | None = None
+    dataloader_num_proc: int | None = None
+    augment: bool | None = None
+    attn_implementation: str | None = None
 
-    hf_args: TrainingArguments | None
+    hf_args: TrainingArguments | None = None
 
 
 def validate_pipeline_config(cfg: PipelineConfig) -> None:
@@ -74,13 +81,6 @@ def validate_training_args(args: TrainingArguments) -> None:
         raise ValueError("bf16 requested but not supported on this hardware")
     if getattr(args, "fp16", False) and not torch.cuda.is_available():
         raise ValueError("fp16 requested but CUDA is not available")
-
-
-def prepare_splits(ds: DatasetDict, seed: int, test_size: int = 5000) -> DatasetDict:
-    base = DatasetDict({"train": ds["train"]}) if "train" in ds else ds
-    size = len(base["train"]) if "train" in base else 0
-    test_size = min(size, test_size) if size > test_size else max(1, size // 20)
-    return make_group_split(base, test_size=test_size, seed=seed)
 
 
 def create_trainer(
@@ -125,13 +125,25 @@ def prepare_dataset(
     tokenizer: AutoTokenizer,
 ) -> tuple[AugmentTokenizeDataset, Dataset]:
     raw = load_hf_dataset(pcfg.dataset_path)
-    logger.info(f"Loaded {len(raw['train'])} train samples")
 
     if pcfg.debug_limit:
         raw = apply_debug_limit(raw, pcfg.debug_limit)
         logger.info(
             f"Applied debug limit: {pcfg.debug_limit}, now {len(raw['train'])} train samples"
         )
+
+    logger.info(f"Loaded {len(raw['train'])} train samples")
+
+    def preprocess_on_load(item: dict[str, Any]) -> dict[str, Any]:
+        item["output"] = try_minify_json_string(item["output"])
+        item["schema"] = try_minify_json_string(item["schema"])
+        return item
+
+    logger.info("Minifying JSON schemas and outputs on load")
+
+    raw["train"] = raw["train"].map(
+        preprocess_on_load, batched=False, num_proc=pcfg.dataloader_num_proc
+    )
 
     ds = prepare_splits(raw, args.seed, pcfg.val_size)
     logger.info(f"Prepared splits: {ds}")
@@ -261,11 +273,42 @@ def cli():
 
 
 @cli.command(name="estimate-lengths")
+@click.pass_context
 @click.option("--dataset-path", default="btseytlin/any2json", type=str)
 @click.option("--model-name", default=DEFAULT_MODEL, type=str)
 @click.option("--estimate-samples", default=2000, type=int)
-def estimate_lengths_cmd(dataset_path: str, model_name: str, estimate_samples: int):
-    estimate_token_lengths(dataset_path, model_name, estimate_samples)
+def estimate_lengths_cmd(
+    ctx: click.Context,
+    dataset_path: str,
+    model_name: str,
+    estimate_samples: int,
+):
+    parser = HfArgumentParser(TrainingArguments)
+    hf_args_list = list(ctx.args)
+    (args,) = parser.parse_args_into_dataclasses(hf_args_list)
+    pcfg = PipelineConfig(
+        dataset_path=dataset_path,
+        model_name=model_name,
+        debug_limit=estimate_samples,
+        hf_args=args,
+    )
+    pcfg.max_sequence_length = None
+    _, tokenizer = prepare_model_and_tokenizer(pcfg, args)
+
+    train_dataset, _ = prepare_dataset(pcfg, args, tokenizer)
+
+    src = [len(r["input_ids"]) for r in train_dataset]
+    tgt = [len([i for i in r["labels"] if i != -100]) for r in train_dataset]
+    total = [src[i] + tgt[i] for i in range(len(src))]
+    click.echo(
+        f"Source sequences: p50={np.quantile(src, 0.5)} p90={np.quantile(src, 0.9)} p95={np.quantile(src, 0.95)} p99={np.quantile(src, 0.99)}"
+    )
+    click.echo(
+        f"Completions: p50={np.quantile(tgt, 0.5)} p90={np.quantile(tgt, 0.9)} p95={np.quantile(tgt, 0.95)} p99={np.quantile(tgt, 0.99)}"
+    )
+    click.echo(
+        f"Total: p50={np.quantile(total, 0.5)} p90={np.quantile(total, 0.9)} p95={np.quantile(total, 0.95)} p99={np.quantile(total, 0.99)}"
+    )
 
 
 @cli.command(
@@ -336,63 +379,10 @@ def train_cmd(
     run_training(pcfg, args)
 
 
-def prepare_stub_dataset(
+def try_training(
     pcfg: PipelineConfig,
     args: TrainingArguments,
-    tokenizer: AutoTokenizer,
-) -> tuple[AugmentTokenizeDataset, Dataset]:
-    max_sequence_length = pcfg.max_sequence_length
-
-    stub_data = [
-        {
-            "input_data": '{"test": "value"}',
-            "schema": '{"type": "object"}',
-            "output": "output",
-        }
-    ] * args.per_device_train_batch_size
-
-    raw_ds = Dataset.from_list(stub_data)
-
-    tokenization_kwargs = {
-        "pad_to": max_sequence_length,
-    }
-
-    tokenize_fn = build_tokenize_fn(tokenizer, **tokenization_kwargs)
-
-    def pass_filter(batch: dict[str, Any]) -> list[bool]:
-        return [True for seq in batch["input_ids"]]
-
-    filter_fn = pass_filter
-
-    train_dataset = AugmentTokenizeDataset.from_raw_dataset(
-        dataset=raw_ds,
-        tokenizer=tokenizer,
-        tokenization_kwargs=tokenization_kwargs,
-        filter_fn=filter_fn,
-        dataloader_num_proc=1,
-        augmentor=None,
-        seed=args.seed,
-    )
-
-    eval_dataset = process_raw_to_tokenized(
-        dataset=raw_ds,
-        tokenize_fn=tokenize_fn,
-        filter_fn=filter_fn,
-        num_proc=1,
-    )
-    assert len(train_dataset) == args.per_device_train_batch_size
-    assert len(eval_dataset) == args.per_device_eval_batch_size
-    for i in range(len(train_dataset)):
-        assert train_dataset[i]["length"] == max_sequence_length
-        assert len(train_dataset[i]["input_ids"]) == max_sequence_length
-        assert eval_dataset[i]["length"] == max_sequence_length
-        assert len(eval_dataset[i]["input_ids"]) == max_sequence_length
-
-    return train_dataset, eval_dataset
-
-
-def try_training(
-    pcfg: PipelineConfig, args: TrainingArguments, batch_size: int
+    batch_size: int,
 ) -> None:
     args.per_device_train_batch_size = batch_size
     args.per_device_eval_batch_size = batch_size
@@ -410,7 +400,11 @@ def try_training(
     model, tokenizer = prepare_model_and_tokenizer(pcfg, args)
     model.to(device)
 
-    train_dataset, eval_dataset = prepare_stub_dataset(pcfg, args, tokenizer)
+    train_dataset, eval_dataset = prepare_stub_dataset(
+        pcfg.max_sequence_length,
+        args.per_device_train_batch_size,
+        tokenizer,
+    )
 
     trainer = create_trainer(
         train_dataset=train_dataset,

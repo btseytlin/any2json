@@ -14,9 +14,6 @@ from any2json.training.utils import (
     # build_gen_toks,
     build_tokenized_length_filter_fn,
     ids_to_token_str,
-    encode_prompt_ids,
-    encode_target_ids,
-    EvalLoggerCallback,
 )
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -255,14 +252,6 @@ def test_ids_to_token_str_and_encoders(tokenizer) -> None:
         wid = hello_ids[0]
         s = ids_to_token_str(tokenizer, [-100, wid, -100])
         assert "-100" in s
-
-    a = encode_prompt_ids(tokenizer, "in", "sch")
-    b = tokenizer(format_example("in", "sch"), add_special_tokens=False)["input_ids"]
-    assert a == b
-
-    c = encode_target_ids(tokenizer, "out")
-    d = tokenizer("out", add_special_tokens=False)["input_ids"]
-    assert c == d
 
 
 def test_full_pipeline_with_real_tokenizer(tokenizer) -> None:

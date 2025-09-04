@@ -8,7 +8,6 @@ import torch
 from transformers import AutoTokenizer
 
 from any2json.training.constants import SCHEMA_MISSING_TOKEN, SYSTEM_PROMPT
-from any2json.utils import logger
 from any2json.grouping import train_test_split_groups
 
 
@@ -17,22 +16,14 @@ def resolve_pad_id(tokenizer: AutoTokenizer) -> int:
 
 
 def format_example(
-    input_data: str | dict,
-    schema: str | dict | None = None,
-    output: str | dict = "",
+    input_data: str,
+    schema: str | None,
+    output: str = "",
     missing_schema_token: str = SCHEMA_MISSING_TOKEN,
     system_prompt: str = SYSTEM_PROMPT,
 ) -> str:
-    if isinstance(input_data, dict):
-        input_data = json.dumps(input_data, separators=(",", ":"), indent=None)
-
     if schema is None:
         schema = missing_schema_token
-    if isinstance(schema, dict):
-        schema = json.dumps(schema, separators=(",", ":"), indent=None)
-    if isinstance(output, dict):
-        output = json.dumps(output, separators=(",", ":"), indent=None)
-
     return f"{system_prompt}[SCHEMA]{schema}[INPUT]{input_data}[OUTPUT]{output}"
 
 
@@ -76,25 +67,6 @@ def ids_to_token_str(tok: AutoTokenizer, ids: list[int]) -> str:
         else:
             out.append(tok.convert_ids_to_tokens([t], skip_special_tokens=False)[0])
     return " ".join(out)
-
-
-def estimate_token_lengths(dataset_path: str, model_name: str, samples: int) -> None:
-    ds_all = load_hf_dataset(dataset_path)
-    base = ds_all["train"] if "train" in ds_all else list(ds_all.values())[0]
-    n = min(samples, len(base))
-    rows = [base[i] for i in range(n)]
-    tok = AutoTokenizer.from_pretrained(model_name)
-    src = [
-        len(tok(format_example(r["input_data"], r["schema"]))["input_ids"])
-        for r in rows
-    ]
-    tgt = [len(tok(r["output"])["input_ids"]) for r in rows]
-    click.echo(
-        f"src p90={percentile(src, 0.9)} p95={percentile(src, 0.95)} p99={percentile(src, 0.99)}"
-    )
-    click.echo(
-        f"tgt p90={percentile(tgt, 0.9)} p95={percentile(tgt, 0.95)} p99={percentile(tgt, 0.99)}"
-    )
 
 
 def build_train_sequence(
@@ -197,22 +169,12 @@ class CausalLMDataCollator:
         }
 
 
-def encode_prompt_ids(
-    tokenizer: AutoTokenizer, input_data: str, schema: str
-) -> list[int]:
-    enc = tokenizer(format_example(input_data, schema), add_special_tokens=False)
-    return enc["input_ids"]
-
-
-def encode_target_ids(tokenizer: AutoTokenizer, output: str) -> list[int]:
-    enc = tokenizer(output, add_special_tokens=False)
-    return enc["input_ids"]
-
-
 def build_tokenized_length_filter_fn(
-    max_sequence_length: int,
+    max_sequence_length: int | None,
 ) -> Callable[[dict[str, Any]], list[bool]]:
     def pred(batch: dict[str, Any]) -> list[bool]:
+        if max_sequence_length is None:
+            return [True for seq in batch["input_ids"]]
         return [len(seq) <= max_sequence_length for seq in batch["input_ids"]]
 
     return pred
@@ -243,3 +205,69 @@ def process_raw_to_tokenized(
     )
     filtered = tokenized.filter(filter_fn, batched=True, num_proc=num_proc)
     return filtered
+
+
+def prepare_stub_dataset(
+    max_sequence_length: int,
+    batch_size: int,
+    tokenizer: AutoTokenizer,
+) -> tuple[Any, Dataset]:
+    """Prepare a fake dataset for testing batch sizes.
+
+    It produces a dataset with `batch_size` samples where all inputs are of length `max_sequence_length`.
+    """
+
+    from any2json.training.dataset import AugmentTokenizeDataset
+
+    stub_data = [
+        {
+            "input_data": '{"test": "value"}',
+            "schema": '{"type": "object"}',
+            "output": "output",
+        }
+    ] * batch_size
+
+    raw_ds = Dataset.from_list(stub_data)
+
+    tokenization_kwargs = {
+        "pad_to": max_sequence_length,
+    }
+
+    tokenize_fn = build_tokenize_fn(tokenizer, **tokenization_kwargs)
+
+    def pass_filter(batch: dict[str, Any]) -> list[bool]:
+        return [True for seq in batch["input_ids"]]
+
+    filter_fn = pass_filter
+
+    train_dataset = AugmentTokenizeDataset.from_raw_dataset(
+        dataset=raw_ds,
+        tokenizer=tokenizer,
+        tokenization_kwargs=tokenization_kwargs,
+        filter_fn=filter_fn,
+        dataloader_num_proc=1,
+        augmentor=None,
+    )
+
+    eval_dataset = process_raw_to_tokenized(
+        dataset=raw_ds,
+        tokenize_fn=tokenize_fn,
+        filter_fn=filter_fn,
+        num_proc=1,
+    )
+    assert len(train_dataset) == batch_size
+    assert len(eval_dataset) == batch_size
+    for i in range(len(train_dataset)):
+        assert train_dataset[i]["length"] == max_sequence_length
+        assert len(train_dataset[i]["input_ids"]) == max_sequence_length
+        assert eval_dataset[i]["length"] == max_sequence_length
+        assert len(eval_dataset[i]["input_ids"]) == max_sequence_length
+
+    return train_dataset, eval_dataset
+
+
+def prepare_splits(ds: DatasetDict, seed: int, test_size: int = 5000) -> DatasetDict:
+    base = DatasetDict({"train": ds["train"]}) if "train" in ds else ds
+    size = len(base["train"]) if "train" in base else 0
+    test_size = min(size, test_size) if size > test_size else max(1, size // 20)
+    return make_group_split(base, test_size=test_size, seed=seed)

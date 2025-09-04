@@ -1,4 +1,5 @@
 from datetime import datetime
+import difflib
 import json
 import os
 import sys
@@ -13,7 +14,12 @@ import fastjsonschema
 
 from any2json.benchmarks.models.vllm_custom import VLLMServerModel
 from any2json.training.utils import load_hf_dataset
-from any2json.utils import configure_loggers, json_dump_safe, logger
+from any2json.utils import (
+    configure_loggers,
+    json_dumps_minified,
+    json_dump_safe,
+    logger,
+)
 
 
 model_types = {
@@ -80,6 +86,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
     json_error = []
     schema_error = []
     all_inference_ms = []
+    all_diff_sizes = []
     for i, result in enumerate(results):
         details = {}
 
@@ -126,6 +133,18 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         if isinstance(correct_answer, str):
             correct_answer = json.loads(correct_answer)
 
+        diff_size = len(
+            difflib.unified_diff(
+                json_dumps_minified(correct_answer).splitlines(keepends=True),
+                json_dumps_minified(answer).splitlines(keepends=True),
+                fromfile="Correct Answer",
+                tofile="Answer",
+                lineterm="",
+            )
+        )
+        all_diff_sizes.append(diff_size)
+        details["diff_size"] = diff_size
+
         if answer == correct_answer:
             correct.append(i)
             details["correct"] = True
@@ -143,6 +162,8 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         "percentage_json_errors": round(len(json_error) / len(results), 3),
         "percentage_correct": round(len(correct) / len(results), 3),
         "percentage_schema_errors": round(len(schema_error) / len(results), 3),
+        "mean_diff_size": round(np.mean(all_diff_sizes).item(), 3),
+        "median_diff_size": round(np.median(all_diff_sizes).item(), 3),
         "mean_inference_ms": round(np.mean(all_inference_ms).item(), 3),
         "median_inference_ms": round(np.median(all_inference_ms).item(), 3),
     }

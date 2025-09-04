@@ -30,6 +30,30 @@ def json_dump_safe(*args, **kwargs) -> None:
     )
 
 
+def json_dumps_minified(*args, **kwargs) -> None:
+    return json.dumps(
+        *args,
+        **kwargs,
+        separators=(",", ":"),
+        indent=None,
+    )
+
+
+def try_json_load(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except Exception as e:
+        return text
+
+
+def try_minify_json_string(text: str) -> Any:
+    try:
+        return json_dumps_minified(json.loads(text))
+    except Exception as e:
+        logger.warning(f"Error minifying JSON: {e}\ntext: {text}")
+        return text
+
+
 def configure_loggers(level: str = "WARNING", basic_level: str = "WARNING"):
     global logger
     logging.basicConfig(level=basic_level, force=True)
