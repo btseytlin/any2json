@@ -6,7 +6,7 @@ import random
 
 from any2json.data_engine.generators.vary_schema import VaryJSONSchemaGenerator
 from any2json.training.constants import SCHEMA_MISSING_TOKEN
-from any2json.utils import logger
+from any2json.utils import json_dumps_minified, logger
 
 
 def aug_drop_schema(
@@ -32,18 +32,21 @@ def aug_vary_schema_and_output(
 
     vary_schema_generator = VaryJSONSchemaGenerator(rng=rng)
     vary_schema_generator.setup()
-    try:
-        source_schema, source_data, new_schema, new_data, changes = (
-            vary_schema_generator.generate(
-                source_data=json.loads(output),
-                source_schema=json.loads(schema),
-            )
-        )
-    except NotImplementedError:
-        return input_data, schema, output
 
-    new_schema = json.dumps(new_schema)
-    new_data = json.dumps(new_data)
+    source_data = json.loads(output)
+    source_schema = json.loads(schema)
+
+    source_schema, source_data, new_schema, new_data, changes = (
+        vary_schema_generator.generate(
+            source_data=source_data,
+            source_schema=source_schema,
+        )
+    )
+
+    new_schema = json_dumps_minified(new_schema)
+    new_data = json_dumps_minified(new_data)
+
+    logger.debug(f"Augmented schema, changes: {changes}")
 
     return input_data, new_schema, new_data
 
@@ -73,13 +76,8 @@ def aug_vary_input_json_presentation(
 ) -> tuple[str, str, str]:
 
     if input_data.startswith("{") or input_data.startswith("["):
-        try:
-            input_data_json = json.loads(input_data)
-            input_data = json.dumps(
-                input_data_json, **get_random_json_dumps_kwargs(rng)
-            )
-        except json.JSONDecodeError:
-            pass
+        input_data_json = json.loads(input_data)
+        input_data = json.dumps(input_data_json, **get_random_json_dumps_kwargs(rng))
 
     return input_data, schema, output
 
@@ -150,7 +148,6 @@ class Augmentor:
                     )
                 except Exception as e:
                     logger.debug(f"Error augmenting example: {e}")
-                    pass
         logger.debug(
             f"Augmented example.\n\nInput_data: {repr(input_data)}\nSchema: {repr(schema)}\nOutput: {repr(output)}"
         )

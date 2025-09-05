@@ -1,7 +1,10 @@
+import json
 import pytest
 import random
 import fastjsonschema
 from any2json.data_engine.generators.vary_schema import VaryJSONSchemaGenerator
+from any2json.training.augment import Augmentor
+from any2json.utils import json_dumps_minified
 
 
 class TestVaryJSONSchemaGenerator:
@@ -421,10 +424,139 @@ class TestVaryJSONSchemaGenerator:
         list_type = generator.json_schema_type_to_pydantic_type(["string", "null"])
         assert list_type is not None  # Should be a Union type
 
-    def test_setup_randomizes_num_fields_deterministic(self):
-        generator = VaryJSONSchemaGenerator(rng=random.Random(43))
+    def test_same_rng_different_results(self):
+        rng = random.Random(43)
+        source_data = {"name": "Alice", "age": 30, "score": 95.5}
+        source_schema = {
+            "type": "object",
+            "properties": {
+                "name": {"type": ["string", "null"]},
+                "age": {"type": ["integer", "null"]},
+                "score": {"type": ["number", "null"]},
+            },
+        }
+
+        generator = VaryJSONSchemaGenerator(rng=rng)
         generator.setup()
+        first_state = generator.get_state()
+        _, _, first_new_schema, first_new_data, first_changes = generator.generate(
+            source_data, source_schema
+        )
 
         expected_num_fields = 2
         assert generator.num_fields_to_add == expected_num_fields
         assert isinstance(generator.fake, object)
+
+        generator = VaryJSONSchemaGenerator(rng=rng)
+        generator.setup()
+        second_state = generator.get_state()
+        _, _, second_new_schema, second_new_data, second_changes = generator.generate(
+            source_data, source_schema
+        )
+
+        assert first_state != second_state
+        assert first_new_schema != second_new_schema
+        assert first_new_data != second_new_data
+        assert first_changes != second_changes
+
+        generator = VaryJSONSchemaGenerator(rng=rng)
+        generator.setup()
+        second_state = generator.get_state()
+        _, _, second_new_schema, second_new_data, second_changes = generator.generate(
+            source_data, source_schema
+        )
+
+        assert first_state != second_state
+        assert first_new_schema != second_new_schema
+        assert first_new_data != second_new_data
+        assert first_changes != second_changes
+
+    def test_different_rng_same_seed_same_results(self):
+        seed = 43
+        source_data = {"name": "Alice", "age": 30, "score": 95.5}
+        source_schema = {
+            "type": "object",
+            "properties": {
+                "name": {"type": ["string", "null"]},
+                "age": {"type": ["integer", "null"]},
+                "score": {"type": ["number", "null"]},
+            },
+        }
+
+        generator = VaryJSONSchemaGenerator(rng=random.Random(seed))
+        generator.setup()
+        first_state = generator.get_state()
+        _, _, first_new_schema, first_new_data, first_changes = generator.generate(
+            source_data, source_schema
+        )
+
+        expected_num_fields = 2
+        assert generator.num_fields_to_add == expected_num_fields
+        assert isinstance(generator.fake, object)
+
+        generator = VaryJSONSchemaGenerator(rng=random.Random(seed))
+        generator.setup()
+        second_state = generator.get_state()
+        _, _, second_new_schema, second_new_data, second_changes = generator.generate(
+            source_data, source_schema
+        )
+
+        assert first_state == second_state
+        assert first_new_schema == second_new_schema
+        assert first_new_data == second_new_data
+        assert first_changes == second_changes
+
+        generator = VaryJSONSchemaGenerator(rng=random.Random(seed + 1))
+        generator.setup()
+        second_state = generator.get_state()
+        _, _, second_new_schema, second_new_data, second_changes = generator.generate(
+            source_data, source_schema
+        )
+
+        assert first_state != second_state
+        assert first_new_schema != second_new_schema
+        assert first_new_data != second_new_data
+        assert first_changes != second_changes
+
+
+class TestAugmentor:
+    def test_apply_deterministic(self):
+        augmentor = Augmentor()
+
+        input_data, schema, output = (
+            "info: data",
+            json.dumps(
+                {
+                    "type": "object",
+                    "properties": {
+                        "info": {"type": ["string", "null"]},
+                    },
+                }
+            ),
+            json.dumps({"info": "data"}),
+        )
+
+        result = augmentor.apply(input_data, schema, output, random.Random(45))
+
+        expected_input_data, expected_schema, expected_output = (
+            "_ in|fo: data",
+            json_dumps_minified(
+                {
+                    "type": ["object", "null"],
+                    "properties": {
+                        "civil": {"type": ["boolean", "null"]},
+                        "info": {"type": ["string", "null"]},
+                        "he": {"type": ["string", "null"]},
+                    },
+                }
+            ),
+            json_dumps_minified({"civil": None, "info": "data", "he": None}),
+        )
+
+        assert result[0] == expected_input_data
+        assert json.loads(result[1]) == json.loads(expected_schema)
+        assert json.loads(result[2]) == json.loads(expected_output)
+
+        next_result = augmentor.apply(input_data, schema, output, random.Random(45))
+
+        assert next_result == result
