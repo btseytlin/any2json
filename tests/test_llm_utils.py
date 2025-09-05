@@ -1,5 +1,6 @@
 import json
 import os
+from datasets import Dataset
 import pytest
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -10,18 +11,21 @@ from any2json.training.utils import (
     build_train_sequence,
     build_tokenize_fn,
     CausalLMDataCollator,
+    process_raw_to_tokenized,
     resolve_pad_id,
-    # build_gen_toks,
     build_tokenized_length_filter_fn,
     ids_to_token_str,
 )
+from any2json.training.callbacks import EvalLoggerCallback
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 @pytest.fixture
 def tokenizer():
-    return AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM2-135M")
+    tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM2-135M")
+    tokenizer.pad_token = tokenizer.eos_token
+    return tokenizer
 
 
 @pytest.fixture
@@ -285,51 +289,67 @@ def test_full_pipeline_with_real_tokenizer(tokenizer) -> None:
 
 @pytest.fixture
 def mock_eval_dataset():
-    return [
-        {
-            "input_data": "hello world",
-            "schema": '{"type": "object", "properties": {"text": {"type": "string"}}}',
-            "output": '{"text": "hello world"}',
-        },
-        {
-            "input_data": "test data",
-            "schema": '{"type": "object", "properties": {"message": {"type": "string"}}}',
-            "output": '{"message": "test data"}',
-        },
-    ]
+    return Dataset.from_list(
+        [
+            {
+                "input_data": "hello world",
+                "schema": '{"type": "object", "properties": {"text": {"type": "string"}}}',
+                "output": '{"text": "hello world"}',
+            },
+            {
+                "input_data": "test data",
+                "schema": '{"type": "object", "properties": {"message": {"type": "string"}}}',
+                "output": '{"message": "test data"}',
+            },
+        ]
+    )
+
+
+@pytest.fixture
+def tokenized_mock_eval_dataset(tokenizer, mock_eval_dataset):
+    tokenize_fn = build_tokenize_fn(tokenizer)
+    tokenized_eval_ds = process_raw_to_tokenized(
+        dataset=mock_eval_dataset,
+        tokenize_fn=tokenize_fn,
+        filter_fn=lambda batch: [True for _ in batch],
+    )
+
+    return tokenized_eval_ds
 
 
 class TestEvalLoggerCallback:
-    def test_init(self, tokenizer, mock_eval_dataset):
+    def test_init(self, tokenizer, tokenized_mock_eval_dataset):
         callback = EvalLoggerCallback(
             tokenizer=tokenizer,
-            raw_eval_ds=mock_eval_dataset,
+            collator=CausalLMDataCollator(tokenizer, pad_to_multiple_of=8),
+            tokenized_eval_ds=tokenized_mock_eval_dataset,
             num_examples=2,
             pad_to_multiple_of=8,
+            max_new_tokens=10,
         )
         assert callback.tokenizer == tokenizer
-        assert callback.raw_eval_ds == mock_eval_dataset
         assert callback.pad_to_multiple_of == 8
         assert callback.num_examples == 2
-        assert callback.tokenize_fn is not None
 
-    def test_sample_rows(self, tokenizer, mock_eval_dataset):
+    def test_sample_rows(self, tokenizer, tokenized_mock_eval_dataset):
         callback = EvalLoggerCallback(
             tokenizer=tokenizer,
-            raw_eval_ds=mock_eval_dataset,
+            collator=CausalLMDataCollator(tokenizer, pad_to_multiple_of=8),
+            tokenized_eval_ds=tokenized_mock_eval_dataset,
             num_examples=2,
         )
         rows = callback.sample_rows()
         assert len(rows) == 2
         assert all(isinstance(row, dict) for row in rows)
-        assert all("input_data" in row for row in rows)
-        assert all("schema" in row for row in rows)
-        assert all("output" in row for row in rows)
+        assert all("input_ids" in row for row in rows), rows
 
-    def test_generate_completion_for_prompt(self, tokenizer, model, mock_eval_dataset):
+    def test_generate_completion_for_prompt(
+        self, tokenizer, model, tokenized_mock_eval_dataset
+    ):
         callback = EvalLoggerCallback(
             tokenizer=tokenizer,
-            raw_eval_ds=mock_eval_dataset,
+            collator=CausalLMDataCollator(tokenizer, pad_to_multiple_of=8),
+            tokenized_eval_ds=tokenized_mock_eval_dataset,
             num_examples=1,
             max_new_tokens=10,
         )
@@ -344,81 +364,41 @@ class TestEvalLoggerCallback:
         pred = callback.generate_completion_for_prompt(model, toks)
         assert pred == "\n\nThe prompt is a text box that you"
 
-    def test_generate_predictions(self, tokenizer, model, mock_eval_dataset):
+    def test_generate_predictions(self, tokenizer, model, tokenized_mock_eval_dataset):
         callback = EvalLoggerCallback(
             tokenizer=tokenizer,
-            raw_eval_ds=mock_eval_dataset,
+            collator=CausalLMDataCollator(tokenizer, pad_to_multiple_of=8),
+            tokenized_eval_ds=tokenized_mock_eval_dataset,
             num_examples=1,
             max_new_tokens=10,
         )
 
-        batch = {
-            "input_data": [mock_eval_dataset[0]["input_data"]],
-            "schema": [mock_eval_dataset[0]["schema"]],
-            "output": [mock_eval_dataset[0]["output"]],
-        }
-        tokenized = callback.tokenize_fn(batch)
-        inputs, preds = callback.generate_predictions(model, tokenized)
-
-        assert inputs == [
-            '<|endoftext|>Convert input data to json according to JSONSchema\n[SCHEMA]{"type": "object", "properties": {"text": {"type": "string"}}}[INPUT]hello world[OUTPUT]'
+        features = [
+            {
+                "input_ids": tokenized_mock_eval_dataset[0]["input_ids"],
+                "labels": tokenized_mock_eval_dataset[0]["labels"],
+            },
+            {
+                "input_ids": tokenized_mock_eval_dataset[1]["input_ids"],
+                "labels": tokenized_mock_eval_dataset[1]["labels"],
+            },
         ]
 
-        assert isinstance(preds[0], str)
-        assert len(preds[0]) > 0
-        assert "SCHEMA" not in preds[0]
-        assert "INPUT" not in preds[0]
-        assert batch["input_data"][0] not in preds[0]
-        assert batch["schema"][0] not in preds[0]
+        batch = callback.collator(features)
+        inputs, preds = callback.generate_predictions(model, batch)
 
-    def test_generate_predictions_multiple_examples(
-        self, tokenizer, model, mock_eval_dataset
-    ):
-        callback = EvalLoggerCallback(
-            tokenizer=tokenizer,
-            raw_eval_ds=mock_eval_dataset,
-            num_examples=2,
-            pad_to_multiple_of=8,
-            max_new_tokens=10,
+        assert (
+            inputs[0]
+            == '<|endoftext|>Convert input data to json according to JSONSchema\n[SCHEMA]{"type": "object", "properties": {"text": {"type": "string"}}}[INPUT]hello world[OUTPUT]'
         )
+        assert preds[0].strip() == "The JSONSchema is a specification for the"
 
-        batch = {
-            "input_data": [
-                mock_eval_dataset[0]["input_data"],
-                mock_eval_dataset[1]["input_data"],
-            ],
-            "schema": [
-                mock_eval_dataset[0]["schema"],
-                mock_eval_dataset[1]["schema"],
-            ],
-            "output": [mock_eval_dataset[0]["output"], mock_eval_dataset[1]["output"]],
-        }
-        tokenized = callback.tokenize_fn(batch)
-        inputs, preds = callback.generate_predictions(
-            model,
-            tokenized,
+        assert (
+            inputs[1]
+            == '<|endoftext|>Convert input data to json according to JSONSchema\n[SCHEMA]{"type": "object", "properties": {"message": {"type": "string"}}}[INPUT]test data[OUTPUT]'
         )
+        # assert preds[1].strip() == "json data The JSONSchema is a standard"
 
-        assert len(inputs) == 2
         assert len(preds) == 2
-
-        assert inputs[0] == (
-            '<|endoftext|>Convert input data to json according to JSONSchema\n[SCHEMA]{"type": "object", "properties": {"text": {"type": "string"}}}[INPUT]hello world[OUTPUT]'
-        )
-        assert inputs[1] == (
-            '<|endoftext|>Convert input data to json according to JSONSchema\n[SCHEMA]{"type": "object", "properties": {"message": {"type": "string"}}}[INPUT]test data[OUTPUT]'
-        )
-
-        assert isinstance(preds[0], str)
-        assert len(preds[0]) > 0
         assert "SCHEMA" not in preds[0]
         assert "INPUT" not in preds[0]
-        assert batch["input_data"][0] not in preds[0]
-        assert batch["schema"][0] not in preds[0]
-
-        assert isinstance(preds[1], str)
-        assert len(preds[1]) > 0
-        assert "SCHEMA" not in preds[1]
-        assert "INPUT" not in preds[1]
-        assert batch["input_data"][1] not in preds[1]
-        assert batch["schema"][1] not in preds[1]

@@ -1,7 +1,6 @@
 import random
 from any2json.containers import FromOtherFormatSample, Sample
 from copy import deepcopy
-from pydantic import BaseModel, create_model, ValidationError
 from typing import Any, Type, Union, Callable
 import fastjsonschema
 import xml.etree.ElementTree as ET
@@ -35,6 +34,7 @@ class VaryJSONSchemaGenerator(SampleGenerator):
 
     def setup(self):
         self.fake = Faker()
+        self.fake.seed_instance(self.rng.randint(0, 1000000))
         self.num_fields_to_add = self.rng.randint(1, 3)
 
     def get_state(self) -> dict:
@@ -51,10 +51,10 @@ class VaryJSONSchemaGenerator(SampleGenerator):
             if (
                 value.get("type") in ["number", "integer"]
                 or isinstance(value.get("type"), list)
-                and value.get("type")[0] in ["integer"]
+                and value.get("type")[0] in ["number", "integer"]
             ):
                 if self.rng.random() <= self.stringify_number_proba:
-                    value["type"] = "string"
+                    value["type"] = ["string", "null"]
                     changed_types[key] = "number_to_string"
         return new_schema, changed_types
 
@@ -117,38 +117,34 @@ class VaryJSONSchemaGenerator(SampleGenerator):
     def get_new_data(self, input_data: dict, new_schema: dict, changes: dict) -> dict:
         if changes.get("changed_types"):
             for key, value in changes["changed_types"].items():
-                if value == "number_to_string":
+                if value == "number_to_string" and key in input_data:
                     input_data[key] = str(input_data[key])
 
-        fields: dict[str, Any] = {}
-        required_fields = new_schema.get("required", [])
+        properties: dict[str, Any] = new_schema["properties"]
+        required_fields = set(new_schema.get("required", []))
 
-        for prop_name, prop_def in new_schema["properties"].items():
-            pydantic_type = self.json_schema_type_to_pydantic_type(
-                prop_def.get("type", "any")
-            )
-            if prop_name in required_fields:
-                fields[prop_name] = (pydantic_type, ...)
+        transformed: dict[str, Any] = {}
+        for prop_name, prop_def in properties.items():
+            value = input_data.get(prop_name, None)
+            t = prop_def["type"]
+            types = t if isinstance(t, list) else [t]
+            if value is None:
+                coerced = None
             else:
-                fields[prop_name] = (Union[pydantic_type, None], None)
+                coerced = self.coerce_value(value, types)
+            if prop_name in required_fields and coerced is None:
+                raise ValueError(f"Missing required field: {prop_name}")
+            transformed[prop_name] = coerced
 
-        DynamicModel = create_model("DynamicModel", **fields)
+        compiled_schema = fastjsonschema.compile(
+            new_schema,
+            detailed_exceptions=False,
+        )
+        compiled_schema(transformed)
 
-        try:
-            model_instance = DynamicModel(**input_data)
-            transformed_data = model_instance.model_dump(exclude_unset=False)
-            compiled_schema = fastjsonschema.compile(new_schema)
-            compiled_schema(transformed_data)
-
-            assert any(
-                [v is not None for v in transformed_data.values()]
-            ), "Transformed data has no non-null values"
-
-            return transformed_data
-        except ValidationError as e:
-            raise ValueError(f"Input data could not be transformed to new schema: {e}")
-        except fastjsonschema.exceptions.JsonSchemaException as e:
-            raise ValueError(f"Transformed data failed schema validation: {e}")
+        if not transformed or all(v is None for v in transformed.values()):
+            raise ValueError("Transformed data has only null values")
+        return transformed
 
     def json_schema_type_to_pydantic_type(
         self, json_type: Union[str, list]
@@ -172,6 +168,35 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         else:
             return type_map.get(json_type, Any)
 
+    def coerce_value(self, value: Any, types: list[str]) -> Any:
+        if "string" in types:
+            return str(value)
+        if "integer" in types:
+            if isinstance(value, float):
+                if float(value).is_integer():
+                    return int(value)
+                else:
+                    raise ValueError(f"Cannot convert float to integer: {value}")
+            if isinstance(value, str):
+                return int(float(value))
+            if isinstance(value, int):
+                return value
+        if "number" in types:
+            if isinstance(value, (int, float)):
+                return value
+            elif isinstance(value, str):
+                return float(value)
+        if "boolean" in types:
+            if isinstance(value, bool):
+                return value
+            elif isinstance(value, str):
+                s = value.strip().lower()
+                if s in {"true", "1", "True"}:
+                    return True
+                if s in {"false", "0", "False"}:
+                    return False
+        raise ValueError(f"Cannot convert value to {types}: {value}")
+
     def validate_source_data(self, source_data: dict, source_schema: dict):
         assert isinstance(
             source_data, dict
@@ -181,7 +206,10 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         ), "Source schema must be provided and be a dictionary"
 
         assert source_schema["type"] == "object", "Source schema must be an object"
-        compiled_schema = fastjsonschema.compile(source_schema)
+        compiled_schema = fastjsonschema.compile(
+            source_schema,
+            detailed_exceptions=False,
+        )
         compiled_schema(source_data)
 
     def generate(
