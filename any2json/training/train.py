@@ -91,10 +91,12 @@ def create_trainer(
     args: TrainingArguments,
     pad_to_multiple_of: int = 8,
     debug_tokens: bool = False,
+    max_sequence_length: int | None = None,
 ):
     collator = CausalLMDataCollator(
         tokenizer=tokenizer,
         pad_to_multiple_of=pad_to_multiple_of,
+        max_length=max_sequence_length,
     )
 
     trainer = Trainer(
@@ -249,6 +251,7 @@ def run_training(pcfg: PipelineConfig, args: TrainingArguments) -> None:
         args=args,
         pad_to_multiple_of=pcfg.pad_to_multiple_of,
         debug_tokens=pcfg.debug_tokens,
+        max_sequence_length=pcfg.max_sequence_length,
     )
 
     logger.info(f"Training")

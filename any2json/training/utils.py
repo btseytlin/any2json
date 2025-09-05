@@ -6,6 +6,7 @@ import click
 from datasets import load_from_disk, load_dataset, DatasetDict, Dataset
 import torch
 from transformers import AutoTokenizer
+from transformers import DataCollatorWithPadding
 
 from any2json.training.constants import SCHEMA_MISSING_TOKEN, SYSTEM_PROMPT
 from any2json.grouping import train_test_split_groups
@@ -140,33 +141,37 @@ def pad_to_multiple(
     return out, attn
 
 
-class CausalLMDataCollator:
-    def __init__(self, tokenizer: AutoTokenizer, pad_to_multiple_of: int = 8):
-        self.tokenizer = tokenizer
-        self.pad_to_multiple_of = pad_to_multiple_of
-        self.pad_id = resolve_pad_id(self.tokenizer)
+class CausalLMDataCollator(DataCollatorWithPadding):
+    def __init__(
+        self,
+        tokenizer: AutoTokenizer,
+        padding: str = "longest",
+        max_length: int | None = None,
+        pad_to_multiple_of: int = 8,
+        return_tensors: str = "pt",
+    ):
+        super().__init__(
+            tokenizer=tokenizer,
+            padding=padding,
+            max_length=max_length,
+            pad_to_multiple_of=pad_to_multiple_of,
+            return_tensors=return_tensors,
+        )
 
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
-        max_len = max(len(f["input_ids"]) for f in features)
-        if self.pad_to_multiple_of:
-            m = self.pad_to_multiple_of
-            max_len = ((max_len + m - 1) // m) * m
+        no_label_features = [
+            {k: v for k, v in f.items() if k != "labels"} for f in features
+        ]
+        batch = super().__call__(no_label_features)
 
-        input_ids, attention_mask = pad_to_multiple(
-            [f["input_ids"] for f in features],
-            self.pad_to_multiple_of,
-            self.pad_id,
-        )
         labels, _ = pad_to_multiple(
             [f["labels"] for f in features],
             self.pad_to_multiple_of,
             -100,
         )
-        return {
-            "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "labels": torch.tensor(labels, dtype=torch.long),
-            "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
-        }
+        batch["labels"] = torch.tensor(labels, dtype=torch.long)
+
+        return batch
 
 
 def build_tokenized_length_filter_fn(
