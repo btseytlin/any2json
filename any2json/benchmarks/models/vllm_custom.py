@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import TextIO
 from any2json.benchmarks.models.vllm_server_mixin import VLLMServerMixin
 from any2json.training.utils import format_example
-from any2json.utils import logger
+from any2json.utils import json_dumps_minified, logger
 import subprocess
 import sys
 import time
