@@ -10,6 +10,8 @@ from any2json.schema_utils import to_supported_json_schema
 from any2json.training.utils import format_example
 import fastjsonschema
 
+from any2json.utils import json_dumps_minified
+
 
 def validate_json_schema(
     schema_text: str,
@@ -119,7 +121,9 @@ def main():
                 return
 
             schema_str = (
-                json.dumps(processed_schema) if processed_schema else "[MISSING]"
+                json_dumps_minified(processed_schema)
+                if processed_schema
+                else "[MISSING]"
             )
             formatted_example = format_example(input_data, schema_str)
 
