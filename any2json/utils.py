@@ -36,6 +36,7 @@ def json_dumps_minified(*args, **kwargs) -> None:
         **kwargs,
         separators=(",", ":"),
         indent=None,
+        sort_keys=True,
     )
 
 
