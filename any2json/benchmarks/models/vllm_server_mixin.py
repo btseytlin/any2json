@@ -17,7 +17,7 @@ class VLLMServerMixin:
     base_url: str = "http://localhost:8000/v1"
     vllm_serve_args: list[str] = field(default_factory=list)
     server_process: subprocess.Popen | None = field(default=None, init=False)
-    server_startup_timeout: float = 180.0
+    server_startup_timeout: float = 360.0
     server_log_path: str | None = "vllm_server.log"
     server_log_handle: TextIO | None = field(default=None, init=False)
     request_timeout: float = 180.0

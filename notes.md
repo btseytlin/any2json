@@ -289,3 +289,16 @@ Ideas:
 2. Retrain smollm with chat template, high augmentations and train for long
 3. Benchmark against gemili flash lite
 4. Train gemma
+
+### 
+
+Submitting runpod benchmarking
+
+```
+python any2json/training/submit_runpod.py --name any2json-benchmark-a40  --script /Users/boris/Documents/any2json/scripts/pod_benchmark.sh
+```
+
+Must integrate this!
+
+https://pypi.org/project/genson/
+

@@ -77,7 +77,7 @@ def build_pod_kwargs(pcfg: PodConfig) -> dict[str, Any]:
 @click.option("--image", default=DEFAULT_IMAGE, type=str, help="Docker image to use")
 @click.option("--cloud-type", default=None, type=str)
 @click.option("--data-center-id", default=None, type=str)
-@click.option("--container-disk-gb", default=None, type=int)
+@click.option("--container-disk-gb", default=40, type=int)
 @click.option("--volume-gb", default=None, type=int)
 @click.option("--volume-mount-path", default="/workspace", type=str)
 @click.option("--start-ssh", is_flag=True)
