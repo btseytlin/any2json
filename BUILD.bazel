@@ -1,3 +1,4 @@
+load("@rules_oci//oci:pull.bzl", "oci_pull")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_push")
 
 oci_image(
