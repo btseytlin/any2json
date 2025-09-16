@@ -10,7 +10,7 @@ import runpod
 from dotenv import load_dotenv, dotenv_values, find_dotenv
 from any2json.utils import logger
 
-DEFAULT_IMAGE = "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04"
+DEFAULT_IMAGE = "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04"  # boristseitlin/any2json:a40
 DEFAULT_GPU = "A40"
 
 
