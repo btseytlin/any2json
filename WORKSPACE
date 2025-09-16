@@ -3,29 +3,29 @@ workspace(name = "any2json")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
-    name = "rules_cc",
-    sha256 = "af6cc82d87db94585bceeda2561cb8a9d55ad435318ccb4ddfee18a43580fb5d",
-    strip_prefix = "rules_cc-0.0.4",
-    urls = ["https://github.com/bazelbuild/rules_cc/archive/refs/tags/0.0.4.tar.gz"],
+    name = "rules_oci",
+    sha256 = "e96d70faa4bace3e09fdb1d7d1441b838920f491588889ff9a7e2615afca5799",
+    strip_prefix = "rules_oci-2.0.0-alpha2",
+    url = "https://github.com/bazel-contrib/rules_oci/releases/download/v2.0.0-alpha2/rules_oci-v2.0.0-alpha2.tar.gz",
 )
 
-http_archive(
-    name = "io_bazel_rules_docker",
-    sha256 = "b1e80761a8a8243d03ebca8845e9cc1ba6c82ce7c5179ce2b295cd36f7e394bf",
-    urls = ["https://github.com/bazelbuild/rules_docker/releases/download/v0.25.0/rules_docker-v0.25.0.tar.gz"],
-)
+load("@rules_oci//oci:dependencies.bzl", "rules_oci_dependencies")
 
-load("@io_bazel_rules_docker//repositories:repositories.bzl", container_repositories = "repositories")
-container_repositories()
+rules_oci_dependencies()
 
-load("@io_bazel_rules_docker//repositories:deps.bzl", container_deps = "deps")
-container_deps()
+load("@rules_oci//oci:repositories.bzl", "oci_register_toolchains")
 
-load("@io_bazel_rules_docker//container:container.bzl", "container_pull")
+oci_register_toolchains(name = "oci")
 
-container_pull(
-    name = "runpod_pytorch_base",
+load("@rules_oci//oci:pull.bzl", "oci_pull")
+
+oci_pull(
+    name = "base_image",
     registry = "index.docker.io",
     repository = "runpod/pytorch",
-    tag = "2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04",
+    digest = "sha256:bf2d42c1240bb8d3e87cce9b2a16c0e18c691e2e8b6b55f0063b55696292d6d0",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64",
+    ]
 )
