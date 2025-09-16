@@ -1,0 +1,13 @@
+INFO:any2json:Configured any2json logger with level INFO
+wandb: Currently logged in as: btseytlin to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.21.1
+wandb: Run data is saved locally in /Users/boris/Documents/any2json/wandb/run-20250916_223438-1lin2vnu
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run efficient-cosmos-127
+wandb: ⭐️ View project at https://wandb.ai/btseytlin/any2json-scripts
+wandb: 🚀 View run at https://wandb.ai/btseytlin/any2json-scripts/runs/1lin2vnu
+Started new wandb run: 1lin2vnu
+1lin2vnu
+[1;34mwandb[0m: 
+[1;34mwandb[0m: 🚀 View run [33mefficient-cosmos-127[0m at: [34mhttps://wandb.ai/btseytlin/any2json-scripts/runs/1lin2vnu[0m
+[1;34mwandb[0m: Find logs at: [1;35mwandb/run-20250916_223438-1lin2vnu/logs[0m

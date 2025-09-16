@@ -47,11 +47,9 @@ def build_pod_kwargs(pcfg: PodConfig) -> dict[str, Any]:
         "ports": ",".join(pcfg.ports) if pcfg.ports else None,
         "env": pcfg.env,
     }
-    # Only add template_id if provided
     if pcfg.template_id:
         kwargs["template_id"] = pcfg.template_id
-    # Only add gpu_type_id if no template is used
-    if pcfg.gpu_type_id and not pcfg.template_id:
+    if pcfg.gpu_type_id:
         kwargs["gpu_type_id"] = pcfg.gpu_type_id
     if pcfg.container_disk_gb is not None:
         kwargs["container_disk_in_gb"] = pcfg.container_disk_gb
@@ -135,7 +133,7 @@ def submit(
                     return g["id"]
         return gpus[0]["id"]
 
-    gpu_type_id = select_gpu_id(gpu_type) if not template_id else None
+    gpu_type_id = select_gpu_id(gpu_type)
 
     pcfg = PodConfig(
         name=name,

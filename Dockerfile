@@ -13,7 +13,6 @@ RUN git clone --filter=blob:none https://github.com/btseytlin/any2json.git
 
 WORKDIR /code/any2json
 
-
 ENV UV_LINK_MODE=copy
 
 RUN uv sync && \
