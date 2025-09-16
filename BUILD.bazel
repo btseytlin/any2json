@@ -17,5 +17,5 @@ oci_push(
     name = "push_any2json_image",
     image = ":any2json_image",
     repository = "index.docker.io/boristseitlin/any2json",
-    remote_tags = ["latest"]
+    remote_tags = ["latest", "a40"]
 )
