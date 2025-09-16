@@ -1,0 +1,16 @@
+load("@rules_docker//container:container.bzl", "container_image", "container_push")
+
+container_image(
+    name = "any2json_image",
+    dockerfile = "Dockerfile",
+    repository = "any2json",
+    tag = "latest",
+)
+
+container_push(
+    name = "push_image",
+    image = ":any2json_image",
+    registry = "docker.io",
+    repository = "btseytlin/any2json",
+    tag = "latest",
+)
