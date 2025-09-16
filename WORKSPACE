@@ -4,7 +4,7 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
     name = "bazel_features",
-    sha256 = "0f23d75c7623d6dac8856db4b8c55c5d05b1b2b8e9a7c6e1e7e3e3e3e3e3e3e3",
+    sha256 = "2cd9e57d4c38675d321731d65c15258f3a66438ad531ae09cb8bb14217dc8572",
     strip_prefix = "bazel_features-1.11.0",
     url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.11.0/bazel_features-v1.11.0.tar.gz",
 )
