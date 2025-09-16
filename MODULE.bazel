@@ -1,0 +1,7 @@
+module(name = "any2json")
+
+bazel_dep(name = "rules_docker", version = "0.25.0")
+bazel_dep(name = "rules_python", version = "0.31.0")
+
+docker = use_extension("@rules_docker//docker:extensions.bzl", "docker")
+docker.toolchain()
