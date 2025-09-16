@@ -9,9 +9,15 @@ WANDB_RUN = None
 
 
 @click.group()
-def cli():
+@click.option("--run-id", help="Existing wandb run ID to resume", envvar="WANDB_RUN_ID")
+def cli(run_id: str):
     global WANDB_RUN
-    WANDB_RUN = wandb.init()
+    if run_id:
+        WANDB_RUN = wandb.init(id=run_id, resume="allow")
+        print(f"Resumed wandb run: {run_id}")
+    else:
+        WANDB_RUN = wandb.init()
+        print(f"Started new wandb run: {WANDB_RUN.id}")
 
 
 @cli.command()
@@ -61,6 +67,11 @@ def upload_directory(
     artifact.add_dir(directory)
     WANDB_RUN.log_artifact(artifact)
     print(f"Directory {directory} uploaded as artifact {name}")
+
+
+@cli.command()
+def get_run_id():
+    print(WANDB_RUN.id)
 
 
 if __name__ == "__main__":
