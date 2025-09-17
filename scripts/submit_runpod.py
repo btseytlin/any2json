@@ -176,15 +176,14 @@ def submit(
 
     if keep_container_alive:
         if max_runtime:
-            cmd = f"{cmd}; sleep {max_runtime}'"
+            cmd = f"{cmd}; sleep {max_runtime}"
         else:
             cmd = f"{cmd}; exec tail -f /dev/null"
 
     if auto_terminate:
-        cmd = f"{cmd}; sleep 10m && runpodctl stop pod $RUNPOD_POD_ID"
+        cmd = f"{cmd}; sleep 10m; runpodctl stop pod $RUNPOD_POD_ID"
 
-    if cmd:
-        cmd = f"bash -lc '{cmd}'"
+    cmd = f"bash -lc '{cmd}'"
 
     docker_args = f"{docker_args} {cmd}".strip()
 
