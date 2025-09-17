@@ -6,7 +6,7 @@ cd /code/any2json && source .venv/bin/activate
 git fetch && git reset --hard origin/main
 
 echo "Downloading checkpoint"
-export WANDB_RUN_ID=$(python scripts/wandb_tools.py get-run-id)
+export WANDB_RUN_ID=$(python scripts/wandb_tools.py --quiet  get-run-id)
 python scripts/wandb_tools.py --run-id $WANDB_RUN_ID download-model --model-id btseytlin/model-registry/any2json_gemma270m:latest --output-root /workspace/models
 
 echo "Setup complete, running command"
