@@ -181,6 +181,81 @@ def add_schema_keys_recursive(
     return result_schema
 
 
+def get_schema_keys_to_change_types_recursive(
+    rng: random.Random,
+    stringify_number_proba: float,
+    current_schema: dict,
+    current_path: str = "",
+    changed_types: dict | None = None,
+) -> tuple[dict, dict]:
+    changed_types = changed_types or {}
+
+    if not isinstance(current_schema, dict):
+        return current_schema, changed_types
+
+    if "properties" in current_schema:
+        for key, value in current_schema["properties"].items():
+            if (
+                value.get("type") in ["number", "integer"]
+                or isinstance(value.get("type"), list)
+                and value.get("type")[0] in ["number", "integer"]
+            ):
+                if rng.random() <= stringify_number_proba:
+                    path = f"{current_path}.{key}" if current_path else key
+                    changed_types[path] = "number_to_string"
+
+            get_schema_keys_to_change_types_recursive(
+                rng,
+                stringify_number_proba,
+                value,
+                f"{current_path}.{key}" if current_path else key,
+                changed_types,
+            )
+
+    if "items" in current_schema:
+        get_schema_keys_to_change_types_recursive(
+            rng,
+            stringify_number_proba,
+            current_schema["items"],
+            f"{current_path}[]",
+            changed_types,
+        )
+
+    return current_schema, changed_types
+
+
+def apply_schema_key_types_change_recursive(
+    current_schema: dict,
+    changed_types: dict,
+    current_path: str = "",
+) -> dict:
+    if not isinstance(current_schema, dict):
+        return current_schema
+
+    result_schema = deepcopy(current_schema)
+
+    if "properties" in result_schema:
+        for key, value in result_schema["properties"].items():
+            path = f"{current_path}.{key}" if current_path else key
+            if path in changed_types and changed_types[path] == "number_to_string":
+                value["type"] = ["string", "null"]
+
+            result_schema["properties"][key] = apply_schema_key_types_change_recursive(
+                value,
+                changed_types,
+                path,
+            )
+
+    if "items" in result_schema:
+        result_schema["items"] = apply_schema_key_types_change_recursive(
+            result_schema["items"],
+            changed_types,
+            f"{current_path}[]",
+        )
+
+    return result_schema
+
+
 class VaryJSONSchemaGenerator(SampleGenerator):
     """
     Generate synthetic JSON schemas and matching JSON chunks by randomly varying a given JSON schema.
@@ -215,16 +290,13 @@ class VaryJSONSchemaGenerator(SampleGenerator):
 
     def change_schema_key_types(self, schema: dict) -> tuple[dict, dict]:
         new_schema = deepcopy(schema)
-        changed_types = {}
-        for key, value in new_schema["properties"].items():
-            if (
-                value.get("type") in ["number", "integer"]
-                or isinstance(value.get("type"), list)
-                and value.get("type")[0] in ["number", "integer"]
-            ):
-                if self.rng.random() <= self.stringify_number_proba:
-                    value["type"] = ["string", "null"]
-                    changed_types[key] = "number_to_string"
+
+        new_schema, changed_types = get_schema_keys_to_change_types_recursive(
+            self.rng, self.stringify_number_proba, new_schema
+        )
+
+        new_schema = apply_schema_key_types_change_recursive(new_schema, changed_types)
+
         return new_schema, changed_types
 
     def drop_schema_keys_recursive(self, schema: dict) -> tuple[dict, list[str]]:
@@ -283,18 +355,114 @@ class VaryJSONSchemaGenerator(SampleGenerator):
 
         return new_schema, changes
 
-    def get_new_data(self, input_data: dict, new_schema: dict, changes: dict) -> dict:
+    def apply_changes_to_data(self, input_data: dict, changes: dict) -> dict:
+        transformed = deepcopy(input_data)
+
         if changes.get("changed_types"):
-            for key, value in changes["changed_types"].items():
-                if value == "number_to_string" and key in input_data:
-                    input_data[key] = str(input_data[key])
+            for path, change_type in changes["changed_types"].items():
+                if change_type == "number_to_string":
+                    self.apply_type_change_recursive(transformed, path, str)
+
+        if changes.get("dropped_fields"):
+            for path in changes["dropped_fields"]:
+                self.remove_field_recursive(transformed, path)
+
+        if changes.get("added_fields"):
+            for path_and_type in changes["added_fields"]:
+                if isinstance(path_and_type, tuple):
+                    path, field_type = path_and_type
+                else:
+                    path = path_and_type
+                    field_type = "string"
+                self.add_field_recursive(transformed, path, None)
+
+        return transformed
+
+    def remove_field_recursive(self, data: dict, path: str) -> None:
+        parts = path.split(".")
+        current = data
+
+        for i, part in enumerate(parts[:-1]):
+            if "[]" in part:
+                key = part.replace("[]", "")
+                if key in current and isinstance(current[key], list):
+                    for item in current[key]:
+                        if isinstance(item, dict):
+                            remaining_path = ".".join(parts[i + 1 :])
+                            self.remove_field_recursive(item, remaining_path)
+                return
+            else:
+                if part in current and isinstance(current[part], dict):
+                    current = current[part]
+                else:
+                    return
+
+        final_key = parts[-1]
+        if final_key in current:
+            del current[final_key]
+
+    def add_field_recursive(self, data: dict, path: str, value: Any) -> None:
+        parts = path.split(".")
+        current = data
+
+        for i, part in enumerate(parts[:-1]):
+            if "[]" in part:
+                key = part.replace("[]", "")
+                if key in current and isinstance(current[key], list):
+                    for item in current[key]:
+                        if isinstance(item, dict):
+                            remaining_path = ".".join(parts[i + 1 :])
+                            self.add_field_recursive(item, remaining_path, value)
+                return
+            else:
+                if part in current:
+                    if isinstance(current[part], dict):
+                        current = current[part]
+                    else:
+                        return
+                else:
+                    current[part] = {}
+                    current = current[part]
+
+        final_key = parts[-1]
+        current[final_key] = value
+
+    def apply_type_change_recursive(
+        self, data: dict, path: str, converter: Callable
+    ) -> None:
+        parts = path.split(".")
+        current = data
+
+        for i, part in enumerate(parts[:-1]):
+            if "[]" in part:
+                key = part.replace("[]", "")
+                if key in current and isinstance(current[key], list):
+                    for item in current[key]:
+                        if isinstance(item, dict):
+                            remaining_path = ".".join(parts[i + 1 :])
+                            self.apply_type_change_recursive(
+                                item, remaining_path, converter
+                            )
+                return
+            else:
+                if part in current and isinstance(current[part], dict):
+                    current = current[part]
+                else:
+                    return
+
+        final_key = parts[-1]
+        if final_key in current and current[final_key] is not None:
+            current[final_key] = converter(current[final_key])
+
+    def get_new_data(self, input_data: dict, new_schema: dict, changes: dict) -> dict:
+        transformed = self.apply_changes_to_data(input_data, changes)
 
         properties: dict[str, Any] = new_schema["properties"]
         required_fields = set(new_schema.get("required", []))
 
-        transformed: dict[str, Any] = {}
+        final_transformed: dict[str, Any] = {}
         for prop_name, prop_def in properties.items():
-            value = input_data.get(prop_name, None)
+            value = transformed.get(prop_name, None)
             t = prop_def["type"]
             types = t if isinstance(t, list) else [t]
             if value is None:
@@ -303,17 +471,17 @@ class VaryJSONSchemaGenerator(SampleGenerator):
                 coerced = self.coerce_value(value, types)
             if prop_name in required_fields and coerced is None:
                 raise ValueError(f"Missing required field: {prop_name}")
-            transformed[prop_name] = coerced
+            final_transformed[prop_name] = coerced
 
         compiled_schema = fastjsonschema.compile(
             new_schema,
             detailed_exceptions=False,
         )
-        compiled_schema(transformed)
+        compiled_schema(final_transformed)
 
-        if not transformed or all(v is None for v in transformed.values()):
+        if not final_transformed or all(v is None for v in final_transformed.values()):
             raise ValueError("Transformed data has only null values")
-        return transformed
+        return final_transformed
 
     def json_schema_type_to_pydantic_type(
         self, json_type: Union[str, list]

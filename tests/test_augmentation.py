@@ -248,6 +248,8 @@ class TestVaryJSONSchemaGenerator:
         }
 
         new_schema, changed = generator.change_schema_key_types(source_schema)
+        expected_changes = {"count": "number_to_string", "score": "number_to_string"}
+        assert changed == expected_changes
 
         expected_schema = {
             "type": "object",
@@ -257,7 +259,72 @@ class TestVaryJSONSchemaGenerator:
                 "name": {"type": ["string", "null"]},
             },
         }
-        expected_changes = {"count": "number_to_string", "score": "number_to_string"}
+
+        assert new_schema == expected_schema
+
+    def test_change_schema_key_types_nested_deterministic(self):
+        generator = VaryJSONSchemaGenerator(
+            stringify_number_proba=0.9, rng=random.Random(42)
+        )
+        generator.setup()
+
+        source_schema = {
+            "type": "object",
+            "properties": {
+                "count": {"type": ["integer", "null"]},
+                "subobject": {
+                    "type": "object",
+                    "properties": {
+                        "nested_number": {"type": ["number", "null"]},
+                        "nested_int": {"type": ["integer", "null"]},
+                        "nested_string": {"type": ["string", "null"]},
+                    },
+                },
+                "subarray": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "array_number": {"type": ["number", "null"]},
+                            "array_string": {"type": ["string", "null"]},
+                        },
+                    },
+                },
+            },
+        }
+
+        new_schema, changed = generator.change_schema_key_types(source_schema)
+
+        expected_schema = {
+            "type": "object",
+            "properties": {
+                "count": {"type": ["string", "null"]},
+                "subobject": {
+                    "type": "object",
+                    "properties": {
+                        "nested_number": {"type": ["string", "null"]},
+                        "nested_int": {"type": ["string", "null"]},
+                        "nested_string": {"type": ["string", "null"]},
+                    },
+                },
+                "subarray": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "array_number": {"type": ["string", "null"]},
+                            "array_string": {"type": ["string", "null"]},
+                        },
+                    },
+                },
+            },
+        }
+        expected_changes = {
+            "count": "number_to_string",
+            "subobject.nested_number": "number_to_string",
+            "subobject.nested_int": "number_to_string",
+            "subarray[].array_number": "number_to_string",
+        }
 
         assert new_schema == expected_schema
         assert changed == expected_changes
@@ -456,7 +523,10 @@ class TestVaryJSONSchemaGenerator:
 
     def test_full_generate_cycle_deterministic(self):
         generator = VaryJSONSchemaGenerator(
-            drop_field_proba=0.2, stringify_number_proba=1, rng=random.Random(41)
+            drop_field_proba=0.2,
+            stringify_number_proba=1,
+            add_field_proba=1.0,
+            rng=random.Random(41),
         )
         generator.setup()
         generator.num_fields_to_add = 1
@@ -488,16 +558,16 @@ class TestVaryJSONSchemaGenerator:
 
         assert changes == {
             "dropped_fields": ["age"],
-            "added_fields": ["provide"],
+            "added_fields": [("decision", "string")],
             "changed_types": {"score": "number_to_string"},
         }
 
-        assert new_data == {"name": "Alice", "provide": None, "score": "95.5"}
+        assert new_data == {"name": "Alice", "decision": None, "score": "95.5"}
         assert new_schema == {
             "type": ["object", "null"],
             "properties": {
                 "name": {"type": ["string", "null"]},
-                "provide": {"type": ["number", "null"]},
+                "decision": {"type": ["string", "null"]},
                 "score": {"type": ["string", "null"]},
             },
         }
@@ -509,6 +579,7 @@ class TestVaryJSONSchemaGenerator:
         generator = VaryJSONSchemaGenerator(
             drop_field_proba=0.0,
             stringify_number_proba=0.0,
+            add_field_proba=1.0,
             rng=random.Random(42),
         )
         generator.setup()
