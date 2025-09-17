@@ -506,6 +506,10 @@ class VaryJSONSchemaGenerator(SampleGenerator):
             return type_map.get(json_type, Any)
 
     def coerce_value(self, value: Any, types: list[str]) -> Any:
+        if "object" in types and isinstance(value, dict):
+            return value
+        if "array" in types and isinstance(value, list):
+            return value
         if "string" in types:
             return str(value)
         if "integer" in types:
