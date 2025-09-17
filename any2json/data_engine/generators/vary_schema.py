@@ -15,6 +15,86 @@ from any2json.data_engine.generators.base import SampleGenerator
 from any2json.schema_utils import to_supported_json_schema
 
 
+def get_schema_keys_to_drop_recursive(
+    rng: random.Random,
+    drop_field_proba: float,
+    current_schema: dict,
+    current_path: str = "",
+) -> list[str]:
+    if not isinstance(current_schema, dict):
+        return []
+
+    dropped_paths = []
+
+    if "properties" in current_schema:
+        keys_to_drop = [
+            key
+            for key in list(current_schema["properties"].keys())
+            if rng.random() < drop_field_proba
+        ]
+
+        for key in current_schema["properties"].keys():
+            if key in keys_to_drop:
+                path = f"{current_path}.{key}" if current_path else key
+                dropped_paths.append(path)
+            else:
+                child_dropped_paths = get_schema_keys_to_drop_recursive(
+                    rng,
+                    drop_field_proba,
+                    current_schema["properties"][key],
+                    f"{current_path}.{key}" if current_path else key,
+                )
+                dropped_paths.extend(child_dropped_paths)
+
+    if "items" in current_schema:
+        items_dropped_paths = get_schema_keys_to_drop_recursive(
+            rng,
+            drop_field_proba,
+            current_schema["items"],
+            f"{current_path}[]",
+        )
+        dropped_paths.extend(items_dropped_paths)
+
+    return dropped_paths
+
+
+def drop_schema_keys_recursive(
+    current_schema: dict,
+    dropped_paths: list[str],
+    current_path: str = "",
+) -> dict:
+    if not isinstance(current_schema, dict):
+        return current_schema
+
+    result_schema = deepcopy(current_schema)
+
+    if "properties" in result_schema:
+        this_path_keys = [
+            key
+            for key in result_schema["properties"].keys()
+            if f"{current_path}.{key}" in dropped_paths or key in dropped_paths
+        ]
+
+        for key in this_path_keys:
+            del result_schema["properties"][key]
+
+        for key in list(result_schema["properties"].keys()):
+            result_schema["properties"][key] = drop_schema_keys_recursive(
+                result_schema["properties"][key],
+                dropped_paths,
+                f"{current_path}.{key}" if current_path else key,
+            )
+
+    if "items" in result_schema:
+        result_schema["items"] = drop_schema_keys_recursive(
+            result_schema["items"],
+            dropped_paths,
+            f"{current_path}[]",
+        )
+
+    return result_schema
+
+
 class VaryJSONSchemaGenerator(SampleGenerator):
     """
     Generate synthetic JSON schemas and matching JSON chunks by randomly varying a given JSON schema.
@@ -58,24 +138,20 @@ class VaryJSONSchemaGenerator(SampleGenerator):
                     changed_types[key] = "number_to_string"
         return new_schema, changed_types
 
-    def drop_schema_keys(self, schema: dict) -> tuple[dict, dict]:
+    def drop_schema_keys_recursive(self, schema: dict) -> tuple[dict, list[str]]:
         """
-        Drops random keys from the schema.
-
-        In the output, the dropped keys will be missing since they are no longer present in the schema even though they were present in the source data.
+        Drops random keys from the schema recursively at any level.
+        Returns xpath-style indicators of dropped keys for corresponding JSON data.
         """
         new_schema = deepcopy(schema)
 
-        keys_to_drop = [
-            key
-            for key in list(new_schema["properties"].keys())
-            if self.rng.random() < self.drop_field_proba
-        ]
+        dropped_paths = get_schema_keys_to_drop_recursive(
+            self.rng, self.drop_field_proba, new_schema
+        )
 
-        for key in keys_to_drop:
-            if "properties" in new_schema and key in new_schema["properties"]:
-                del new_schema["properties"][key]
-        return new_schema, keys_to_drop
+        new_schema = drop_schema_keys_recursive(new_schema, dropped_paths)
+
+        return new_schema, dropped_paths
 
     def add_schema_keys(self, schema: dict) -> tuple[dict, list[str]]:
         """
@@ -98,7 +174,7 @@ class VaryJSONSchemaGenerator(SampleGenerator):
     def get_new_schema(self, input_schema: dict) -> tuple[dict, dict]:
         new_schema = deepcopy(input_schema)
 
-        new_schema, keys_to_drop = self.drop_schema_keys(new_schema)
+        new_schema, keys_to_drop = self.drop_schema_keys_recursive(new_schema)
 
         new_schema, changed_types = self.change_schema_key_types(new_schema)
 

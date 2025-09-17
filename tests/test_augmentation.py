@@ -21,7 +21,9 @@ class TestVaryJSONSchemaGenerator:
             },
         }
 
-        new_schema, dropped = generator.drop_schema_keys(source_schema)
+        new_schema, dropped = generator.drop_schema_keys_recursive(source_schema)
+        expected_dropped = ["name"]
+        assert set(dropped) == set(expected_dropped)
 
         expected_schema = {
             "type": "object",
@@ -30,10 +32,88 @@ class TestVaryJSONSchemaGenerator:
                 "city": {"type": ["string", "null"]},
             },
         }
-        expected_dropped = ["name"]
 
         assert new_schema == expected_schema
+
+    def test_drop_fields_nested_deterministic(self):
+        generator = VaryJSONSchemaGenerator(
+            drop_field_proba=0.4,
+            rng=random.Random(35),
+        )
+        generator.setup()
+
+        source_schema = {
+            "type": "object",
+            "properties": {
+                "prop1": {"type": ["string", "null"]},
+                "subobject": {
+                    "type": "object",
+                    "properties": {
+                        "prop2": {"type": ["string", "null"]},
+                        "prop3": {"type": ["integer", "null"]},
+                        "prop4": {
+                            "type": "subsubobject",
+                            "properties": {
+                                "prop8": {"type": ["string", "null"]},
+                                "prop9": {"type": ["integer", "null"]},
+                                "prop10": {"type": ["string", "null"]},
+                            },
+                        },
+                    },
+                },
+                "subarray": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "prop5": {"type": ["string", "null"]},
+                            "prop6": {"type": ["integer", "null"]},
+                            "prop7": {"type": ["string", "null"]},
+                        },
+                    },
+                },
+            },
+        }
+
+        new_schema, dropped = generator.drop_schema_keys_recursive(source_schema)
+        expected_dropped = [
+            "subarray[].prop5",
+            "subarray[].prop6",
+            "subobject.prop2",
+        ]
         assert set(dropped) == set(expected_dropped)
+
+        expected_schema = {
+            "type": "object",
+            "properties": {
+                "prop1": {"type": ["string", "null"]},
+                "subobject": {
+                    "type": "object",
+                    "properties": {
+                        "prop3": {"type": ["integer", "null"]},
+                        "prop4": {
+                            "type": "subsubobject",
+                            "properties": {
+                                "prop8": {"type": ["string", "null"]},
+                                "prop9": {"type": ["integer", "null"]},
+                                "prop10": {"type": ["string", "null"]},
+                            },
+                        },
+                    },
+                },
+                "subarray": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "prop7": {"type": ["string", "null"]},
+                        },
+                    },
+                },
+            },
+        }
+
+        assert new_schema == expected_schema
 
     def test_add_fields_deterministic(self):
         generator = VaryJSONSchemaGenerator(rng=random.Random(42))

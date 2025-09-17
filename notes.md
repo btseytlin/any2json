@@ -289,6 +289,7 @@ Ideas:
 2. Retrain smollm with chat template, high augmentations and train for long
 3. Benchmark against gemili flash lite
 4. Train gemma
+5. Put and save input data types to meta when benchmarking so I can analyze errors by format 
 
 ### 
 
@@ -301,4 +302,9 @@ python any2json/training/submit_runpod.py --name any2json-benchmark-a40  --scrip
 Must integrate this!
 
 https://pypi.org/project/genson/
+
+
+Finally runpod benchmarking worked
+
+Next step: run a gemma 270m so training run on runpod for 10 epochs
 
