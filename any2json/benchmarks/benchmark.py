@@ -87,6 +87,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
     schema_error = []
     all_inference_ms = []
     all_diff_sizes = []
+    all_diff_sizes_chars = []
     for i, result in enumerate(results):
         details = {}
 
@@ -133,17 +134,24 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         if isinstance(correct_answer, str):
             correct_answer = json.loads(correct_answer)
 
-        diff_size = len(
+        diff_parts = list(
             difflib.unified_diff(
-                json_dumps_minified(correct_answer).splitlines(keepends=True),
-                json_dumps_minified(answer).splitlines(keepends=True),
+                json.dumps(correct_answer, indent=1).splitlines(keepends=True),
+                json.dumps(answer, indent=1).splitlines(keepends=True),
                 fromfile="Correct Answer",
                 tofile="Answer",
                 lineterm="",
             )
         )
-        all_diff_sizes.append(diff_size)
-        details["diff_size"] = diff_size
+        diff_size_lines = len([part for part in diff_parts[3:] if part.startswith("-")])
+        all_diff_sizes.append(diff_size_lines)
+
+        diff_size_chars = sum(
+            [len(part[1:]) for part in diff_parts[3:] if part.startswith("-")]
+        )
+        all_diff_sizes_chars.append(diff_size_chars)
+        details["diff_size_lines"] = diff_size_lines
+        details["diff_size_chars"] = diff_size_chars
 
         if answer == correct_answer:
             correct.append(i)
@@ -162,8 +170,8 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         "percentage_json_errors": round(len(json_error) / len(results), 3),
         "percentage_correct": round(len(correct) / len(results), 3),
         "percentage_schema_errors": round(len(schema_error) / len(results), 3),
-        "mean_diff_size": round(np.mean(all_diff_sizes).item(), 3),
-        "median_diff_size": round(np.median(all_diff_sizes).item(), 3),
+        "mean_diff_size_lines": round(np.mean(all_diff_sizes).item(), 3),
+        "mean_diff_size_chars": round(np.mean(all_diff_sizes_chars).item(), 3),
         "mean_inference_ms": round(np.mean(all_inference_ms).item(), 3),
         "median_inference_ms": round(np.median(all_inference_ms).item(), 3),
     }

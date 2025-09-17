@@ -42,6 +42,7 @@ dependencies = [
     "wandb>=0.17.0",
     "runpod>=1.7.13",
     "unsloth>=2025.8.6 ; sys_platform == 'linux'",
+    "plotly>=6.3.0",
 ]
 
 [tool.setuptools.packages.find]

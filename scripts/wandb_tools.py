@@ -40,6 +40,20 @@ def download_model(model_id: str, output_root: str):
 
 
 @cli.command()
+@click.argument("artifact-id", type=str)
+@click.option(
+    "--output-root",
+    default="artifacts",
+    type=click.Path(dir_okay=True, file_okay=False),
+)
+def download_artifact(artifact_id: str, output_root: str):
+    artifact = WANDB_RUN.use_artifact(artifact_id)
+    output_dir = os.path.join(output_root, artifact_id.split("/")[-1])
+    artifact_dir = artifact.download(output_dir)
+    print(f"Artifact downloaded to {artifact_dir}")
+
+
+@cli.command()
 @click.argument(
     "directory", type=click.Path(exists=True, file_okay=False, dir_okay=True)
 )

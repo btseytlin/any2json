@@ -2,9 +2,12 @@
 set -euo pipefail
 
 cd /code/any2json && source .venv/bin/activate
-
 git fetch --all && git reset --hard origin/main
-echo "Code updated"
+
+uv sync && uv pip install -e . && uv -q pip install vllm --torch-backend=auto
+
+
+echo "Code and dependencies updated"
 
 echo "Downloading checkpoint"
 export WANDB_RUN_ID=$(python scripts/wandb_tools.py --quiet get-run-id)

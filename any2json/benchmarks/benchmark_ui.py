@@ -96,7 +96,7 @@ def show_info(results_per_model: dict[str, dict]):
             st.json(info)
 
 
-def show_predictions(results_per_model: dict[str, dict]):
+def to_predictions_df(results_per_model: dict[str, dict]):
     predictions_records = []
     for model_name, benchmark_results in results_per_model.items():
         predictions = benchmark_results["results"]
@@ -117,6 +117,11 @@ def show_predictions(results_per_model: dict[str, dict]):
             )
 
     df = pd.DataFrame(predictions_records)
+    return df
+
+
+def show_predictions(results_per_model: dict[str, dict]):
+    df = to_predictions_df(results_per_model)
     st.markdown("### Predictions")
     st.dataframe(df)
 
@@ -263,6 +268,91 @@ def show_prediction_explorer(results_per_model: dict[str, dict]):
         st.divider()
 
 
+def show_error_analysis(results_per_model: dict[str, dict]):
+    st.markdown("### Error Analysis")
+
+    st.markdown(f"#### Input data len vs error rates")
+
+    plot_df = to_predictions_df(results_per_model)
+    print(plot_df.head())
+    plot_df["error_type"] = plot_df.metrics_details.apply(
+        lambda x: x.get("error_type")
+        or ("wrong_content" if x.get("correct") is False else None)
+    )
+    plot_df = plot_df[plot_df.error_type.notna()]
+    plot_df["input_data_len"] = plot_df["input_data"].apply(len)
+    # bucket input lengths
+    plot_df["input_data_len_bucket"] = pd.cut(
+        plot_df["input_data_len"],
+        bins=range(0, plot_df["input_data_len"].max() + 1, 500),
+    )
+    plot_df = (
+        plot_df.groupby(["model_name", "input_data_len_bucket", "error_type"])
+        .size()
+        .reset_index(name="count")
+    )
+    plot_df["input_data_len_bucket"] = plot_df["input_data_len_bucket"].astype(str)
+    plot_df["model_name"] = plot_df["model_name"].astype(str)
+    fig = px.bar(
+        plot_df,
+        x="input_data_len_bucket",
+        y="count",
+        color="error_type",
+        barmode="stack",
+        facet_col="model_name",
+        width=600,
+        height=400,
+    )
+    st.plotly_chart(fig)
+
+    st.markdown(f"#### Input data len vs diff chars")
+
+    df = to_predictions_df(results_per_model)
+
+    plot_df = df[df.metrics_details.apply(lambda x: x.get("diff_size_chars")).notna()]
+    plot_df["input_data_len"] = plot_df["input_data"].apply(len)
+    plot_df["input_data_len_bucket"] = pd.cut(
+        plot_df["input_data_len"],
+        bins=range(0, plot_df["input_data_len"].max() + 1, 500),
+    )
+    plot_df["error_chars"] = plot_df["metrics_details"].apply(
+        lambda x: float(x.get("diff_size_chars"))
+    )
+    plot_df = (
+        plot_df.groupby(["model_name", "input_data_len_bucket"])["error_chars"]
+        .mean()
+        .reset_index(name="mean_error_chars")
+    )
+    plot_df["input_data_len_bucket"] = plot_df["input_data_len_bucket"].astype(str)
+
+    plot_df["model_name"] = plot_df["model_name"].astype(str)
+    fig = px.bar(
+        plot_df,
+        x="input_data_len_bucket",
+        y="mean_error_chars",
+        color="model_name",
+        barmode="group",
+        width=600,
+        height=400,
+    )
+    st.plotly_chart(fig)
+
+    st.markdown(f"#### Input data len vs inference time")
+
+    plot_df = df[df.meta.apply(lambda x: x.get("inference_ms")).notna()]
+    plot_df["input_data_len"] = plot_df["input_data"].apply(len)
+    plot_df["inference_ms"] = plot_df["meta"].apply(lambda x: x.get("inference_ms"))
+    fig = px.scatter(
+        plot_df,
+        x="input_data_len",
+        y="inference_ms",
+        color="model_name",
+        width=600,
+        height=400,
+    )
+    st.plotly_chart(fig)
+
+
 def visualize_results(results_dir: str, results_per_model: dict[str, dict]):
     st.set_page_config(page_title="Any2JSON Inference", page_icon="🔄", layout="wide")
 
@@ -277,6 +367,8 @@ def visualize_results(results_dir: str, results_per_model: dict[str, dict]):
     show_predictions(results_per_model)
 
     show_prediction_explorer(results_per_model)
+
+    show_error_analysis(results_per_model)
 
 
 def main():
