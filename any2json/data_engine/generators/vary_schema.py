@@ -95,6 +95,92 @@ def drop_schema_keys_recursive(
     return result_schema
 
 
+def get_schema_keys_to_add_recursive(
+    rng: random.Random,
+    fake: Faker,
+    add_field_proba: float,
+    num_fields_to_add: int,
+    current_schema: dict,
+    current_path: str = "",
+) -> list[tuple[str, dict]]:
+    if not isinstance(current_schema, dict):
+        return []
+
+    keys_to_add = []
+
+    if "properties" in current_schema:
+        if rng.random() < add_field_proba:
+            for _ in range(rng.randint(1, num_fields_to_add)):
+                key = rng.choice(fake.words())
+                type_name = rng.choice(["string", "integer", "number", "boolean"])
+                field_def = {"type": [type_name, "null"]}
+                path = f"{current_path}.{key}" if current_path else key
+                keys_to_add.append((path, field_def))
+
+        for key in current_schema["properties"].keys():
+            child_keys_to_add = get_schema_keys_to_add_recursive(
+                rng,
+                fake,
+                add_field_proba,
+                num_fields_to_add,
+                current_schema["properties"][key],
+                f"{current_path}.{key}" if current_path else key,
+            )
+            keys_to_add.extend(child_keys_to_add)
+
+    if "items" in current_schema:
+        items_keys_to_add = get_schema_keys_to_add_recursive(
+            rng,
+            fake,
+            add_field_proba,
+            num_fields_to_add,
+            current_schema["items"],
+            f"{current_path}[]",
+        )
+        keys_to_add.extend(items_keys_to_add)
+
+    return keys_to_add
+
+
+def add_schema_keys_recursive(
+    current_schema: dict,
+    keys_to_add: list[tuple[str, dict]],
+    current_path: str = "",
+) -> dict:
+    if not isinstance(current_schema, dict):
+        return current_schema
+
+    result_schema = deepcopy(current_schema)
+
+    if "properties" in result_schema:
+        for path, field_def in keys_to_add:
+            if current_path == "":
+                if "." not in path and "[]" not in path:
+                    result_schema["properties"][path] = field_def
+            else:
+                expected_prefix = f"{current_path}."
+                if path.startswith(expected_prefix):
+                    remaining_path = path[len(expected_prefix) :]
+                    if "." not in remaining_path and "[]" not in remaining_path:
+                        result_schema["properties"][remaining_path] = field_def
+
+        for key in list(result_schema["properties"].keys()):
+            result_schema["properties"][key] = add_schema_keys_recursive(
+                result_schema["properties"][key],
+                keys_to_add,
+                f"{current_path}.{key}" if current_path else key,
+            )
+
+    if "items" in result_schema:
+        result_schema["items"] = add_schema_keys_recursive(
+            result_schema["items"],
+            keys_to_add,
+            f"{current_path}[]",
+        )
+
+    return result_schema
+
+
 class VaryJSONSchemaGenerator(SampleGenerator):
     """
     Generate synthetic JSON schemas and matching JSON chunks by randomly varying a given JSON schema.
@@ -104,11 +190,13 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         self,
         drop_field_proba: float = 0.2,
         stringify_number_proba: float = 0.3,
+        add_field_proba: float = 0.3,
         num_fields_to_add: int | None = None,
         rng: random.Random | None = None,
     ):
         self.drop_field_proba = drop_field_proba
         self.stringify_number_proba = stringify_number_proba
+        self.add_field_proba = add_field_proba
         self.num_fields_to_add = num_fields_to_add
         self.rng = rng or random.Random()
 
@@ -121,6 +209,7 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         return {
             "drop_field_proba": self.drop_field_proba,
             "stringify_number_proba": self.stringify_number_proba,
+            "add_field_proba": self.add_field_proba,
             "num_fields_to_add": self.num_fields_to_add,
         }
 
@@ -153,23 +242,27 @@ class VaryJSONSchemaGenerator(SampleGenerator):
 
         return new_schema, dropped_paths
 
-    def add_schema_keys(self, schema: dict) -> tuple[dict, list[str]]:
+    def add_schema_keys_recursive(self, schema: dict) -> tuple[dict, list[str]]:
         """
-        Adds new random keys to the schema.
-
-        In the output, the expected values for the new keys will be null since they are missing in the source data.
+        Adds new random keys to the schema recursively at any level.
+        Returns xpath-style indicators of added keys for corresponding JSON data.
         """
         new_schema = deepcopy(schema)
 
-        keys_to_add = []
+        keys_to_add_with_defs = get_schema_keys_to_add_recursive(
+            self.rng,
+            self.fake,
+            self.add_field_proba,
+            self.num_fields_to_add,
+            new_schema,
+        )
 
-        for _ in range(self.num_fields_to_add):
-            key = self.rng.choice(self.fake.words())
-            type = self.rng.choice(["string", "integer", "number", "boolean"])
-            new_schema["properties"][key] = {"type": [type, "null"]}
-            keys_to_add.append(key)
+        new_schema = add_schema_keys_recursive(new_schema, keys_to_add_with_defs)
+        added_paths_and_types = [
+            (path, field_def["type"][0]) for path, field_def in keys_to_add_with_defs
+        ]
 
-        return new_schema, keys_to_add
+        return new_schema, added_paths_and_types
 
     def get_new_schema(self, input_schema: dict) -> tuple[dict, dict]:
         new_schema = deepcopy(input_schema)
@@ -178,7 +271,7 @@ class VaryJSONSchemaGenerator(SampleGenerator):
 
         new_schema, changed_types = self.change_schema_key_types(new_schema)
 
-        new_schema, keys_to_add = self.add_schema_keys(new_schema)
+        new_schema, keys_to_add = self.add_schema_keys_recursive(new_schema)
 
         changes = {}
         if keys_to_drop:

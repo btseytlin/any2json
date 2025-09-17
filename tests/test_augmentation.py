@@ -125,19 +125,112 @@ class TestVaryJSONSchemaGenerator:
             "properties": {"existing": {"type": ["string", "null"]}},
         }
 
-        new_schema, added = generator.add_schema_keys(source_schema)
+        new_schema, added = generator.add_schema_keys_recursive(source_schema)
 
         assert len(new_schema["properties"]) == len(source_schema["properties"]) + 2
         assert len(added) == 2
         assert "existing" in new_schema["properties"]
 
-        for field_name in added:
+        for field_name, type_name in added:
             field_def = new_schema["properties"][field_name]
+            assert field_def["type"][0] == type_name
             assert isinstance(field_def["type"], list)
             assert len(field_def["type"]) == 2
             assert "null" in field_def["type"]
             non_null_type = [t for t in field_def["type"] if t != "null"][0]
             assert non_null_type in ["string", "integer", "number", "boolean"]
+
+    def test_add_fields_deterministic_nested(self):
+        generator = VaryJSONSchemaGenerator(
+            add_field_proba=0.8,
+            rng=random.Random(35),
+        )
+        generator.setup()
+        generator.num_fields_to_add = 2
+
+        source_schema = {
+            "type": "object",
+            "properties": {
+                "prop1": {"type": ["string", "null"]},
+                "subobject": {
+                    "type": "object",
+                    "properties": {
+                        "prop2": {"type": ["string", "null"]},
+                        "prop3": {"type": ["integer", "null"]},
+                        "prop4": {
+                            "type": "object",
+                            "properties": {
+                                "prop8": {"type": ["string", "null"]},
+                                "prop9": {"type": ["integer", "null"]},
+                                "prop10": {"type": ["string", "null"]},
+                            },
+                        },
+                    },
+                },
+                "subarray": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "prop5": {"type": ["string", "null"]},
+                            "prop6": {"type": ["integer", "null"]},
+                            "prop7": {"type": ["string", "null"]},
+                        },
+                    },
+                },
+            },
+        }
+
+        new_schema, added = generator.add_schema_keys_recursive(source_schema)
+        expected_added = [
+            ("law", "number"),
+            ("among", "number"),
+            ("subobject.day", "number"),
+            ("subobject.happen", "string"),
+            ("subobject.prop4.research", "boolean"),
+            ("subarray[].stuff", "boolean"),
+        ]
+        assert set(added) == set(expected_added)
+
+        expected_schema = {
+            "type": "object",
+            "properties": {
+                "prop1": {"type": ["string", "null"]},
+                "law": {"type": ["number", "null"]},
+                "among": {"type": ["number", "null"]},
+                "subobject": {
+                    "type": "object",
+                    "properties": {
+                        "day": {"type": ["number", "null"]},
+                        "happen": {"type": ["string", "null"]},
+                        "prop2": {"type": ["string", "null"]},
+                        "prop3": {"type": ["integer", "null"]},
+                        "prop4": {
+                            "type": "object",
+                            "properties": {
+                                "research": {"type": ["boolean", "null"]},
+                                "prop8": {"type": ["string", "null"]},
+                                "prop9": {"type": ["integer", "null"]},
+                                "prop10": {"type": ["string", "null"]},
+                            },
+                        },
+                    },
+                },
+                "subarray": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "stuff": {"type": ["boolean", "null"]},
+                            "prop5": {"type": ["string", "null"]},
+                            "prop6": {"type": ["integer", "null"]},
+                            "prop7": {"type": ["string", "null"]},
+                        },
+                    },
+                },
+            },
+        }
+        assert new_schema == expected_schema
 
     def test_change_types_deterministic(self):
         generator = VaryJSONSchemaGenerator(
@@ -476,12 +569,16 @@ class TestVaryJSONSchemaGenerator:
 
     def test_get_state_returns_exact_config(self):
         generator = VaryJSONSchemaGenerator(
-            drop_field_proba=0.3, stringify_number_proba=0.4, num_fields_to_add=2
+            drop_field_proba=0.3,
+            stringify_number_proba=0.4,
+            add_field_proba=0.5,
+            num_fields_to_add=2,
         )
 
         expected_state = {
             "drop_field_proba": 0.3,
             "stringify_number_proba": 0.4,
+            "add_field_proba": 0.5,
             "num_fields_to_add": 2,
         }
 
