@@ -1,23 +1,30 @@
+import logging
 import os
 import click
 from dotenv import load_dotenv
 import wandb
 
-from any2json.utils import configure_loggers
+from any2json.utils import configure_loggers, logger
 
 WANDB_RUN = None
 
 
 @click.group()
 @click.option("--run-id", help="Existing wandb run ID to resume", envvar="WANDB_RUN_ID")
-def cli(run_id: str):
+@click.option("--quiet", is_flag=True, help="Quiet mode")
+def cli(run_id: str, quiet: bool):
+    if quiet:
+        wandb_logger = logging.getLogger("wandb")
+        wandb_logger.setLevel(logging.ERROR)
+        os.environ["WANDB_SILENT"] = "true"
+
     global WANDB_RUN
     if run_id:
         WANDB_RUN = wandb.init(id=run_id, resume="allow")
-        print(f"Resumed wandb run: {run_id}")
+        logger.debug(f"Resumed wandb run: {run_id}")
     else:
         WANDB_RUN = wandb.init()
-        print(f"Started new wandb run: {WANDB_RUN.id}")
+        logger.debug(f"Started new wandb run: {WANDB_RUN.id}")
 
 
 @cli.command()
@@ -66,12 +73,12 @@ def upload_directory(
 
     artifact.add_dir(directory)
     WANDB_RUN.log_artifact(artifact)
-    print(f"Directory {directory} uploaded as artifact {name}")
+    logger.info(f"Directory {directory} uploaded as artifact {name}")
 
 
 @cli.command()
 def get_run_id():
-    print(WANDB_RUN.id)
+    click.echo(WANDB_RUN.id)
 
 
 if __name__ == "__main__":
