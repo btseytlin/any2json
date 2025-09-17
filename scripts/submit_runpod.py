@@ -86,6 +86,10 @@ def build_pod_kwargs(pcfg: PodConfig) -> dict[str, Any]:
 @click.option("--command", default=None, type=str, help="Command to run on the pod")
 @click.option("--script", type=click.Path(exists=True, dir_okay=False), default=None)
 @click.option("--auto-terminate", is_flag=True)
+@click.option("--keep-container-alive", is_flag=True)
+@click.option(
+    "--max-runtime", default="24h", type=str, help="Max runtime as a wait string"
+)
 def submit(
     name: str,
     template_id: str,
@@ -104,6 +108,8 @@ def submit(
     image: str,
     script: str | None,
     auto_terminate: bool,
+    keep_container_alive: bool,
+    max_runtime: str | None,
 ):
     path = find_dotenv(usecwd=True)
     load_dotenv(path)
@@ -159,14 +165,23 @@ def submit(
         script_text = Path(script).read_text()
         encoded = base64.b64encode(script_text.encode()).decode()
         cmd = (
-            f'echo \\"{encoded}\\" | base64 -d > /workspace/run.sh && '
-            f"chmod +x /workspace/run.sh && /workspace/run.sh"
+            f'echo \\"{encoded}\\" | base64 -d > /run.sh && '
+            f"chmod +x /run.sh && /run.sh"
         ).strip()
     elif command:
         cmd = command
 
-    if auto_terminate and cmd:
-        cmd = f"{cmd} && sleep 10m && runpodctl stop pod $RUNPOD_POD_ID"
+    if not cmd:
+        raise ValueError("No command provided")
+
+    if keep_container_alive:
+        if max_runtime:
+            cmd = f"{cmd}; sleep {max_runtime}'"
+        else:
+            cmd = f"{cmd}; exec tail -f /dev/null"
+
+    if auto_terminate:
+        cmd = f"{cmd}; sleep 10m && runpodctl stop pod $RUNPOD_POD_ID"
 
     if cmd:
         cmd = f"bash -lc '{cmd}'"
