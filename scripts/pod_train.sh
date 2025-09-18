@@ -21,6 +21,7 @@ export NUM_EPOCHS=5
 python /code/any2json/any2json/training/train.py train \
     --model-name=google/gemma-3-270m \
     --max-sequence-length 2560 \
+    --group-by-length True --lengths-column-name length \
     --learning_rate=5e-5 --warmup-ratio 0.03 --weight-decay 0.01 \
     --eval-strategy steps  --report_to wandb --save-strategy steps --save-total-limit 3 \
     --eval-steps 4000 --save-steps 4000 \
