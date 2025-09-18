@@ -196,7 +196,7 @@ class Augmentor:
                 except Exception as e:
                     logger.debug(f"Error augmenting example: {e}")
         logger.debug(
-            f"Augmented example.\n\nInput_data: {repr(input_data)}\nSchema: {repr(schema)}\nOutput: {repr(output)}"
+            f"Augmented example.\nInput_data: {repr(input_data)}\nSchema: {repr(schema)}\nOutput: {repr(output)}"
         )
         return input_data, schema, output
 

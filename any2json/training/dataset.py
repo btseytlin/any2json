@@ -1,3 +1,4 @@
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Callable
 import random
@@ -34,7 +35,7 @@ class AugmentTokenizeDataset(TorchDataset):
             self.tokenizer, **self.tokenization_kwargs
         )
 
-        self.index_access_counter = {idx: 0 for idx in range(len(dataset))}
+        self.index_access_counter = Counter()
 
     @classmethod
     def from_raw_dataset(
@@ -107,5 +108,5 @@ class AugmentTokenizeDataset(TorchDataset):
         return {
             "input_ids": tokenized["input_ids"][0],
             "labels": tokenized["labels"][0],
-            "length": len(tokenized["input_ids"][0]),
+            "length": self.lengths[idx],
         }
