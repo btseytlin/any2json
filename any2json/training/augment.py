@@ -35,7 +35,9 @@ def aug_negative_sample(
         random_schema = random_row["schema"]
 
         try:
-            fastjsonschema.validate(json.loads(random_schema), json.loads(output))
+            fastjsonschema.validate(
+                json.loads(random_schema), json.loads(output), detailed_exceptions=False
+            )
             indices.remove(random_idx)
         except Exception as e:
             # Output does not match random schema, so we can use it as a negative sample
