@@ -81,14 +81,16 @@ def build_pod_kwargs(pcfg: PodConfig) -> dict[str, Any]:
 @click.option("--start-ssh", is_flag=True)
 @click.option("--port", "ports", multiple=True, type=str)
 @click.option("--env", "env_pairs", multiple=True, type=str)
-@click.option("--network-volume-id", "network_volume_id", default=None, type=str)
+@click.option(
+    "--network-volume-id", "network_volume_id", default="10ku3w3g4n", type=str
+)
 @click.option("--docker-args", default=None, type=str)
 @click.option("--command", default=None, type=str, help="Command to run on the pod")
 @click.option("--script", type=click.Path(exists=True, dir_okay=False), default=None)
 @click.option("--auto-terminate", is_flag=True)
 @click.option("--keep-container-alive", is_flag=True)
 @click.option(
-    "--max-runtime", default="24h", type=str, help="Max runtime as a wait string"
+    "--max-runtime", default="24h", type=str, help="Max runtime as a sleep time string"
 )
 def submit(
     name: str,
