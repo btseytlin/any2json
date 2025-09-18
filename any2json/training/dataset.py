@@ -19,7 +19,7 @@ class AugmentTokenizeDataset(TorchDataset):
         tokenization_kwargs: dict[str, Any] = {},
         augmentor: Augmentor | None = None,
         seed: int = 42,
-        no_augment_first_k_calls: int = 0,
+        no_augment_first_k_index_accesses: int = 1,
     ):
         self.dataset = dataset
         self.lengths = lengths
@@ -27,7 +27,7 @@ class AugmentTokenizeDataset(TorchDataset):
         self.tokenization_kwargs = tokenization_kwargs
         self.augmentor = augmentor
         self.seed = seed
-        self.no_augment_first_k_calls = no_augment_first_k_calls
+        self.no_augment_first_k_index_accesses = no_augment_first_k_index_accesses
         self.rng = random.Random(seed)
 
         self._tokenize_fn = build_tokenize_fn(
@@ -90,7 +90,7 @@ class AugmentTokenizeDataset(TorchDataset):
 
         if (
             self.augmentor
-            and self.index_access_counter[idx] > self.no_augment_first_k_calls
+            and self.index_access_counter[idx] > self.no_augment_first_k_index_accesses
         ):
             input_data, schema, output = self.augmentor.apply(
                 input_data,
