@@ -217,6 +217,9 @@ def train_test_split_groups(
         logger.debug(f"Current test size: {test_count}")
         logger.debug(f"Current distance: {current_dist}")
 
+        if current_dist == 0:
+            break
+
         if size > current_dist:
             logger.debug(f"Skipping group {g} because it is too large")
             continue
