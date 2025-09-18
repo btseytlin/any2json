@@ -19,6 +19,7 @@ class AugmentTokenizeDataset(TorchDataset):
         tokenization_kwargs: dict[str, Any] = {},
         augmentor: Augmentor | None = None,
         seed: int = 42,
+        no_augment_first_k_calls: int = 0,
     ):
         self.dataset = dataset
         self.lengths = lengths
@@ -26,8 +27,14 @@ class AugmentTokenizeDataset(TorchDataset):
         self.tokenization_kwargs = tokenization_kwargs
         self.augmentor = augmentor
         self.seed = seed
-
+        self.no_augment_first_k_calls = no_augment_first_k_calls
         self.rng = random.Random(seed)
+
+        self._tokenize_fn = build_tokenize_fn(
+            self.tokenizer, **self.tokenization_kwargs
+        )
+
+        self.index_access_counter = {idx: 0 for idx in range(len(dataset))}
 
     @classmethod
     def from_raw_dataset(
@@ -75,12 +82,16 @@ class AugmentTokenizeDataset(TorchDataset):
         return len(self.dataset)
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
-        tokenize_fn = build_tokenize_fn(self.tokenizer, **self.tokenization_kwargs)
         row = self.dataset[idx]
+        self.index_access_counter[idx] += 1
         input_data = row["input_data"]
         schema = row["schema"]
         output = row["output"]
-        if self.augmentor:
+
+        if (
+            self.augmentor
+            and self.index_access_counter[idx] > self.no_augment_first_k_calls
+        ):
             input_data, schema, output = self.augmentor.apply(
                 input_data,
                 schema,
@@ -91,9 +102,9 @@ class AugmentTokenizeDataset(TorchDataset):
             )
 
         batch = {"input_data": [input_data], "schema": [schema], "output": [output]}
-        tokenized = tokenize_fn(batch)
+        tokenized = self._tokenize_fn(batch)
         return {
             "input_ids": tokenized["input_ids"][0],
             "labels": tokenized["labels"][0],
-            "length": self.lengths[int(idx)],
+            "length": self.lengths[idx],
         }
