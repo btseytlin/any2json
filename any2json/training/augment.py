@@ -19,7 +19,7 @@ def aug_negative_sample(
     rng: random.Random,
     dataset: Dataset | None = None,
     idx: int | None = None,
-    max_attempts: int = 10,
+    max_attempts: int = 2,
     **kwargs,
 ) -> tuple[str, str, str]:
     if dataset is None or idx is None or schema == SCHEMA_MISSING_TOKEN:
@@ -37,13 +37,11 @@ def aug_negative_sample(
         try:
             fastjsonschema.validate(json.loads(random_schema), json.loads(output))
             indices.remove(random_idx)
-            continue
         except Exception as e:
-            pass
-
-        new_output = json.dumps(None)
-        return input_data, random_schema, new_output
-    logger.debug(f"Failed to find a negative sample after {max_attempts} attempts")
+            # Output does not match random schema, so we can use it as a negative sample
+            schema = random_schema
+            output = json.dumps(None)
+            break
     return input_data, schema, output
 
 
