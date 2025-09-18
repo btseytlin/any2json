@@ -83,7 +83,6 @@ class AugmentTokenizeDataset(TorchDataset):
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
         row = self.dataset[idx]
-        self.index_access_counter[idx] += 1
         input_data = row["input_data"]
         schema = row["schema"]
         output = row["output"]
@@ -103,6 +102,8 @@ class AugmentTokenizeDataset(TorchDataset):
 
         batch = {"input_data": [input_data], "schema": [schema], "output": [output]}
         tokenized = self._tokenize_fn(batch)
+        self.index_access_counter[idx] += 1
+
         return {
             "input_ids": tokenized["input_ids"][0],
             "labels": tokenized["labels"][0],
