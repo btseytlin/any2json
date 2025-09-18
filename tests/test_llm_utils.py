@@ -25,6 +25,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 def tokenizer():
     tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM2-135M")
     tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
     return tokenizer
 
 
