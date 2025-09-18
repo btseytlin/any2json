@@ -44,7 +44,7 @@ class AugmentTokenizeDataset(TorchDataset):
         tokenizer: AutoTokenizer,
         filter_fn: Callable[[dict[str, Any]], bool],
         tokenization_kwargs: dict[str, Any] = {},
-        dataloader_num_proc: int = 8,
+        dataloader_num_proc: int = 4,
         **kwargs,
     ):
 
@@ -103,6 +103,19 @@ class AugmentTokenizeDataset(TorchDataset):
 
         batch = {"input_data": [input_data], "schema": [schema], "output": [output]}
         tokenized = self._tokenize_fn(batch)
+
+        if len(tokenized["input_ids"][0]) > self.tokenizer.model_max_length:
+            logger.warning(
+                f"Reverting augmentations. Tokenized input length {len(tokenized['input_ids'][0])} is greater than model max length {self.tokenizer.model_max_length}"
+            )
+            row = self.dataset[idx]
+            input_data = row["input_data"]
+            schema = row["schema"]
+            output = row["output"]
+
+            batch = {"input_data": [input_data], "schema": [schema], "output": [output]}
+            tokenized = self._tokenize_fn(batch)
+
         self.index_access_counter[idx] += 1
 
         return {
