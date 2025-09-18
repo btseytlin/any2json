@@ -206,6 +206,11 @@ def prepare_model_and_tokenizer(
         tokenizer = AutoTokenizer.from_pretrained(pcfg.model_name)
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
+    if tokenizer.model_max_length != pcfg.max_sequence_length:
+        tokenizer.model_max_length = pcfg.max_sequence_length
+        logger.warning(
+            f"Model max length {tokenizer.model_max_length} forcefully set to {pcfg.max_sequence_length}"
+        )
     return model, tokenizer
 
 
