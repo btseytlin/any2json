@@ -23,8 +23,10 @@ python /code/any2json/any2json/training/train.py train \
     --max-sequence-length 2560 \
     --group-by-length True --length-column-name length \
     --learning_rate=5e-5 --warmup-ratio 0.03 --weight-decay 0.01 \
+    --label-smoothing-factor 0.1 \
+    --eval-on-start True \
     --eval-strategy steps  --report_to wandb --save-strategy steps --save-total-limit 3 \
-    --eval-steps 4000 --save-steps 4000 \
+    --eval-steps 0.05 --save-steps 0.2 \
     --optim adamw_torch_fused --tf32 True --bf16 \
     --dataloader-num-workers 4 --dataloader-prefetch-factor 1 \
     --gradient-checkpointing \
