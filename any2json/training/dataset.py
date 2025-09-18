@@ -107,5 +107,5 @@ class AugmentTokenizeDataset(TorchDataset):
         return {
             "input_ids": tokenized["input_ids"][0],
             "labels": tokenized["labels"][0],
-            "length": self.lengths[idx],
+            "length": tokenized["input_ids"][0].shape[0],
         }
