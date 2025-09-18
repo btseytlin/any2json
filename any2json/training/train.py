@@ -204,6 +204,9 @@ def prepare_model_and_tokenizer(
         if getattr(args, "gradient_checkpointing", False):
             model.gradient_checkpointing_enable()
         tokenizer = AutoTokenizer.from_pretrained(pcfg.model_name)
+
+    tokenizer.padding_side = "right"
+
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
 

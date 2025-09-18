@@ -150,6 +150,9 @@ class CausalLMDataCollator(DataCollatorWithPadding):
         pad_to_multiple_of: int = 8,
         return_tensors: str = "pt",
     ):
+        assert (
+            tokenizer.padding_side == "right"
+        ), "Tokenizer must have padding_side == 'right' or the collator will not work correctly"
         super().__init__(
             tokenizer=tokenizer,
             padding=padding,
