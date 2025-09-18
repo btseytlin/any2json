@@ -86,6 +86,8 @@ class AugmentTokenizeDataset(TorchDataset):
                 schema,
                 output,
                 self.rng,
+                idx=idx,
+                dataset=self.dataset,
             )
 
         batch = {"input_data": [input_data], "schema": [schema], "output": [output]}

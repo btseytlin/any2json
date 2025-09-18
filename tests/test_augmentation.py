@@ -2,8 +2,10 @@ import json
 import pytest
 import random
 import fastjsonschema
+from datasets import Dataset
 from any2json.data_engine.generators.vary_schema import VaryJSONSchemaGenerator
-from any2json.training.augment import Augmentor
+from any2json.training.augment import Augmentor, aug_negative_sample
+from any2json.training.constants import SCHEMA_MISSING_TOKEN
 from any2json.utils import json_dumps_minified
 
 
@@ -789,3 +791,171 @@ class TestAugmentor:
         next_result = augmentor.apply(input_data, schema, output, random.Random(seed))
 
         assert next_result == result
+
+
+class TestAugNegativeSample:
+    @pytest.fixture
+    def mock_dataset(self):
+        return Dataset.from_list(
+            [
+                {
+                    "schema": json.dumps(
+                        {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "age": {"type": "integer"},
+                            },
+                        }
+                    ),
+                    "output": json.dumps({"name": "Alice", "age": 30}),
+                },
+                {
+                    "schema": json.dumps(
+                        {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "count": {"type": "integer"},
+                            },
+                        }
+                    ),
+                    "output": json.dumps({"title": "Test", "count": 5}),
+                },
+                {
+                    "schema": json.dumps(
+                        {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        }
+                    ),
+                    "output": json.dumps(["item1", "item2"]),
+                },
+            ]
+        )
+
+    def test_returns_unchanged_when_dataset_none(self):
+        rng = random.Random(42)
+        augmentor = Augmentor()
+
+        input_data = "test input"
+        schema = json.dumps({"type": "object"})
+        output = json.dumps({"data": "test"})
+
+        result = aug_negative_sample(
+            input_data, schema, output, augmentor, rng, dataset=None, idx=0
+        )
+
+        assert result == (input_data, schema, output)
+
+    def test_returns_unchanged_when_idx_none(self, mock_dataset):
+        rng = random.Random(42)
+        augmentor = Augmentor()
+
+        input_data = "test input"
+        schema = json.dumps({"type": "object"})
+        output = json.dumps({"data": "test"})
+
+        result = aug_negative_sample(
+            input_data, schema, output, augmentor, rng, dataset=mock_dataset, idx=None
+        )
+
+        assert result == (input_data, schema, output)
+
+    def test_returns_unchanged_when_schema_missing_token(self, mock_dataset):
+        rng = random.Random(42)
+        augmentor = Augmentor()
+
+        input_data = "test input"
+        schema = SCHEMA_MISSING_TOKEN
+        output = json.dumps({"data": "test"})
+
+        result = aug_negative_sample(
+            input_data, schema, output, augmentor, rng, dataset=mock_dataset, idx=0
+        )
+
+        assert result == (input_data, schema, output)
+
+    def test_finds_negative_sample_deterministic(self, mock_dataset):
+        rng = random.Random(42)
+        augmentor = Augmentor()
+
+        idx = 0
+        input_data = json.dumps({"name": "Alice", "age": 30})
+        schema = mock_dataset[0]["schema"]
+        output = mock_dataset[0]["output"]
+
+        result = aug_negative_sample(
+            input_data, schema, output, augmentor, rng, dataset=mock_dataset, idx=idx
+        )
+
+        result_input, result_schema, result_output = result
+
+        assert result_input == input_data
+        assert result_schema != schema
+        assert result_output == json.dumps(None)
+        assert result_schema in [mock_dataset[1]["schema"], mock_dataset[2]["schema"]]
+
+    def test_max_attempts_fallback(self):
+        dataset_with_matching_schemas = Dataset.from_list(
+            [
+                {
+                    "schema": json.dumps(
+                        {"type": "object", "properties": {"name": {"type": "string"}}}
+                    ),
+                    "output": json.dumps({"name": "test"}),
+                },
+                {
+                    "schema": json.dumps(
+                        {"type": "object", "properties": {"name": {"type": "string"}}}
+                    ),
+                    "output": json.dumps({"name": "another"}),
+                },
+                {
+                    "schema": json.dumps(
+                        {"type": "object", "properties": {"name": {"type": "string"}}}
+                    ),
+                    "output": json.dumps({"name": "third"}),
+                },
+            ]
+        )
+
+        rng = random.Random(42)
+        augmentor = Augmentor()
+
+        input_data = json.dumps({"name": "Alice", "age": 30})
+        schema = dataset_with_matching_schemas[0]["schema"]
+        output = dataset_with_matching_schemas[0]["output"]
+
+        result = aug_negative_sample(
+            input_data,
+            schema,
+            output,
+            augmentor,
+            rng,
+            dataset=dataset_with_matching_schemas,
+            idx=0,
+            max_attempts=3,
+        )
+
+        assert result == (input_data, schema, output)
+
+    def test_with_augmentor_integration(self, mock_dataset):
+        augmentor = Augmentor()
+        augmentor.augmentations = {aug_negative_sample: 1.0}
+
+        rng = random.Random(42)
+
+        input_data = json.dumps({"name": "Alice", "age": 30})
+        schema = mock_dataset[0]["schema"]
+        output = mock_dataset[0]["output"]
+
+        result = augmentor.apply(
+            input_data, schema, output, rng, dataset=mock_dataset, idx=0
+        )
+
+        result_input, result_schema, result_output = result
+
+        assert result_input == input_data
+        assert result_schema != schema
+        assert result_output == json.dumps(None)

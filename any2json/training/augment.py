@@ -4,9 +4,47 @@ from typing import Any, Callable
 from datasets import Dataset
 import random
 
+import fastjsonschema
+
 from any2json.data_engine.generators.vary_schema import VaryJSONSchemaGenerator
 from any2json.training.constants import SCHEMA_MISSING_TOKEN
 from any2json.utils import json_dumps_minified, logger
+
+
+def aug_negative_sample(
+    input_data: str,
+    schema: str,
+    output: str,
+    augmentor: "Augmentor",
+    rng: random.Random,
+    dataset: Dataset | None = None,
+    idx: int | None = None,
+    max_attempts: int = 10,
+    **kwargs,
+) -> tuple[str, str, str]:
+    if dataset is None or idx is None or schema == SCHEMA_MISSING_TOKEN:
+        return input_data, schema, output
+
+    indices = list(range(len(dataset)))
+    indices.remove(idx)
+    for _ in range(max_attempts):
+        if not indices:
+            break
+        random_idx = rng.choice(indices)
+        random_row = dataset[random_idx]
+        random_schema = random_row["schema"]
+
+        try:
+            fastjsonschema.validate(json.loads(random_schema), json.loads(output))
+            indices.remove(random_idx)
+            continue
+        except Exception as e:
+            pass
+
+        new_output = json.dumps(None)
+        return input_data, random_schema, new_output
+    logger.debug(f"Failed to find a negative sample after {max_attempts} attempts")
+    return input_data, schema, output
 
 
 def aug_drop_schema(
@@ -16,6 +54,7 @@ def aug_drop_schema(
     augmentor: "Augmentor",
     rng: random.Random,
     schema_missing_token: str = SCHEMA_MISSING_TOKEN,
+    **kwargs,
 ) -> tuple[str, str, str]:
     return input_data, schema_missing_token, output
 
@@ -26,6 +65,7 @@ def aug_vary_schema_and_output(
     output: str,
     augmentor: "Augmentor",
     rng: random.Random,
+    **kwargs,
 ) -> tuple[str, str, str]:
     if schema == SCHEMA_MISSING_TOKEN:
         return input_data, schema, output
@@ -73,6 +113,7 @@ def aug_vary_input_json_presentation(
     output: str,
     augmentor: "Augmentor",
     rng: random.Random,
+    **kwargs,
 ) -> tuple[str, str, str]:
 
     if input_data.startswith("{") or input_data.startswith("["):
@@ -102,6 +143,7 @@ def aug_corrupt_input(
         "_",
     ],
     max_num_corruptions: int = 5,
+    **kwargs,
 ) -> tuple[str, str, str]:
     """Insert a few junk symbols into the input data"""
     num_corruptions = rng.randint(1, max_num_corruptions)
@@ -123,6 +165,7 @@ class Augmentor:
         aug_vary_schema_and_output: 0.8,
         aug_vary_input_json_presentation: 0.8,
         aug_corrupt_input: 0.8,
+        aug_negative_sample: 0.05,
     }
 
     def apply(
@@ -131,6 +174,8 @@ class Augmentor:
         schema: str,
         output: str,
         rng: random.Random,
+        dataset: Dataset | None = None,
+        idx: int | None = None,
     ) -> tuple[str, str, str]:
         logger.debug(
             f"Applying augmentations.\n\nInput_data: {repr(input_data)}\nSchema: {repr(schema)}\nOutput: {repr(output)}"
@@ -145,6 +190,8 @@ class Augmentor:
                         output,
                         self,
                         rng,
+                        dataset=dataset,
+                        idx=idx,
                     )
                 except Exception as e:
                     logger.debug(f"Error augmenting example: {e}")
