@@ -458,7 +458,6 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         transformed = self.apply_changes_to_data(input_data, changes)
 
         properties: dict[str, Any] = new_schema["properties"]
-        required_fields = set(new_schema.get("required", []))
 
         final_transformed: dict[str, Any] = {}
         for prop_name, prop_def in properties.items():
@@ -469,8 +468,6 @@ class VaryJSONSchemaGenerator(SampleGenerator):
                 coerced = None
             else:
                 coerced = self.coerce_value(value, types)
-            if prop_name in required_fields and coerced is None:
-                raise ValueError(f"Missing required field: {prop_name}")
             final_transformed[prop_name] = coerced
 
         compiled_schema = fastjsonschema.compile(
