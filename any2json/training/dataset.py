@@ -20,7 +20,7 @@ class AugmentTokenizeDataset(TorchDataset):
         tokenization_kwargs: dict[str, Any] = {},
         augmentor: Augmentor | None = None,
         seed: int = 42,
-        no_augment_first_k_index_accesses: int = 1,
+        no_augment_first_k_index_accesses: int = 2,
     ):
         self.dataset = dataset
         self.lengths = lengths
