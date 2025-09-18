@@ -15,8 +15,9 @@ echo "Setup complete, running command"
 
 # For A40 GPU, gemma3 270m, 3096 max seq len
 
-BATCH_SIZE = 2
-NUM_EPOCHS = 5
+export BATCH_SIZE=2
+export NUM_EPOCHS=5
+
 python /code/any2json/any2json/training/train.py train \
     --model-name=google/gemma-3-270m \
     --max-sequence-length 3096 \
