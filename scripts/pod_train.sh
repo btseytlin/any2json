@@ -15,7 +15,7 @@ echo "Setup complete, running command"
 
 # For A40 GPU, gemma3 270m, 3096 max seq len
 
-export BATCH_SIZE=3
+export BATCH_SIZE=4
 export NUM_EPOCHS=5
 
 python /code/any2json/any2json/training/train.py train \
