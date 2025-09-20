@@ -14,7 +14,6 @@ export WANDB_RUN_ID=$(python scripts/wandb_tools.py --quiet get-run-id)
 
 echo "WANDB_RUN_ID: $WANDB_RUN_ID"
 
-# export MODEL_ID=btseytlin/model-registry/any2json_gemma270m:latest
 export MODEL_ID=btseytlin/model-registry/any2json_smollm2175:latest
 export MODEL_NAME=smollm2175_latest
 
