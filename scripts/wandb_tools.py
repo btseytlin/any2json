@@ -28,18 +28,6 @@ def cli(run_id: str, quiet: bool):
 
 
 @cli.command()
-@click.option("--model-id", default="btseytlin/model-registry/any2json_smollm2175:v1")
-@click.option(
-    "--output-root", default="models", type=click.Path(dir_okay=True, file_okay=False)
-)
-def download_model(model_id: str, output_root: str):
-    artifact = WANDB_RUN.use_artifact(model_id, type="model")
-    output_dir = os.path.join(output_root, model_id.split("/")[-1])
-    artifact_dir = artifact.download(output_dir)
-    print(f"Model downloaded to {artifact_dir}")
-
-
-@cli.command()
 @click.argument("artifact-id", type=str)
 @click.option(
     "--output-root",

@@ -16,10 +16,12 @@ echo "Setup complete, running command"
 # For A40 GPU, gemma3 270m, 3096 max seq len
 
 export BATCH_SIZE=3
-export NUM_EPOCHS=5
+export NUM_EPOCHS=2
+# export MODEL=google/gemma-3-270m
+export MODEL=HuggingFaceTB/SmolLM2-135M
 
 python /code/any2json/any2json/training/train.py train \
-    --model-name=google/gemma-3-270m \
+    --model-name=$MODEL \
     --max-sequence-length 2560 \
     --group-by-length True --length-column-name length \
     --learning_rate=5e-5 --warmup-ratio 0.03 --weight-decay 0.01 \

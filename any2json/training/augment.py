@@ -162,10 +162,10 @@ def aug_corrupt_input(
 class Augmentor:
     augmentations: dict[Callable, float] = {
         aug_drop_schema: 0.1,
-        aug_vary_schema_and_output: 0.8,
-        aug_vary_input_json_presentation: 0.8,
-        aug_corrupt_input: 0.8,
-        aug_negative_sample: 0.05,
+        aug_vary_schema_and_output: 0.2,
+        aug_vary_input_json_presentation: 0.5,
+        aug_corrupt_input: 0.2,
+        aug_negative_sample: 0.1,
     }
 
     def apply(

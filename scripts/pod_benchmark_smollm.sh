@@ -17,7 +17,7 @@ echo "WANDB_RUN_ID: $WANDB_RUN_ID"
 export MODEL_ID=btseytlin/model-registry/any2json_smollm2175:latest
 export MODEL_NAME=smollm2175_latest
 
-python scripts/wandb_tools.py --run-id $WANDB_RUN_ID download-model --model-id $MODEL_ID --output-root /workspace/models
+python scripts/wandb_tools.py --run-id $WANDB_RUN_ID download-artifact --model-id $MODEL_ID --output-root /workspace/models
 
 echo "Downloaded checkpoint"
 

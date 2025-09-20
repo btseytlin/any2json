@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import asyncio
 
 import httpx
+import torch
 
 from any2json.utils import logger
 
@@ -19,6 +20,7 @@ class VLLMServerMixin:
     server_process: subprocess.Popen | None = field(default=None, init=False)
     server_startup_timeout: float = 360.0
     server_log_path: str | None = "vllm_server.log"
+    server_logs: str | None = None
     server_log_handle: TextIO | None = field(default=None, init=False)
     request_timeout: float = 180.0
     max_concurrent_requests: int = 16
@@ -56,6 +58,9 @@ class VLLMServerMixin:
         if self.vllm_serve_args:
             args += self.vllm_serve_args
 
+        if not torch.cuda.is_available():
+            args += ["--disable-sliding-window"]
+
         return [
             sys.executable,
             "-u",
@@ -87,6 +92,9 @@ class VLLMServerMixin:
             except Exception:
                 pass
             self.server_log_handle = None
+
+            with open(self.server_log_path, "r") as f:
+                self.server_logs = f.read()
 
     def spawn_server(self, cmd: list[str]) -> None:
         try:

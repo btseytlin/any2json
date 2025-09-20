@@ -308,3 +308,8 @@ Finally runpod benchmarking worked
 
 Next step: run a gemma 270m so training run on runpod for 10 epochs
 
+
+Command to run gemma benchmarks on cpu:
+
+python any2json/benchmarks/benchmark.py run --hf-dataset btseytlin/any2json --split test --model-type vllm_custom --output-dir=benchmark_results --model-kwargs='{"model_name": "/Users/boris/Documents/any2json/artifacts/any2json_gemma270m:epoch_5", "vllm_serve_args": ["--disable-sliding-window", "--max-model-len", "8000", "--max-num-batched-tokens", "8000"], "guided_json": true}' --output-dir benchmark_results/gemma270m_so --limit 1
+

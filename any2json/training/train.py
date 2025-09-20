@@ -210,19 +210,19 @@ def prepare_model_and_tokenizer(
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token or tokenizer.unk_token
 
-    if pcfg.max_sequence_length:
-        if (
-            not tokenizer.model_max_length
-            or tokenizer.model_max_length != pcfg.max_sequence_length
-        ):
-            if tokenizer.model_max_length < pcfg.max_sequence_length:
-                raise ValueError(
-                    f"Model can not support max sequence length {pcfg.max_sequence_length}, maximum is {tokenizer.model_max_length}"
-                )
-            tokenizer.model_max_length = pcfg.max_sequence_length
-            logger.warning(
-                f"Model max length {tokenizer.model_max_length} forcefully set to {pcfg.max_sequence_length}"
-            )
+    # if pcfg.max_sequence_length:
+    #     if (
+    #         not tokenizer.model_max_length
+    #         or tokenizer.model_max_length != pcfg.max_sequence_length
+    #     ):
+    #         if tokenizer.model_max_length < pcfg.max_sequence_length:
+    #             raise ValueError(
+    #                 f"Model can not support max sequence length {pcfg.max_sequence_length}, maximum is {tokenizer.model_max_length}"
+    #             )
+    #         tokenizer.model_max_length = pcfg.max_sequence_length
+    #         logger.warning(
+    #             f"Model max length {tokenizer.model_max_length} forcefully set to {pcfg.max_sequence_length}"
+    #         )
     return model, tokenizer
 
 
