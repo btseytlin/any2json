@@ -183,7 +183,7 @@ def submit(
             cmd = f"{cmd}; exec tail -f /dev/null"
 
     if auto_terminate:
-        cmd = f"{cmd}; sleep 10m; runpodctl stop pod $RUNPOD_POD_ID"
+        cmd = f"{cmd}; echo 'Sleeping 10m before shutdown' && sleep 10m; runpodctl stop pod $RUNPOD_POD_ID"
 
     cmd = f"bash -lc '{cmd}'"
 
