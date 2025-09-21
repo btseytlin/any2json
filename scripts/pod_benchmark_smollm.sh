@@ -14,23 +14,24 @@ export WANDB_RUN_ID=$(python scripts/wandb_tools.py --quiet get-run-id)
 
 echo "WANDB_RUN_ID: $WANDB_RUN_ID"
 
-export MODEL_ID=btseytlin/model-registry/any2json_smollm2175:latest
-export MODEL_NAME=smollm2175_latest
+export MODEL_ID=btseytlin/any2json/model-nq8slosi:v6
+export MODEL_ID_NAME=model-nq8slosi:v6
+export MODEL_NAME=smollm2_nq8slosi_v6
 
-python scripts/wandb_tools.py --run-id $WANDB_RUN_ID download-artifact --model-id $MODEL_ID --output-root /workspace/models
+python scripts/wandb_tools.py --run-id $WANDB_RUN_ID download-artifact --artifact-id $MODEL_ID --output-root /workspace/models
 
 echo "Downloaded checkpoint"
 
 echo "Setup complete, running commands"
 
 python any2json/benchmarks/benchmark.py run --hf-dataset btseytlin/any2json --split test --model-type vllm_custom --output-dir=benchmark_results  \
-    --model-kwargs='{"model_name": "/workspace/models/any2json_smollm2175:latest", "guided_json": true, "server_startup_timeout": 600}' \
-    --output-dir /workspace/benchmark_results/smollm2175_latest_so \
+    --model-kwargs='{"model_name": "/workspace/models/model-nq8slosi:v6", "guided_json": true, "server_startup_timeout": 600}' \
+    --output-dir /workspace/benchmark_results/smollm2_nq8slosi_v6_so \
     --limit 500
 
-python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory /workspace/benchmark_results/smollm2175_latest_so \
-    --name any2json-benchmark-smollm2175_latest_so --type benchmark_results
+python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory /workspace/benchmark_results/smollm2_nq8slosi_v6_so \
+    --name any2json-benchmark-smollm2_nq8slosi_v6_so --type benchmark_results
 
-python any2json/benchmarks/benchmark.py metrics /workspace/benchmark_results/smollm2175_latest_so
+python any2json/benchmarks/benchmark.py metrics /workspace/benchmark_results/smollm2_nq8slosi_v6_so
 
-python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory /workspace/benchmark_results/smollm2175_latest_so --incremental --name any2json-benchmark-smollm2175_latest_so --type benchmark_results
+python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory /workspace/benchmark_results/smollm2_nq8slosi_v6_so --incremental --name any2json-benchmark-smollm2_nq8slosi_v6_so --type benchmark_results
