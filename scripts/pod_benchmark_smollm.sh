@@ -18,7 +18,7 @@ export MODEL_ID=btseytlin/any2json/model-nq8slosi:v6
 export MODEL_ID_NAME=model-nq8slosi:v6
 export MODEL_NAME=smollm2_nq8slosi_v6
 
-python scripts/wandb_tools.py --run-id $WANDB_RUN_ID download-artifact --artifact-id $MODEL_ID --output-root /workspace/models
+python scripts/wandb_tools.py --run-id $WANDB_RUN_ID download-artifact $MODEL_ID --output-root /workspace/models
 
 echo "Downloaded checkpoint"
 
