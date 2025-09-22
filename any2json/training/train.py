@@ -58,6 +58,7 @@ class PipelineConfig:
     unsloth: bool | None = None
     dataloader_num_proc: int | None = None
     augment: bool | None = None
+    augment_val: bool | None = None
     attn_implementation: str | None = None
 
     hf_args: TrainingArguments | None = None
@@ -170,12 +171,23 @@ def prepare_dataset(
 
     logger.info("Preparing validation dataset")
 
-    val_tokenized = process_raw_to_tokenized(
-        dataset=ds["validation"],
-        tokenize_fn=tokenize_fn,
-        filter_fn=filter_fn,
-        num_proc=pcfg.dataloader_num_proc,
-    )
+    if pcfg.augment_val:
+        val_augmentor = Augmentor()
+        val_tokenized = AugmentTokenizeDataset.from_raw_dataset(
+            dataset=ds["validation"],
+            tokenizer=tokenizer,
+            filter_fn=filter_fn,
+            dataloader_num_proc=pcfg.dataloader_num_proc,
+            augmentor=val_augmentor,
+            seed=args.seed,
+        )
+    else:
+        val_tokenized = process_raw_to_tokenized(
+            dataset=ds["validation"],
+            tokenize_fn=tokenize_fn,
+            filter_fn=filter_fn,
+            num_proc=pcfg.dataloader_num_proc,
+        )
     logger.info("Prepared datasets")
     return train_dataset, val_tokenized
 
@@ -349,6 +361,7 @@ def estimate_lengths_cmd(
 @click.option("--unsloth", is_flag=True)
 @click.option("--dataloader-num-proc", default=8, type=int)
 @click.option("--augment/--no-augment", default=True)
+@click.option("--augment-val/--no-augment-val", default=False)
 @click.option("--attn-implementation", default="eager", type=str)
 def train_cmd(
     ctx: click.Context,

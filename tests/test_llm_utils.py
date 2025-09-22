@@ -3,8 +3,9 @@ import os
 from datasets import Dataset
 import pytest
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
 
+from any2json.training.train import PipelineConfig, prepare_model_and_tokenizer
 from any2json.training.utils import (
     format_example,
     pad_to_multiple,
@@ -21,17 +22,27 @@ from any2json.training.callbacks import EvalLoggerCallback
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-@pytest.fixture
-def tokenizer():
-    tokenizer = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM2-135M")
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "right"
-    return tokenizer
+@pytest.fixture(scope="session")
+def model_and_tokenizer():
+    pcfg = PipelineConfig()
+    args = TrainingArguments()
+    pcfg.hf_args = args
+    pcfg.model_name = "HuggingFaceTB/SmolLM2-135M"
+    model, tokenizer = prepare_model_and_tokenizer(
+        pcfg,
+        args,
+    )
+    return model, tokenizer
 
 
 @pytest.fixture
-def model():
-    return AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM2-135M")
+def tokenizer(model_and_tokenizer):
+    return model_and_tokenizer[1]
+
+
+@pytest.fixture
+def model(model_and_tokenizer):
+    return model_and_tokenizer[0]
 
 
 def test_format_example() -> None:
