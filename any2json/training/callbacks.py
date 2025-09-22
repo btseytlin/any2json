@@ -24,9 +24,9 @@ class EvalLoggerCallback(TrainerCallback):
         tokenizer: AutoTokenizer,
         collator: CausalLMDataCollator,
         tokenized_eval_ds: Dataset,
-        num_examples: int = 3,
+        num_examples: int = 10,
         pad_to_multiple_of: int = 8,
-        max_new_tokens: int = 8000,
+        max_new_tokens: int = 4000,
     ):
         self.tokenizer = tokenizer
         self.collator = collator
@@ -201,14 +201,6 @@ class DebugTokensCallback(TrainerCallback):
                 input_ids=None, attention_mask=None, labels=None, **kwargs
             ):
 
-                if self.step_count >= 3 or not model.training:
-                    model.forward = original_forward
-                    return original_forward(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        labels=labels,
-                        **kwargs,
-                    )
                 if self.step_count <= 3:
                     logger.info(f"DEBUG FORWARD PASS - Step {self.step_count}:")
                     if input_ids is not None:
@@ -258,6 +250,14 @@ class DebugTokensCallback(TrainerCallback):
                                     logger.info(
                                         f"    Target decoded: {repr(self.tokenizer.decode(target_tokens))}"
                                     )
+                else:
+                    model.forward = original_forward
+                    return original_forward(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        labels=labels,
+                        **kwargs,
+                    )
 
                 return original_forward(
                     input_ids=input_ids,
