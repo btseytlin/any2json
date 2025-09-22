@@ -11,6 +11,26 @@ from any2json.training.constants import SCHEMA_MISSING_TOKEN
 from any2json.utils import json_dumps_minified, logger
 
 
+def make_null_result_for_schema(schema: dict) -> dict:
+    type_ = schema["type"]
+
+    if isinstance(type_, list):
+        type_ = type_[0]
+
+    if type_ == "object":
+        return {}
+    elif type_ == "array":
+        return []
+    elif type_ == "string":
+        return ""
+    elif type_ == "integer":
+        return 0
+    elif type_ == "number":
+        return 0.0
+    else:
+        return None
+
+
 def aug_negative_sample(
     input_data: str,
     schema: str,
@@ -42,7 +62,9 @@ def aug_negative_sample(
         except Exception as e:
             # Output does not match random schema, so we can use it as a negative sample
             schema = random_schema
-            output = json.dumps(None)
+            output = json_dumps_minified(
+                make_null_result_for_schema(json.loads(random_schema))
+            )
             break
     return input_data, schema, output
 
