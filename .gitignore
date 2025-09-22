@@ -3,6 +3,7 @@ data/
 wandb/
 trainer_output/
 benchmark_results/
+artifacts/
 
 models/
 

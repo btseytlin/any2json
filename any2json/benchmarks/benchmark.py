@@ -95,7 +95,10 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
             request_error.append(i)
             details["error_type"] = "request_error"
             details["error"] = result["error"]
-            details["traceback"] = result["error"]["traceback"]
+            try:
+                details["traceback"] = result["error"]["traceback"]
+            except Exception:
+                details["traceback"] = None
             details_list.append(details)
             continue
 

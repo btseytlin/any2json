@@ -155,8 +155,11 @@ class QwenVLLMServer(VLLMServerMixin):
                 traceback_str = "".join(
                     traceback.format_exception(exc_type, exc_value, exc_traceback)
                 )
-                result["error"] = str(e)
-                result["traceback"] = traceback_str
+                result["error"] = {
+                    "class": str(e.__class__.__name__),
+                    "message": str(e),
+                    "traceback": traceback_str,
+                }
             return result
 
         tasks = [task(i, sample) for i, sample in enumerate(samples)]

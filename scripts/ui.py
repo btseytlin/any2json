@@ -55,6 +55,7 @@ def call_vllm_inference(
 
         if response.status_code == 200:
             result = response.json()
+            print("Raw result:", repr(result))
             completion = result["choices"][0]["text"]
             return True, completion
         else:
@@ -134,6 +135,7 @@ def main():
                     original_schema if original_schema and enable_guided_json else None
                 ),
             )
+
             if success:
                 with output_placeholder.container():
                     json_parsed = False
