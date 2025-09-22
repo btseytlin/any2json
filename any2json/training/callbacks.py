@@ -126,26 +126,36 @@ class EvalLoggerCallback(TrainerCallback):
             )
             correct_completion = input_data.split("[OUTPUT]")[1].strip()
 
-            correct_completion = correct_completion.replace(
-                self.tokenizer.eos_token, ""
-            )
-            completion = completion.replace(self.tokenizer.eos_token, "")
-
             diff_size = None
             try:
                 correct_json = json.loads(correct_completion)
                 pred_json = json.loads(completion)
                 correct_json_dumped = json.dumps(correct_json, sort_keys=True, indent=1)
                 pred_json_dumped = json.dumps(pred_json, sort_keys=True, indent=1)
-                diff_lines = list(
-                    difflib.ndiff(
-                        correct_json_dumped.splitlines(), pred_json_dumped.splitlines()
+
+                diff_parts = list(
+                    difflib.unified_diff(
+                        json.dumps(correct_json_dumped, indent=1).splitlines(
+                            keepends=True
+                        ),
+                        json.dumps(pred_json_dumped, indent=1).splitlines(
+                            keepends=True
+                        ),
+                        fromfile="Correct",
+                        tofile="Predicted",
+                        lineterm="",
                     )
                 )
-                diff_size = sum(
-                    1 for line in diff_lines if line.startswith(("+", "-", "?"))
+                diff_size_lines = len(
+                    [part for part in diff_parts[3:] if part.startswith("-")]
                 )
-            except Exception:
+                diff_size = diff_size_lines
+                diff_size_chars = sum(
+                    [len(part[1:]) for part in diff_parts[3:] if part.startswith("-")]
+                )
+            except Exception as e:
+                logger.error(f"Error calculating diff")
+                logger.exception(e, exc_info=True)
                 pass
 
             self.table.add_data(

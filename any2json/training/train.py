@@ -378,6 +378,7 @@ def train_cmd(
     unsloth: bool,
     dataloader_num_proc: int,
     augment: bool,
+    augment_val: bool,
     attn_implementation: str,
 ):
     parser = HfArgumentParser(TrainingArguments)
@@ -398,6 +399,7 @@ def train_cmd(
         hf_args=args,
         dataloader_num_proc=dataloader_num_proc,
         augment=augment,
+        augment_val=augment_val,
         attn_implementation=attn_implementation,
     )
     if not args.output_dir:

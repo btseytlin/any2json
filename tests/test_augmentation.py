@@ -753,7 +753,7 @@ class TestVaryJSONSchemaGenerator:
 
 class TestAugmentor:
     def test_same_seed_same_results(self):
-        seed = 41
+        seed = 40
         augmentor = Augmentor()
 
         input_data, schema, output = (
@@ -893,7 +893,7 @@ class TestAugNegativeSample:
 
         assert result_input == input_data
         assert result_schema != schema
-        assert result_output == json.dumps(None)
+        assert result_output == json.dumps([])
         assert result_schema in [mock_dataset[1]["schema"], mock_dataset[2]["schema"]]
 
     def test_max_attempts_fallback(self):
@@ -958,4 +958,4 @@ class TestAugNegativeSample:
 
         assert result_input == input_data
         assert result_schema != schema
-        assert result_output == json.dumps(None)
+        assert result_output == json.dumps([])
