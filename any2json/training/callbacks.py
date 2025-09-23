@@ -128,8 +128,12 @@ class EvalLoggerCallback(TrainerCallback):
 
             diff_size = None
             try:
-                correct_json = json.loads(correct_completion)
-                pred_json = json.loads(completion)
+                correct_json = json.loads(
+                    correct_completion.replace(self.tokenizer.eos_token, "").strip()
+                )
+                pred_json = json.loads(
+                    completion.replace(self.tokenizer.eos_token, "").strip()
+                )
                 correct_json_dumped = json.dumps(correct_json, sort_keys=True, indent=1)
                 pred_json_dumped = json.dumps(pred_json, sort_keys=True, indent=1)
 
