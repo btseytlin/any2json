@@ -20,7 +20,7 @@ from tqdm.asyncio import tqdm as tqdm_asyncio
 class VLLMServerModel(VLLMServerMixin):
     model_name: str | None = None
     max_tokens: int = 4096
-    temperature: float = 0.0
+    temperature: float = 0.1
     guided_json: bool = False
 
     def get_state(self) -> dict:
@@ -47,7 +47,6 @@ class VLLMServerModel(VLLMServerMixin):
             payload = {
                 "prompt": prompt,
                 "max_tokens": self.max_tokens,
-                "temperature": self.temperature,
             }
             if self.guided_json and isinstance(sample["schema"], dict):
                 payload["guided_json"] = sample["schema"]
