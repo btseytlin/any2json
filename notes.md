@@ -314,3 +314,29 @@ Command to run gemma benchmarks on cpu:
 python any2json/benchmarks/benchmark.py run --hf-dataset btseytlin/any2json --split test --model-type vllm_custom --output-dir=benchmark_results --model-kwargs='{"model_name": "/Users/boris/Documents/any2json/artifacts/any2json_gemma270m:epoch_5", "vllm_serve_args": ["--disable-sliding-window", "--max-model-len", "8000", "--max-num-batched-tokens", "8000"], "guided_json": true}' --output-dir benchmark_results/gemma270m_so --limit 1
 
 Training Smollm and Gemma without augmentations and gemma with augmentations for both train and val to understand if its the problem
+
+### Result of experiment
+
+1. Smollm no augs: https://wandb.ai/btseytlin/any2json/runs/f2yvr0zy/overview
+2. Gemma no augs: https://wandb.ai/btseytlin/any2json/runs/ot5q00pi?nw=nwuserbtseytlin
+3. Gemma augs val+train: https://wandb.ai/btseytlin/any2json/runs/kcid85k4/overview
+
+Train loss is suspiciously the same between 2 and 3. Need to confirm: does --no-augment really use no augments?
+
+--no-augment correctly sets augment False, --augment sets True
+
+Ok the loss is same because of no_augment_first_k_index_accesses = 2. If thats true loss should be different after 2nd epoch. But I only trained for 2 epochs! Need to change to no_augment_first_k_index_accesses=1. So I ran three expreiments with no augs
+
+Lets measure benchmark quality
+
+1. Artifact btseytlin/any2json/model-f2yvr0zy:v6
+
+```
+python scripts/submit_runpod.py  --name any2json-benchmark-f2yvr0zy  --script scripts/pod_benchmark_smollm.sh --template-id gmu9nenh8c --auto-terminate
+```
+
+2. btseytlin/any2json/model-ot5q00pi:v6
+
+```
+python scripts/submit_runpod.py  --name any2json-benchmark-ot5q00pi  --script scripts/pod_benchmark_gemma.sh --template-id gmu9nenh8c --auto-terminate
+```

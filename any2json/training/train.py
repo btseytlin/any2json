@@ -411,6 +411,7 @@ def train_cmd(
 
     validate_pipeline_config(pcfg)
     validate_training_args(args)
+
     run_training(pcfg, args)
 
 
