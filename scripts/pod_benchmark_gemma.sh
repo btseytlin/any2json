@@ -24,7 +24,7 @@ echo "Setup complete, running commands"
 
 # Structured Output
 
-python any2json/benchmarks/benchmark.py run --hf-dataset btseytlin/any2json --split test --model-type vllm_custom --output-dir=benchmark_results  \
+python any2json/benchmarks/benchmark.py run --run-id $WANDB_RUN_ID --hf-dataset btseytlin/any2json --split test --model-type vllm_custom --output-dir=benchmark_results  \
     --model-kwargs='{"model_name": "/workspace/models/model-ot5q00pi:v6", "guided_json": true, "server_startup_timeout": 600}' \
     --output-dir /workspace/benchmark_results/gemma270m_ot5q00pi_v6_so \
     --limit 500
@@ -38,7 +38,7 @@ python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory /workspace
 
 # No Structured Output
 
-python any2json/benchmarks/benchmark.py run --hf-dataset btseytlin/any2json --split test --model-type vllm_custom --output-dir=benchmark_results  \
+python any2json/benchmarks/benchmark.py run --run-id $WANDB_RUN_ID --hf-dataset btseytlin/any2json --split test --model-type vllm_custom --output-dir=benchmark_results  \
     --model-kwargs='{"model_name": "/workspace/models/any2json_gemma270m:epoch1", "server_startup_timeout": 600}' \
     --output-dir /workspace/benchmark_results/gemma270m_ot5q00pi_v6 \
     --limit 500

@@ -24,7 +24,7 @@ echo "Downloaded checkpoint"
 
 echo "Setup complete, running commands"
 
-python any2json/benchmarks/benchmark.py run --hf-dataset btseytlin/any2json --split test --model-type vllm_custom --output-dir=benchmark_results  \
+python any2json/benchmarks/benchmark.py run --run-id $WANDB_RUN_ID --hf-dataset btseytlin/any2json --split test --model-type vllm_custom --output-dir=benchmark_results  \
     --model-kwargs='{"model_name": "/workspace/models/model-f2yvr0zy:v6", "guided_json": true, "server_startup_timeout": 600}' \
     --output-dir /workspace/benchmark_results/smollm2_f2yvr0zy_v6_so \
     --limit 500

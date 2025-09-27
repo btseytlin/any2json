@@ -415,8 +415,16 @@ Noticed that vllm was trying to use bf16. Which explains the "logits must be fp3
 
 Now it suddenly works after I put ```--dtype float``` to vllm args
 
-Lets rerun the benches then
+All previous so benches ran without so. Deleting all old benchmark results with _so postfixes to avoid confusion.
+
+Lets rerun the benches for smollm and gemma with true so then. 
+
 
 ### Train with augs
+
+Smollm: https://wandb.ai/btseytlin/any2json/runs/31cjr161/overview
+Gemma: https://wandb.ai/btseytlin/any2json/runs/gbghsh7d?nw=nwuserbtseytlin
+
+
 
  
