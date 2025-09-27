@@ -33,5 +33,4 @@ python /code/any2json/any2json/training/train.py train \
     --num-train-epochs=$NUM_EPOCHS \
     --per-device-train-batch-size $BATCH_SIZE --per-device-eval-batch-size $BATCH_SIZE \
     --augment \
-    --augment-val \
-    --debug-tokens
+    --augment-val

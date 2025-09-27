@@ -315,6 +315,12 @@ python any2json/benchmarks/benchmark.py run --hf-dataset btseytlin/any2json --sp
 
 Training Smollm and Gemma without augmentations and gemma with augmentations for both train and val to understand if its the problem
 
+## Experiment Alpha
+
+Smollm vs Gemma
+
+Augs vs no augs
+
 ### Result of experiment
 
 1. Smollm no augs: https://wandb.ai/btseytlin/any2json/runs/f2yvr0zy/overview
@@ -335,8 +341,47 @@ Lets measure benchmark quality
 python scripts/submit_runpod.py  --name any2json-benchmark-f2yvr0zy  --script scripts/pod_benchmark_smollm.sh --template-id gmu9nenh8c --auto-terminate
 ```
 
+Benchmark results:
+
+https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json-benchmark-smollm2_f2yvr0zy_v6_so/v1
+
 2. btseytlin/any2json/model-ot5q00pi:v6
 
 ```
 python scripts/submit_runpod.py  --name any2json-benchmark-ot5q00pi  --script scripts/pod_benchmark_gemma.sh --template-id gmu9nenh8c --auto-terminate
 ```
+
+Benchmark results:
+
+https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json-benchmark-gemma270m_ot5q00pi_v6_so/v1
+
+3. Is identical to 2, so no need to benchmark
+
+We can see eval loss stops falling after 80k steps, but train loss keeps falling -> overfitting.
+
+Lets run a training with actual augs.
+
+#### Results summary
+
+smollm2_f2yvr0zy_v6_so:
+- Correct: 75.6% 
+- Json errors: 4.2%
+- Schema errors: 1.4%
+- Mean diff chars: 116
+
+gemma270m_ot5q00pi_v6_so:
+- Correct: 57.8% 
+- Json errors: 7.6%
+- Schema errors: 9.4%
+- Mean diff chars: 321
+
+Conclusion: gemma is worse. I am probably not using it right. Lets stick to smollm until we finish the whole pipeline. 
+
+Lets dive deeper into smollm.
+First, benchmark without `"guided_json": true`. 
+
+
+
+### Train with augs
+
+ 
