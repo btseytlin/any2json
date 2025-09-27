@@ -224,16 +224,16 @@ def cli():
     help="Limit the number of prompts to benchmark",
 )
 @click.option(
-    "--wandb-run-id",
+    "--run-id",
     type=str,
     help="WANDB run id",
 )
-def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit, wandb_run_id):
-    if wandb_run_id:
+def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit, run_id):
+    if run_id:
         import wandb
 
-        wandb.init(id=wandb_run_id, resume="allow")
-        logger.debug(f"Resumed wandb run: {wandb_run_id}")
+        wandb.init(id=run_id, resume="allow")
+        logger.debug(f"Resumed wandb run: {run_id}")
 
     command = " ".join(sys.argv)
     model_kwargs = json.loads(model_kwargs) if model_kwargs else {}
