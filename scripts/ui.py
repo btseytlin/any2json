@@ -121,18 +121,15 @@ def main():
                 st.error(f"Schema validation failed: {error_msg}")
                 return
 
-            schema_str = (
-                json_dumps_minified(processed_schema)
-                if processed_schema
-                else "[MISSING]"
-            )
-            formatted_example = format_example(input_data, schema_str)
+            formatted_example = format_example(input_data, processed_schema)
 
             success, result = call_vllm_inference(
                 formatted_example,
                 endpoint_url,
                 json_schema=(
-                    original_schema if original_schema and enable_guided_json else None
+                    processed_schema
+                    if processed_schema and enable_guided_json
+                    else None
                 ),
             )
 

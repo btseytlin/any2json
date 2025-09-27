@@ -10,6 +10,7 @@ from transformers import DataCollatorWithPadding
 
 from any2json.training.constants import SCHEMA_MISSING_TOKEN, SYSTEM_PROMPT
 from any2json.grouping import train_test_split_groups
+from any2json.utils import json_dumps_minified
 
 
 def resolve_pad_id(tokenizer: AutoTokenizer) -> int:
@@ -18,14 +19,25 @@ def resolve_pad_id(tokenizer: AutoTokenizer) -> int:
 
 def format_example(
     input_data: str,
-    schema: str | None,
-    output: str = "",
+    schema: str | dict | None,
+    output: str | dict | None = "",
     missing_schema_token: str = SCHEMA_MISSING_TOKEN,
     system_prompt: str = SYSTEM_PROMPT,
 ) -> str:
     if schema is None:
         schema = missing_schema_token
-    return f"{system_prompt}[SCHEMA]{schema}[INPUT]{input_data}[OUTPUT]{output}"
+
+    if isinstance(schema, dict):
+        schema_str = json_dumps_minified(schema) if schema else "[MISSING]"
+    else:
+        schema_str = schema
+
+    if output and isinstance(output, dict):
+        output_str = json_dumps_minified(output) if output else "[MISSING]"
+    else:
+        output_str = output
+
+    return f"{system_prompt}[SCHEMA]{schema_str}[INPUT]{input_data}[OUTPUT]{output_str}"
 
 
 def percentile(values: list[int], q: float) -> int:
@@ -98,7 +110,7 @@ def build_tokenize_fn(
     if eos is None:
         raise ValueError("Tokenizer must define eos_token_id")
 
-    def tokenize(batch: dict[str, Any]) -> dict[str, Any]:
+    def tokenize(batch: dict[str, list[str]]) -> dict[str, Any]:
         input_data = batch["input_data"]
         schema = batch["schema"]
         output = batch["output"]

@@ -54,7 +54,7 @@ class VLLMServerMixin:
     def build_server_command(self) -> list[str]:
         host, port = self.parse_host_port()
 
-        args = []
+        args = ["--dtype", "float"]
         if self.vllm_serve_args:
             args += self.vllm_serve_args
 
@@ -153,6 +153,7 @@ class VLLMServerMixin:
         payload: dict,
     ) -> tuple[str, dict]:
         client = self.get_http_client()
+        logger.debug(f"Request payload: {payload}")
         t0 = time.perf_counter()
         response = await client.post(
             f"{self.base_url}/completions",

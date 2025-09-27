@@ -31,7 +31,6 @@ model_types = {
 
 def run_benchmark(model, samples: list[dict]) -> list[dict]:
     results: list[dict] = []
-
     preds = model.get_predictions(samples)
     id_to_pred = {p["id"]: p for p in preds}
     for i, sample in enumerate(samples):
@@ -224,7 +223,18 @@ def cli():
     type=int,
     help="Limit the number of prompts to benchmark",
 )
-def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit):
+@click.option(
+    "--wandb-run-id",
+    type=str,
+    help="WANDB run id",
+)
+def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit, wandb_run_id):
+    if wandb_run_id:
+        import wandb
+
+        wandb.init(id=wandb_run_id, resume="allow")
+        logger.debug(f"Resumed wandb run: {wandb_run_id}")
+
     command = " ".join(sys.argv)
     model_kwargs = json.loads(model_kwargs) if model_kwargs else {}
 
@@ -240,6 +250,12 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit):
 
     if limit:
         samples = samples[:limit]
+
+    for sample in samples:
+        if isinstance(sample["schema"], str):
+            sample["schema"] = json.loads(sample["schema"])
+        if isinstance(sample["output"], str):
+            sample["output"] = json.loads(sample["output"])
 
     logger.info(f"Running benchmark with {len(samples)} samples")
 

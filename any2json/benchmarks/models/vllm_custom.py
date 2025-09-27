@@ -24,7 +24,9 @@ class VLLMServerModel(VLLMServerMixin):
     guided_json: bool = False
 
     def get_state(self) -> dict:
-        return vars(self)
+        state = vars(self)
+        state["vllm_server_command"] = self.build_server_command()
+        return state
 
     async def async_get_predictions(
         self,
@@ -39,7 +41,7 @@ class VLLMServerModel(VLLMServerMixin):
         semaphore = asyncio.Semaphore(self.max_concurrent_requests)
 
         async def task(
-            i: int, sample: dict
+            i: int, sample: dict[str, str]
         ) -> tuple[str, dict] | tuple[Exception, str]:
             prompt = format_example(sample["input_data"], sample["schema"])
             payload = {

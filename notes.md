@@ -375,12 +375,47 @@ gemma270m_ot5q00pi_v6_so:
 - Schema errors: 9.4%
 - Mean diff chars: 321
 
-Conclusion: gemma is worse. I am probably not using it right. Lets stick to smollm until we finish the whole pipeline. 
+Conclusion: gemma is worse. Either I dont have enough data for it or I am not using it right. Lets stick to smollm until we finish the whole pipeline. 
 
 Lets dive deeper into smollm.
 First, benchmark without `"guided_json": true`. 
 
 
+smollm2_f2yvr0zy_v6:
+- Correct: 75.2% 
+- Json errors: 4.0%
+- Schema errors: 1.4%
+- Mean diff chars: 125
+
+I honestly dont understand how it's doing the guided json thing, lets explore
+
+Ok so I am passing guided json true, it attaches the schema to the request payload. But vllm should freak out at the sight of my schemas which have optional fields. It does it during manual inference. Why not here? Lets check vllm server logs.
+
+Lets try benchmarking locally and see if schemas actually get sent in the SO mode
+
+Need to make sure format_example is applied the same way during training, inference, benchmarking
+
+Yay, now structured outputs dont work in benchmarking just like in inference! Great!
+
+Apparently outlines can handle optional files if the schema is like this:
+```python
+{'properties': {'name': {'title': 'Name', 'type': 'string'}, 'urgency': {'enum': ['high', 'medium', 'low'], 'title': 'Urgency', 'type': 'string'}, 'issue': {'title': 'Issue', 'type': 'string'}, 'reporter': {'anyOf': [{'type': 'string'}, {'type': 'null'}], 'title': 'Reporter'}}, 'required': ['name', 'urgency', 'issue', 'reporter'], 'title': 'Customer', 'type': 'object'}
+```
+
+Perhaps I can convert all `["string", null]` types to `anyOf` and it will work. 
+
+Outlines cant be used with modern vllm. Lets try xgrammar with optional types
+
+Xgrammar compiles the schema
+
+Even this:
+```{"properties": {"name": {"title": "Name", "type": ["string", "null"]}}, "title": "Customer", "type": "object"}```
+
+Noticed that vllm was trying to use bf16. Which explains the "logits must be fp32" error from xgrammar.
+
+Now it suddenly works after I put ```--dtype float``` to vllm args
+
+Lets rerun the benches then
 
 ### Train with augs
 
