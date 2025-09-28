@@ -16,7 +16,7 @@ from any2json.utils import logger
 @dataclass
 class VLLMServerMixin:
     base_url: str = "http://localhost:8000/v1"
-    vllm_serve_args: list[str] = field(default_factory=list)
+    vllm_serve_args: list[str] = field(default_factory=lambda: ["--dtype", "auto"])
     server_process: subprocess.Popen | None = field(default=None, init=False)
     server_startup_timeout: float = 360.0
     server_log_path: str | None = "vllm_server.log"
@@ -57,9 +57,6 @@ class VLLMServerMixin:
         args = []
         if self.vllm_serve_args:
             args += self.vllm_serve_args
-
-        if not torch.cuda.is_available():
-            args += ["--disable-sliding-window"]
 
         return [
             sys.executable,
