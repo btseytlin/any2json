@@ -44,9 +44,9 @@ dependencies = [
     "unsloth>=2025.8.6 ; sys_platform == 'linux'",
     "plotly>=6.3.0",
     "jupyterlab>=4.4.7",
+    "xgrammar>=0.1.25",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["any2json*"]
-

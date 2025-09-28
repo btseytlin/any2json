@@ -421,7 +421,22 @@ Lets rerun the benches for smollm and gemma with true so then.
 
 Trying to, but with so vllm smollm benchmarking didnt run on runpod
 
-Upd: it was vram error, maybe need to decrease number of concurrent requests
+Upd: it was vram error, maybe need to decrease number of concurrent requests. Reduced to 4
+
+Retrying:
+
+```bash
+python scripts/submit_runpod.py  --name any2json-benchmark-a40-f2yvr0zy-v6-so  --script scripts/pod_benchmark.sh --template-id gmu9nenh8c --keep-container-alive --additional-env-file scripts/config_smollm.env
+```
+
+Vllm crashes with:
+
+(EngineCore_DP0 pid=883) ERROR 09-28 20:07:31 [core.py:720] torch.AcceleratorError: CUDA error: an illegal memory access was encountered
+
+Current error when starting benchmarks:
+(APIServer pid=660) OSError: Can't load the configuration of '/workspace/models/any2json/model-f2yvr0zy:v6'. If you were trying to load it from 'https://huggingface.co/models', make sure you don't have a local directory with the same name. Otherwise, make sure '/workspace/models/any2json/model-f2yvr0zy:v6'is the correct path to a directory containing a config.json file
+
+A bug in benchmarking script it seems
 
 ### Train with augs
 

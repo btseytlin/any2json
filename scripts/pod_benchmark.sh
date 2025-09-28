@@ -45,7 +45,7 @@ echo "Setup complete, running commands"
 if [[ -n "$MODEL_PATH_OVERRIDE" ]]; then
     MODEL_PATH="$MODEL_PATH_OVERRIDE"
 else
-    MODEL_PATH="/workspace/models/${MODEL_ARTIFACT_ID#*/}"
+    MODEL_PATH="/workspace/models/$ARTIFACT_PART"
 fi
 
 # Structured Output Benchmark
