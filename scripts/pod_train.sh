@@ -16,8 +16,8 @@ echo "Setup complete, running command"
 
 export BATCH_SIZE=3
 export NUM_EPOCHS=2
-export MODEL=google/gemma-3-270m
-# export MODEL=HuggingFaceTB/SmolLM2-135M
+# export MODEL=google/gemma-3-270m
+export MODEL=HuggingFaceTB/SmolLM2-135M
 
 python /code/any2json/any2json/training/train.py train \
     --model-name=$MODEL \
