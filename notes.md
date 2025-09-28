@@ -421,10 +421,14 @@ Lets rerun the benches for smollm and gemma with true so then.
 
 Trying to, but with so vllm smollm benchmarking didnt run on runpod
 
+Upd: it was vram error, maybe need to decrease number of concurrent requests
+
 ### Train with augs
 
 Smollm: https://wandb.ai/btseytlin/any2json/runs/31cjr161/overview
 Gemma: https://wandb.ai/btseytlin/any2json/runs/gbghsh7d?nw=nwuserbtseytlin
+
+Done. Lets run the benchmarks for smollm.
 
 
 

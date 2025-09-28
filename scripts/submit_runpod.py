@@ -92,6 +92,12 @@ def build_pod_kwargs(pcfg: PodConfig) -> dict[str, Any]:
 @click.option(
     "--max-runtime", default="24h", type=str, help="Max runtime as a sleep time string"
 )
+@click.option(
+    "--additional-env-file",
+    default=None,
+    type=str,
+    help="Additional environment variables file",
+)
 def submit(
     name: str,
     template_id: str,
@@ -112,6 +118,7 @@ def submit(
     auto_terminate: bool,
     keep_container_alive: bool,
     max_runtime: str | None,
+    additional_env_file: str | None,
 ):
     path = find_dotenv(usecwd=True)
     load_dotenv(path)
@@ -120,7 +127,12 @@ def submit(
         network_volume_id = os.environ.get("RUNPOD_NETWORK_VOLUME_ID")
     runpod.api_key = os.environ["RUNPOD_API_KEY"]
     cli_env = parse_kv_pairs(env_pairs)
+
     env = {**file_env, **cli_env}
+
+    if additional_env_file:
+        additional_env = dotenv_values(additional_env_file)
+        env = {**env, **additional_env}
 
     def select_gpu_id(preferred: str | None) -> str:
         gpus = runpod.get_gpus()
