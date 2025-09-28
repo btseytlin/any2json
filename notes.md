@@ -438,6 +438,8 @@ Current error when starting benchmarks:
 
 A bug in benchmarking script it seems
 
+I got it to work. However if vllm encounters an engine error then it responds 500 to all remaining requests. Need to restart it when that happens.
+
 ### Train with augs
 
 Smollm: https://wandb.ai/btseytlin/any2json/runs/31cjr161/overview

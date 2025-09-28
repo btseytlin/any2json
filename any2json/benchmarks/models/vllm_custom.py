@@ -22,11 +22,20 @@ class VLLMServerModel(VLLMServerMixin):
     max_tokens: int = 4096
     temperature: float = 0.1
     guided_json: bool = False
+    _restart_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
 
     def get_state(self) -> dict:
         state = vars(self)
         state["vllm_server_command"] = self.build_server_command()
         return state
+
+    async def restart_server_if_needed(self) -> None:
+        async with self._restart_lock:
+            if not self.is_server_alive():
+                logger.info("Server is not alive, restarting...")
+                self.stop_server()
+                self.ensure_server_started()
+                logger.info("Server restarted successfully")
 
     async def async_get_predictions(
         self,
@@ -52,27 +61,43 @@ class VLLMServerModel(VLLMServerMixin):
                 payload["guided_json"] = sample["schema"]
 
             result = {"id": i}
-            try:
-                async with semaphore:
-                    completion, meta = await self.request_completion(payload)
+            max_retries = 2
 
-                result["completion"] = completion
-                result["meta"] = meta
+            for attempt in range(max_retries):
+                try:
+                    async with semaphore:
+                        async with self._restart_lock:
+                            pass
+                        completion, meta = await self.request_completion(payload)
 
-                answer = completion["choices"][0]["text"]
-                result["answer"] = answer
+                    result["completion"] = completion
+                    result["meta"] = meta
 
-            except Exception as e:
-                logger.error(e, exc_info=True)
-                exc_type, exc_value, exc_traceback = sys.exc_info()
-                traceback_str = "".join(
-                    traceback.format_exception(exc_type, exc_value, exc_traceback)
-                )
-                result["error"] = {
-                    "class": str(e.__class__.__name__),
-                    "message": str(e),
-                    "traceback": traceback_str,
-                }
+                    answer = completion["choices"][0]["text"]
+                    result["answer"] = answer
+                    break
+                except Exception as e:
+                    if (
+                        isinstance(e, httpx.HTTPStatusError)
+                        and e.response.status_code == 500
+                    ):
+                        logger.warning(
+                            f"Got 500 error on attempt {attempt + 1}, restarting server..."
+                        )
+                        await self.restart_server_if_needed()
+                        if attempt < max_retries - 1:
+                            continue
+                    logger.error(e, exc_info=True)
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    traceback_str = "".join(
+                        traceback.format_exception(exc_type, exc_value, exc_traceback)
+                    )
+                    result["error"] = {
+                        "class": str(e.__class__.__name__),
+                        "message": str(e),
+                        "traceback": traceback_str,
+                    }
+                    break
             return result
 
         tasks = [task(i, sample) for i, sample in enumerate(samples)]
