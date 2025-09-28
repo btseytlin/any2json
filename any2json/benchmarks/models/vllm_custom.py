@@ -31,7 +31,7 @@ class VLLMServerModel(VLLMServerMixin):
 
     async def restart_server_if_needed(self) -> None:
         async with self._restart_lock:
-            if not self.is_server_alive():
+            if self.is_server_alive():
                 logger.info("Server is not alive, restarting...")
                 self.stop_server()
                 self.ensure_server_started()
