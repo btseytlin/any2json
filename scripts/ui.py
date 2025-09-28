@@ -41,7 +41,6 @@ def call_vllm_inference(
         payload = {
             "prompt": formatted_example,
             "max_tokens": 2048,
-            "temperature": 0,
         }
 
         if json_schema:

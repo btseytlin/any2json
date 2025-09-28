@@ -54,7 +54,7 @@ class VLLMServerMixin:
     def build_server_command(self) -> list[str]:
         host, port = self.parse_host_port()
 
-        args = ["--dtype", "float"]
+        args = []
         if self.vllm_serve_args:
             args += self.vllm_serve_args
 
