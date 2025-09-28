@@ -22,7 +22,7 @@ class VLLMServerMixin:
     server_log_path: str | None = "vllm_server.log"
     server_logs: str | None = None
     server_log_handle: TextIO | None = field(default=None, init=False)
-    request_timeout: float = 30.0
+    request_timeout: float = 180.0
     max_concurrent_requests: int = 6
     http_client: httpx.AsyncClient | None = field(default=None, init=False)
 
