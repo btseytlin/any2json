@@ -419,6 +419,7 @@ All previous so benches ran without so. Deleting all old benchmark results with 
 
 Lets rerun the benches for smollm and gemma with true so then. 
 
+Trying to, but with so vllm smollm benchmarking didnt run on runpod
 
 ### Train with augs
 

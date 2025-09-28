@@ -11,7 +11,6 @@ from any2json.utils import logger
 
 
 class AugmentTokenizeDataset(TorchDataset):
-
     def __init__(
         self,
         dataset: HFDataset,
@@ -20,7 +19,6 @@ class AugmentTokenizeDataset(TorchDataset):
         tokenization_kwargs: dict[str, Any] = {},
         augmentor: Augmentor | None = None,
         seed: int = 42,
-        no_augment_first_k_index_accesses: int = 1,
     ):
         self.dataset = dataset
         self.lengths = lengths
@@ -28,14 +26,11 @@ class AugmentTokenizeDataset(TorchDataset):
         self.tokenization_kwargs = tokenization_kwargs
         self.augmentor = augmentor
         self.seed = seed
-        self.no_augment_first_k_index_accesses = no_augment_first_k_index_accesses
         self.rng = random.Random(seed)
 
         self._tokenize_fn = build_tokenize_fn(
             self.tokenizer, **self.tokenization_kwargs
         )
-
-        self.index_access_counter = Counter()
 
     @classmethod
     def from_raw_dataset(
@@ -88,10 +83,7 @@ class AugmentTokenizeDataset(TorchDataset):
         schema = row["schema"]
         output = row["output"]
 
-        if (
-            self.augmentor
-            and self.index_access_counter[idx] >= self.no_augment_first_k_index_accesses
-        ):
+        if self.augmentor:
             input_data, schema, output = self.augmentor.apply(
                 input_data,
                 schema,
@@ -115,8 +107,6 @@ class AugmentTokenizeDataset(TorchDataset):
 
             batch = {"input_data": [input_data], "schema": [schema], "output": [output]}
             tokenized = self._tokenize_fn(batch)
-
-        self.index_access_counter[idx] += 1
 
         return {
             "input_ids": tokenized["input_ids"][0],
