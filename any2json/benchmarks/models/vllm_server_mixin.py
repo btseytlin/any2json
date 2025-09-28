@@ -23,7 +23,7 @@ class VLLMServerMixin:
     server_logs: str | None = None
     server_log_handle: TextIO | None = field(default=None, init=False)
     request_timeout: float = 180.0
-    max_concurrent_requests: int = 16
+    max_concurrent_requests: int = 4
     http_client: httpx.AsyncClient | None = field(default=None, init=False)
 
     def parse_host_port(self) -> tuple[str, int]:
