@@ -45,6 +45,7 @@ dependencies = [
     "plotly>=6.3.0",
     "jupyterlab>=4.4.7",
     "xgrammar>=0.1.25",
+    "weave>=0.52.9",
 ]
 
 [tool.setuptools.packages.find]

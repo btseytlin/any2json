@@ -25,6 +25,7 @@ class VLLMServerMixin:
     request_timeout: float = 180.0
     max_concurrent_requests: int = 6
     http_client: httpx.AsyncClient | None = field(default=None, init=False)
+    restart_server_on_500: bool = True
 
     def parse_host_port(self) -> tuple[str, int]:
         u = urlparse(self.base_url)

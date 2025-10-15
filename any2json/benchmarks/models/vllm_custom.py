@@ -31,11 +31,13 @@ class VLLMServerModel(VLLMServerMixin):
 
     async def restart_server_if_needed(self) -> None:
         async with self._restart_lock:
-            if self.is_server_alive():
+            if not self.is_server_alive():
                 logger.info("Server is not alive, restarting...")
                 self.stop_server()
                 self.ensure_server_started()
                 logger.info("Server restarted successfully")
+            else:
+                logger.info("Server is alive, no need to restart")
 
     async def async_get_predictions(
         self,
@@ -61,43 +63,35 @@ class VLLMServerModel(VLLMServerMixin):
                 payload["guided_json"] = sample["schema"]
 
             result = {"id": i}
-            max_retries = 2
 
-            for attempt in range(max_retries):
-                try:
-                    async with semaphore:
-                        async with self._restart_lock:
-                            pass
-                        completion, meta = await self.request_completion(payload)
+            try:
+                async with semaphore:
+                    async with self._restart_lock:
+                        pass
+                    completion, meta = await self.request_completion(payload)
 
-                    result["completion"] = completion
-                    result["meta"] = meta
+                result["completion"] = completion
+                result["meta"] = meta
 
-                    answer = completion["choices"][0]["text"]
-                    result["answer"] = answer
-                    break
-                except Exception as e:
-                    if (
-                        isinstance(e, httpx.HTTPStatusError)
-                        and e.response.status_code == 500
-                    ):
-                        logger.warning(
-                            f"Got 500 error on attempt {attempt + 1}, restarting server..."
-                        )
-                        await self.restart_server_if_needed()
-                        if attempt < max_retries - 1:
-                            continue
-                    logger.error(e, exc_info=True)
-                    exc_type, exc_value, exc_traceback = sys.exc_info()
-                    traceback_str = "".join(
-                        traceback.format_exception(exc_type, exc_value, exc_traceback)
-                    )
-                    result["error"] = {
-                        "class": str(e.__class__.__name__),
-                        "message": str(e),
-                        "traceback": traceback_str,
-                    }
-                    break
+                answer = completion["choices"][0]["text"]
+                result["answer"] = answer
+            except Exception as e:
+                if (
+                    isinstance(e, httpx.HTTPStatusError)
+                    and e.response.status_code == 500
+                    and self.restart_server_on_500
+                ):
+                    await self.restart_server_if_needed()
+                logger.error(e, exc_info=True)
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                traceback_str = "".join(
+                    traceback.format_exception(exc_type, exc_value, exc_traceback)
+                )
+                result["error"] = {
+                    "class": str(e.__class__.__name__),
+                    "message": str(e),
+                    "traceback": traceback_str,
+                }
             return result
 
         tasks = [task(i, sample) for i, sample in enumerate(samples)]

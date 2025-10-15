@@ -457,9 +457,22 @@ Done. Lets run the benchmarks for smollm.
 
 Key: understand if smollm btseytlin/any2json/model-449y0zrw:v6 SO (trained with augs) has better quality than smollm f2yvr0zy-v6-so.
 
+During benchmarks encountered: 
+ERROR:any2json:Request failed: {"error":{"message":"EngineCore encountered an issue. See stack trace (above) for the root cause.","type":"Internal Server Error","param":null,"code":500}}
+Had to restart evals server
+
+(EngineCore_DP0 pid=4083) RuntimeError: [19:36:22] /project/cpp/json_schema_converter.cc:2181: items must be a boolean or an object
+
+For some reason vllm uses V1 engine instead of V2
+
+Seems like VLLM SO breaks down if it can't compile schemas
+
 449y0zrw:
+
 1. Had slightly higher eval loss and train loss
 2. Val loss curve and train loss curve very similar to f2yvr0zy
 3. Grad norm had more spikes. Suddenly much lower after 100k steps. 
 4. Train loss also drops significantly after 100k steps.
-Eval loss was lower for 
+5. From eval callback outputs I see: at 10k steps the model is already competent. Captures json format. But contents can be wrong and hallucinated.
+6. 
+
