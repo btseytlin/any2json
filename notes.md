@@ -612,7 +612,59 @@ https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json
 ```
 
 f2yvr0zy-v6 (trained without augs)
-
+https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json-benchmark-smollm2_f2yvr0zy_v6/v9
 ```json
+{
+  "percentage_request_errors": 0.0,
+  "percentage_json_errors": 0.004,
+  "percentage_schema_errors": 0.011,
+  "percentage_correct": 0.95,
+  "diff_size_lines_added_mean": 11.531,
+  "diff_size_lines_removed_mean": 11.587,
+  "diff_size_chars_added_mean": 377.643,
+  "diff_size_chars_removed_mean": 379.432,
+  "inference_ms_mean": 593.973
+}
+```
 
+Verdict: my augmentations suck and don't help.
+
+Onto the next steps.
+
+Wait. Did the new samples even make it into benchmarking? I used limits
+
+YES, FUCK. I was always testing on the same first 2k samples.
+
+Rerunning benchmarks with randomly sampling 2k benchmark samples
+
+CORRECT RESULTS SURE THIS TIME (I HOPE)
+
+49y0zrw-v6
+```json
+{
+  "percentage_request_errors": 0.0,
+  "percentage_json_errors": 0.004,
+  "percentage_schema_errors": 0.011,
+  "percentage_correct": 0.929,
+  "diff_size_lines_added_mean": 11.571,
+  "diff_size_lines_removed_mean": 11.604,
+  "diff_size_chars_added_mean": 377.174,
+  "diff_size_chars_removed_mean": 379.384,
+  "inference_ms_mean": 595.869
+}
+```
+
+f2yvr0zy-v6
+```
+{
+  "percentage_request_errors": 0.0,
+  "percentage_json_errors": 0.002,
+  "percentage_schema_errors": 0.013,
+  "percentage_correct": 0.951,
+  "diff_size_lines_added_mean": 11.675,
+  "diff_size_lines_removed_mean": 11.664,
+  "diff_size_chars_added_mean": 381.321,
+  "diff_size_chars_removed_mean": 381.925,
+  "inference_ms_mean": 630.843
+}
 ```

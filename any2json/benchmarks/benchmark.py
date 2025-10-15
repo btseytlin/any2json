@@ -2,6 +2,7 @@ from datetime import datetime
 import difflib
 import json
 import os
+import random
 import sys
 import numpy as np
 import traceback
@@ -29,19 +30,19 @@ model_types = {
 }
 
 
-def run_benchmark(model, samples: list[dict]) -> list[dict]:
+def run_benchmark(model, samples: list[dict], sample_indices: list[int]) -> list[dict]:
     results: list[dict] = []
     preds = model.get_predictions(samples)
     id_to_pred = {p["id"]: p for p in preds}
-    for i, sample in enumerate(samples):
+    for idx, sample in zip(sample_indices, samples, strict=True):
         try:
-            prediction = id_to_pred[i]
+            prediction = id_to_pred[idx]
             input_data = sample["input_data"]
             if isinstance(input_data, dict):
                 input_data = json.dumps(input_data)
             results.append(
                 {
-                    "id": i,
+                    "id": idx,
                     "input_data": input_data,
                     "schema": sample["schema"],
                     "correct_answer": sample["output"],
@@ -54,7 +55,7 @@ def run_benchmark(model, samples: list[dict]) -> list[dict]:
             )
         except Exception as e:
             logger.error(
-                f"Error processing prediction for sample {i}: {e}", exc_info=True
+                f"Error processing prediction for sample {idx}: {e}", exc_info=True
             )
             continue
     return results
@@ -212,8 +213,19 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
 
 
 @click.group()
-def cli():
-    pass
+@click.option(
+    "--seed",
+    default=42,
+    type=int,
+    help="Random seed",
+)
+def cli(seed: int):
+    global SEED
+    SEED = seed
+
+    random.seed(SEED)
+
+    logger.info(f"Using seed: {SEED}")
 
 
 @cli.command(
@@ -280,8 +292,10 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit, run_id):
 
     samples = load_hf_dataset(hf_dataset)[split].to_list()
 
+    sample_indices = list(range(len(samples)))
     if limit:
-        samples = samples[:limit]
+        sample_indices = random.sample(sample_indices, limit)
+        samples = [samples[i] for i in sample_indices]
 
     for sample in samples:
         if isinstance(sample["schema"], str):
@@ -292,7 +306,7 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit, run_id):
     logger.info(f"Running benchmark with {len(samples)} samples")
 
     start_dt = datetime.now()
-    results = run_benchmark(model, samples)
+    results = run_benchmark(model, samples, sample_indices)
     end_dt = datetime.now()
     duration_s = (end_dt - start_dt).total_seconds()
     logger.info(f"Benchmarking took {duration_s} seconds")
