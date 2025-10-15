@@ -565,8 +565,24 @@ Verdict: augmentations trained the model to better understand JSON, the number o
 
 What if I run the benchmarks for more examples than 500? Lets see how my sampling affects the score variance.
 
-{'percentage_request_errors': 0.0, 'percentage_json_errors': 0.015, 'percentage_correct': 0.791, 'percentage_schema_errors': 0.004, 'mean_diff_size_lines': 11.971, 'mean_diff_size_chars': 392.206, 'mean_inference_ms': 596.302, 'median_inference_ms': 389.308}
+```json
+{
+  "percentage_request_errors": 0.0,
+  "percentage_json_errors": 0.015,
+  "percentage_schema_errors": 0.004,
+  "percentage_correct": 0.786,
+  "diff_size_lines_added_mean": 11.443,
+  "diff_size_lines_removed_mean": 12.039,
+  "diff_size_chars_added_mean": 386.873,
+  "diff_size_chars_removed_mean": 398.87,
+  "inference_ms_mean": 632.534
+}
+```
+
+Variance for percentage_correct is +-2% at least
 
 Running benchmarks for 449y0zrw with BENCHMARK_LIMIT=2000
 
 I really need to add a benchmark for refusal/negative samples as the next step.
+
+Idea: add negative samples to existing benchmark. 25% of the benchmark should be negative samples. This will allow me to use this one benchmark as the one measure of how good a model is. 
