@@ -440,6 +440,14 @@ A bug in benchmarking script it seems
 
 I got it to work. However if vllm encounters an engine error then it responds 500 to all remaining requests. Need to restart it when that happens.
 
+It finally worked!
+
+smollm f2yvr0zy-v6-so
+
+```python
+{'percentage_request_errors': 0.0, 'percentage_json_errors': 0.034, 'percentage_correct': 0.814, 'percentage_schema_errors': 0.014, 'mean_diff_size_lines': 13.588, 'mean_diff_size_chars': 467.408, 'mean_inference_ms': 986.233, 'median_inference_ms': 564.573}
+```
+
 ### Train with augs
 
 Smollm: https://wandb.ai/btseytlin/any2json/runs/31cjr161/overview
@@ -447,6 +455,11 @@ Gemma: https://wandb.ai/btseytlin/any2json/runs/gbghsh7d?nw=nwuserbtseytlin
 
 Done. Lets run the benchmarks for smollm.
 
+Key: understand if smollm btseytlin/any2json/model-449y0zrw:v6 SO (trained with augs) has better quality than smollm f2yvr0zy-v6-so.
 
-
- 
+449y0zrw:
+1. Had slightly higher eval loss and train loss
+2. Val loss curve and train loss curve very similar to f2yvr0zy
+3. Grad norm had more spikes. Suddenly much lower after 100k steps. 
+4. Train loss also drops significantly after 100k steps.
+Eval loss was lower for 

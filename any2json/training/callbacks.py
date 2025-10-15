@@ -40,7 +40,8 @@ class EvalLoggerCallback(TrainerCallback):
                 "prompt",
                 "completion",
                 "correct_completion",
-                "diff",
+                "diff_size_lines",
+                "diff_size_chars",
                 "sample_sequence",
             ],
             log_mode="INCREMENTAL",
@@ -126,7 +127,8 @@ class EvalLoggerCallback(TrainerCallback):
             )
             correct_completion = input_data.split("[OUTPUT]")[1].strip()
 
-            diff_size = None
+            diff_size_lines = None
+            diff_size_chars = None
             try:
                 correct_json = json.loads(
                     correct_completion.replace(self.tokenizer.eos_token, "").strip()
@@ -153,7 +155,6 @@ class EvalLoggerCallback(TrainerCallback):
                 diff_size_lines = len(
                     [part for part in diff_parts[3:] if part.startswith("-")]
                 )
-                diff_size = diff_size_lines
                 diff_size_chars = sum(
                     [len(part[1:]) for part in diff_parts[3:] if part.startswith("-")]
                 )
@@ -168,7 +169,8 @@ class EvalLoggerCallback(TrainerCallback):
                 prompt,
                 completion,
                 correct_completion,
-                diff_size,
+                diff_size_lines,
+                diff_size_chars,
                 input_data,
             )
         wandb.log({"eval_examples": self.table})
