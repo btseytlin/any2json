@@ -67,116 +67,147 @@ def postprocess_answer(answer: str) -> dict | str | list | int | float | bool | 
     return json.loads(answer)
 
 
-def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
-    details_list = []
-
-    if not results:
-        return details_list, {
-            "percentage_json_errors": None,
-            "percentage_correct": None,
-            "percentage_schema_errors": None,
-            "percentage_request_errors": None,
-            "mean_inference_ms": None,
-            "median_inference_ms": None,
-        }
-
-    correct = []
-    request_error = []
-    json_error = []
-    schema_error = []
-    all_inference_ms = []
-    all_diff_sizes = []
-    all_diff_sizes_chars = []
-    for i, result in enumerate(results):
-        details = {}
-
-        if result.get("error"):
-            request_error.append(i)
-            details["error_type"] = "request_error"
-            details["error"] = result["error"]
-            try:
-                details["traceback"] = result["error"]["traceback"]
-            except Exception:
-                details["traceback"] = None
-            details_list.append(details)
-            continue
-
-        if isinstance(result["schema"], str):
-            result["schema"] = json.loads(result["schema"])
-        schema = fastjsonschema.compile(result["schema"])
-
-        try:
-            answer = postprocess_answer(result["answer"])
-            schema(answer)
-        except fastjsonschema.JsonSchemaException as e:
-            schema_error.append(i)
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            traceback_str = "".join(
-                traceback.format_exception(exc_type, exc_value, exc_traceback)
-            )
-            details["error_type"] = "schema_error"
-            details["error"] = str(e)
-            details["traceback"] = traceback_str
-            details_list.append(details)
-            continue
-        except Exception as e:
-            json_error.append(i)
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            traceback_str = "".join(
-                traceback.format_exception(exc_type, exc_value, exc_traceback)
-            )
-            details["error_type"] = "json_error"
-            details["error"] = str(e)
-            details["traceback"] = traceback_str
-            details_list.append(details)
-            continue
-
-        correct_answer = result["correct_answer"]
-
-        if isinstance(correct_answer, str):
-            correct_answer = json.loads(correct_answer)
-
-        diff_parts = list(
-            difflib.unified_diff(
-                json.dumps(correct_answer, indent=1).splitlines(keepends=True),
-                json.dumps(answer, indent=1).splitlines(keepends=True),
-                fromfile="Correct Answer",
-                tofile="Answer",
-                lineterm="",
-            )
+def calculate_diff_metrics(
+    answer: dict, correct_answer: dict
+) -> dict[str, float | int]:
+    diff_parts = list(
+        difflib.unified_diff(
+            json.dumps(correct_answer, indent=1).splitlines(keepends=True),
+            json.dumps(answer, indent=1).splitlines(keepends=True),
+            fromfile="Correct Answer",
+            tofile="Model Answer",
+            lineterm="",
+            n=0,
         )
-        diff_size_lines = len([part for part in diff_parts[3:] if part.startswith("-")])
-        all_diff_sizes.append(diff_size_lines)
+    )
 
-        diff_size_chars = sum(
-            [len(part[1:]) for part in diff_parts[3:] if part.startswith("-")]
-        )
-        all_diff_sizes_chars.append(diff_size_chars)
-        details["diff_size_lines"] = diff_size_lines
-        details["diff_size_chars"] = diff_size_chars
+    diff_size_lines_added = len(
+        [part for part in diff_parts[3:] if part.startswith("+")]
+    )
+    diff_size_lines_removed = len(
+        [part for part in diff_parts[3:] if part.startswith("-")]
+    )
 
-        if answer == correct_answer:
-            correct.append(i)
-            details["correct"] = True
-        else:
-            details["correct"] = False
+    diff_size_chars_added = sum(
+        [len(part[1:]) for part in diff_parts[3:] if part.startswith("+")]
+    )
+    diff_size_chars_removed = sum(
+        [len(part[1:]) for part in diff_parts[3:] if part.startswith("-")]
+    )
 
-        inference_ms = result.get("meta", {}).get("inference_ms")
-        if inference_ms:
-            all_inference_ms.append(inference_ms)
-
-        details_list.append(details)
-
-    return details_list, {
-        "percentage_request_errors": round(len(request_error) / len(results), 3),
-        "percentage_json_errors": round(len(json_error) / len(results), 3),
-        "percentage_correct": round(len(correct) / len(results), 3),
-        "percentage_schema_errors": round(len(schema_error) / len(results), 3),
-        "mean_diff_size_lines": round(np.mean(all_diff_sizes).item(), 3),
-        "mean_diff_size_chars": round(np.mean(all_diff_sizes_chars).item(), 3),
-        "mean_inference_ms": round(np.mean(all_inference_ms).item(), 3),
-        "median_inference_ms": round(np.median(all_inference_ms).item(), 3),
+    return {
+        "diff_size_lines_added": diff_size_lines_added,
+        "diff_size_lines_removed": diff_size_lines_removed,
+        "diff_size_chars_added": diff_size_chars_added,
+        "diff_size_chars_removed": diff_size_chars_removed,
     }
+
+
+def calculate_sample_metrics(result: dict) -> dict:
+    metrics_details = {}
+
+    if result.get("error"):
+        metrics_details["error_type"] = "request_error"
+        metrics_details["error"] = result["error"]
+        try:
+            metrics_details["traceback"] = result["error"]["traceback"]
+        except Exception:
+            metrics_details["traceback"] = None
+        return metrics_details
+
+    if isinstance(result["schema"], str):
+        result["schema"] = json.loads(result["schema"])
+    schema = fastjsonschema.compile(result["schema"])
+
+    try:
+        answer = postprocess_answer(result["answer"])
+        schema(answer)
+    except fastjsonschema.JsonSchemaException as e:
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        traceback_str = "".join(
+            traceback.format_exception(exc_type, exc_value, exc_traceback)
+        )
+        metrics_details["error_type"] = "schema_error"
+        metrics_details["error"] = str(e)
+        metrics_details["traceback"] = traceback_str
+        return metrics_details
+    except Exception as e:
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        traceback_str = "".join(
+            traceback.format_exception(exc_type, exc_value, exc_traceback)
+        )
+        metrics_details["error_type"] = "json_error"
+        metrics_details["error"] = str(e)
+        metrics_details["traceback"] = traceback_str
+        return metrics_details
+
+    correct_answer = result["correct_answer"]
+
+    if isinstance(correct_answer, str):
+        correct_answer = json.loads(correct_answer)
+
+    metrics_details["correct"] = answer == correct_answer
+
+    diff_metrics = calculate_diff_metrics(answer, correct_answer)
+    metrics_details["diff_size_lines_added"] = diff_metrics["diff_size_lines_added"]
+    metrics_details["diff_size_lines_removed"] = diff_metrics["diff_size_lines_removed"]
+    metrics_details["diff_size_chars_added"] = diff_metrics["diff_size_chars_added"]
+    metrics_details["diff_size_chars_removed"] = diff_metrics["diff_size_chars_removed"]
+
+    metrics_details["inference_ms"] = result.get("meta", {}).get("inference_ms")
+
+    return metrics_details
+
+
+def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
+    if not results:
+        return [], {}
+
+    metrics_details_list = []
+    for i, result in enumerate(results):
+        sample_metric_details = calculate_sample_metrics(result)
+        metrics_details_list.append(sample_metric_details)
+
+    aggregate_metrics = {}
+    request_error = [
+        m for m in metrics_details_list if m.get("error_type") == "request_error"
+    ]
+    aggregate_metrics["percentage_request_errors"] = round(
+        len(request_error) / len(results), 3
+    )
+
+    json_error = [
+        m for m in metrics_details_list if m.get("error_type") == "json_error"
+    ]
+    aggregate_metrics["percentage_json_errors"] = round(
+        len(json_error) / len(results), 3
+    )
+
+    schema_error = [
+        m for m in metrics_details_list if m.get("error_type") == "schema_error"
+    ]
+    aggregate_metrics["percentage_schema_errors"] = round(
+        len(schema_error) / len(results), 3
+    )
+
+    correct = [m for m in metrics_details_list if m.get("correct")]
+    aggregate_metrics["percentage_correct"] = round(len(correct) / len(results), 3)
+
+    statistics_metrics = [
+        "diff_size_lines_added",
+        "diff_size_lines_removed",
+        "diff_size_chars_added",
+        "diff_size_chars_removed",
+        "inference_ms",
+    ]
+
+    for metric in statistics_metrics:
+        all_metrics = [
+            m.get(metric) for m in metrics_details_list if m.get(metric) is not None
+        ]
+        aggregate_metrics[f"{metric}_mean"] = round(np.mean(all_metrics).item(), 3)
+
+    return metrics_details_list, aggregate_metrics
 
 
 @click.group()
@@ -320,7 +351,7 @@ def calculate_metrics_cmd(results_dir):
 
     details_list, metrics = calculate_metrics(results)
 
-    logger.info(f"Metrics:\n{metrics}")
+    logger.info(f"Metrics:\n{json.dumps(metrics, indent=2)}")
 
     output = {
         "metrics": metrics,

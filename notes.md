@@ -443,9 +443,36 @@ I got it to work. However if vllm encounters an engine error then it responds 50
 It finally worked!
 
 smollm f2yvr0zy-v6-so
+https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json-benchmark-smollm2_f2yvr0zy_v6_so/v10/files/metrics.json
+
 
 ```python
-{'percentage_request_errors': 0.0, 'percentage_json_errors': 0.034, 'percentage_correct': 0.814, 'percentage_schema_errors': 0.014, 'mean_diff_size_lines': 13.588, 'mean_diff_size_chars': 467.408, 'mean_inference_ms': 986.233, 'median_inference_ms': 564.573}
+{
+    "percentage_request_errors": 0.624,
+    "percentage_json_errors": 0.016,
+    "percentage_correct": 0.05,
+    "percentage_schema_errors": 0.0,
+    "mean_diff_size_lines": 18.172,
+    "mean_diff_size_chars": 522.178,
+    "mean_inference_ms": 1818.368,
+    "median_inference_ms": 752.188
+  }
+```
+
+smollm f2yvr0zy-v6 (no so)
+
+https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json-benchmark-smollm2_f2yvr0zy_v6/v7/files/metrics.json
+```python
+{
+    "percentage_request_errors": 0.0,
+    "percentage_json_errors": 0.034,
+    "percentage_correct": 0.814,
+    "percentage_schema_errors": 0.014,
+    "mean_diff_size_lines": 13.588,
+    "mean_diff_size_chars": 467.408,
+    "mean_inference_ms": 986.233,
+    "median_inference_ms": 564.573
+  }
 ```
 
 ### Train with augs
@@ -474,5 +501,72 @@ Seems like VLLM SO breaks down if it can't compile schemas
 3. Grad norm had more spikes. Suddenly much lower after 100k steps. 
 4. Train loss also drops significantly after 100k steps.
 5. From eval callback outputs I see: at 10k steps the model is already competent. Captures json format. But contents can be wrong and hallucinated.
-6. 
 
+
+Got benchmark results 
+
+449y0zrw-v6-so
+```python
+{'percentage_request_errors': 0.016, 'percentage_json_errors': 0.034, 'percentage_correct': 0.136, 'percentage_schema_errors': 0.0, 'mean_diff_size_lines': 18.438, 'mean_diff_size_chars': 563.554, 'mean_inference_ms': 2043.455, 'median_inference_ms': 332.689}
+```
+
+449y0zrw-v6 no so
+```python
+{'percentage_request_errors': 0.0, 'percentage_json_errors': 0.016, 'percentage_correct': 0.772, 'percentage_schema_errors': 0.01, 'mean_diff_size_lines': 15.349, 'mean_diff_size_chars': 494.565, 'mean_inference_ms': 764.187, 'median_inference_ms': 438.794}
+```
+
+Ok, SO is broken in some way with only 13.6% correct. FUCK IT. Lets only work with no-so in benchmarks for now. 
+
+Smollm 449y0zrw-v6 (augs) vs f2yvr0zy-v6-so (no augs)
+- percentage_json_errors 0.016 vs 0.034
+- percentage_correct 0.772 vs 0.814
+- percentage_schema_errors 0.01 vs 0.014 
+- mean_diff_size_lines: 15.3 vs 13.6
+
+Alpha experiment verdict: augmentations in that state do not make models achieve better quality on my benchmark.
+
+However I think the benchmark might be ill-designed. 449y0zrw was trained with negative samples. It might be hallucating less and refusing to answer. It tires less, so achieves less accuracy. 
+
+I need ot log not just mean diff, but diff added extra (hallucation) and diff removed (missing)
+
+I added calculation of diff chars added and diff charts removed to benchmark metrics
+
+any2json-benchmark-smollm2_f2yvr0zy_v6:v7
+```json
+{
+  "percentage_request_errors": 0.0,
+  "percentage_json_errors": 0.034,
+  "percentage_schema_errors": 0.014,
+  "percentage_correct": 0.814,
+  "diff_size_lines_added_mean": 12.975,
+  "diff_size_lines_removed_mean": 13.588,
+  "diff_size_chars_added_mean": 453.345,
+  "diff_size_chars_removed_mean": 467.408,
+  "inference_ms_mean": 986.233
+}
+```
+
+any2json-benchmark-smollm2_449y0zrw_v6:v1
+```json
+{
+  "percentage_request_errors": 0.0,
+  "percentage_json_errors": 0.016,
+  "percentage_schema_errors": 0.01,
+  "percentage_correct": 0.772,
+  "diff_size_lines_added_mean": 13.294,
+  "diff_size_lines_removed_mean": 15.349,
+  "diff_size_chars_added_mean": 460.489,
+  "diff_size_chars_removed_mean": 494.565,
+  "inference_ms_mean": 764.187
+}
+```
+
+Verdict: augmentations trained the model to better understand JSON, the number of json and schema errors went down. However it didn't decrease hallucinations.
+
+What if I run the benchmarks for more examples than 500? Lets see how my sampling affects the score variance.
+
+{'percentage_request_errors': 0.0, 'percentage_json_errors': 0.015, 'percentage_correct': 0.791, 'percentage_schema_errors': 0.004, 'mean_diff_size_lines': 11.971, 'mean_diff_size_chars': 392.206, 'mean_inference_ms': 596.302, 'median_inference_ms': 389.308}
+
+Running benchmarks for 449y0zrw with BENCHMARK_LIMIT=2000
+
+I really need to add a benchmark for refusal/negative samples as the next step.
