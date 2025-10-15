@@ -11,6 +11,8 @@ echo "Code and dependencies updated"
 echo "Downloading checkpoint"
 export WANDB_RUN_ID=$(python scripts/wandb_tools.py --quiet get-run-id)
 
+export ROOT_DIR=/workspace
+
 echo "WANDB_RUN_ID: $WANDB_RUN_ID"
 
 # Required environment variables
@@ -36,7 +38,7 @@ echo "Generated MODEL_NAME: $MODEL_NAME"
 : ${MODEL_PATH_OVERRIDE:=""}
 : ${NO_SO_MODEL_PATH_OVERRIDE:=""}
 
-python scripts/wandb_tools.py --run-id $WANDB_RUN_ID download-artifact $MODEL_ARTIFACT_ID --output-root /workspace/models
+python scripts/wandb_tools.py --run-id $WANDB_RUN_ID download-artifact $MODEL_ARTIFACT_ID --output-root $ROOT_DIR/models
 
 echo "Downloaded checkpoint"
 echo "Setup complete, running commands"
@@ -45,24 +47,24 @@ echo "Setup complete, running commands"
 if [[ -n "$MODEL_PATH_OVERRIDE" ]]; then
     MODEL_PATH="$MODEL_PATH_OVERRIDE"
 else
-    MODEL_PATH="/workspace/models/$ARTIFACT_PART"
+    MODEL_PATH="$ROOT_DIR/models/$ARTIFACT_PART"
 fi
 
 # Structured Output Benchmark
 if [[ "$RUN_STRUCTURED_OUTPUT" == "true" ]]; then
     echo "Running structured output benchmark"
     
-    python any2json/benchmarks/benchmark.py run --run-id $WANDB_RUN_ID --hf-dataset btseytlin/any2json --split test --model-type vllm_custom --output-dir=benchmark_results \
+    python any2json/benchmarks/benchmark.py run --run-id $WANDB_RUN_ID --hf-dataset btseytlin/any2json --split test --model-type vllm_custom \
         --model-kwargs="{\"model_name\": \"$MODEL_PATH\", \"guided_json\": true, \"server_startup_timeout\": 600}" \
-        --output-dir /workspace/benchmark_results/${MODEL_NAME}_so \
+        --output-dir $ROOT_DIR/benchmark_results/${MODEL_NAME}_so \
         --limit $BENCHMARK_LIMIT
 
-    python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory /workspace/benchmark_results/${MODEL_NAME}_so \
+    python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory $ROOT_DIR/benchmark_results/${MODEL_NAME}_so \
         --name any2json-benchmark-${MODEL_NAME}_so --type benchmark_results
 
-    python any2json/benchmarks/benchmark.py metrics /workspace/benchmark_results/${MODEL_NAME}_so
+    python any2json/benchmarks/benchmark.py metrics $ROOT_DIR/benchmark_results/${MODEL_NAME}_so
 
-    python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory /workspace/benchmark_results/${MODEL_NAME}_so --incremental --name any2json-benchmark-${MODEL_NAME}_so --type benchmark_results
+    python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory $ROOT_DIR/benchmark_results/${MODEL_NAME}_so --incremental --name any2json-benchmark-${MODEL_NAME}_so --type benchmark_results
 fi
 
 # No Structured Output Benchmark
@@ -76,17 +78,17 @@ if [[ "$RUN_NO_STRUCTURED_OUTPUT" == "true" ]]; then
         NO_SO_MODEL_PATH="$MODEL_PATH"
     fi
     
-    python any2json/benchmarks/benchmark.py run --run-id $WANDB_RUN_ID --hf-dataset btseytlin/any2json --split test --model-type vllm_custom --output-dir=benchmark_results \
+    python any2json/benchmarks/benchmark.py run --run-id $WANDB_RUN_ID --hf-dataset btseytlin/any2json --split test --model-type vllm_custom  \
         --model-kwargs="{\"model_name\": \"$NO_SO_MODEL_PATH\", \"server_startup_timeout\": 600}" \
-        --output-dir /workspace/benchmark_results/$MODEL_NAME \
+        --output-dir $ROOT_DIR/benchmark_results/$MODEL_NAME \
         --limit $BENCHMARK_LIMIT
 
-    python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory /workspace/benchmark_results/$MODEL_NAME \
+    python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory $ROOT_DIR/benchmark_results/$MODEL_NAME \
         --name any2json-benchmark-$MODEL_NAME --type benchmark_results
 
-    python any2json/benchmarks/benchmark.py metrics /workspace/benchmark_results/$MODEL_NAME
+    python any2json/benchmarks/benchmark.py metrics $ROOT_DIR/benchmark_results/$MODEL_NAME
 
-    python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory /workspace/benchmark_results/$MODEL_NAME --incremental --name any2json-benchmark-$MODEL_NAME --type benchmark_results
+    python scripts/wandb_tools.py --run-id $WANDB_RUN_ID upload-directory $ROOT_DIR/benchmark_results/$MODEL_NAME --incremental --name any2json-benchmark-$MODEL_NAME --type benchmark_results
 fi
 
 echo "Benchmark completed"
