@@ -586,3 +586,33 @@ Running benchmarks for 449y0zrw with BENCHMARK_LIMIT=2000
 I really need to add a benchmark for refusal/negative samples as the next step.
 
 Idea: add negative samples to existing benchmark. 25% of the benchmark should be negative samples. This will allow me to use this one benchmark as the one measure of how good a model is. 
+
+I added 25% negative samples to the benchmark and 10% missing schema samples. Recalculating metrics for 449y0zrw (augs) and f2yvr0zy (no augs).
+
+#### New benchmark results
+
+Negative samples and missing schema samples were added to the test set
+
+449y0zrw-v6 (trained with augs)
+
+https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json-benchmark-smollm2_449y0zrw_v6/v7/files
+
+```json
+{
+  "percentage_request_errors": 0.0,
+  "percentage_json_errors": 0.005,
+  "percentage_schema_errors": 0.015,
+  "percentage_correct": 0.929,
+  "diff_size_lines_added_mean": 11.428,
+  "diff_size_lines_removed_mean": 11.533,
+  "diff_size_chars_added_mean": 373.538,
+  "diff_size_chars_removed_mean": 376.207,
+  "inference_ms_mean": 586.034
+}
+```
+
+f2yvr0zy-v6 (trained without augs)
+
+```json
+
+```
