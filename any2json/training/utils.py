@@ -61,8 +61,16 @@ def make_group_split(ds_dict: DatasetDict, test_size: int, seed: int) -> Dataset
 
 def load_hf_dataset(path_or_repo: str) -> DatasetDict:
     if os.path.isdir(path_or_repo):
-        return load_from_disk(path_or_repo)
-    return load_dataset(path_or_repo)
+        dataset = load_from_disk(path_or_repo)
+    else:
+        dataset = load_dataset(path_or_repo)
+
+    def load_meta_batch(batch):
+        batch["meta"] = [json.loads(x) for x in batch["meta"]]
+        return batch
+
+    dataset = dataset.map(load_meta_batch, batched=True)
+    return dataset
 
 
 def apply_debug_limit(ds: DatasetDict, limit: int) -> DatasetDict:

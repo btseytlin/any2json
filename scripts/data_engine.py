@@ -1,9 +1,10 @@
 import asyncio
+import copy
 import json
 import os
 import random
-import hashlib
 import click
+import fastjsonschema
 from dotenv import load_dotenv
 import os
 import time
@@ -12,7 +13,6 @@ from datasets import Dataset, DatasetDict, load_dataset
 from dotenv import load_dotenv
 import git
 from sqlalchemy import select
-from sqlalchemy.orm import joinedload
 from any2json.agents.schema_generator import JSONSchemaGeneratorAgent
 from any2json.agents.chunk_generator import JSONChunkGeneratorAgent
 from any2json.data_engine.generators.converters.utils import (
@@ -36,11 +36,18 @@ from any2json.database.models import Chunk, JsonSchema, SchemaConversion
 from any2json.enums import ContentType
 from any2json.grouping import assign_groups, train_test_split_groups
 from any2json.infinigram import InfiniGramAPI
-from any2json.utils import logger, configure_loggers, stringify_content
+from any2json.training.augment import make_null_result_for_schema
+from any2json.utils import (
+    json_dumps_minified,
+    logger,
+    configure_loggers,
+    stringify_content,
+)
 from any2json.dataset_processors import get_dataset_processor
 
 from any2json.data_engine.generators.synthetic.pandas_generator import PandasGenerator
 from any2json.data_engine.utils import preview_chunks, save_chunks_to_db
+from any2json.training.constants import SCHEMA_MISSING_TOKEN
 
 
 PREVIEW = False
@@ -729,6 +736,80 @@ def assign_groups_command(num_groups: int | None):
 # Step 4.2: Export HF dataset dict
 
 
+def generate_negative_sample(
+    input_data: str,
+    schema: str,
+    output: str,
+    rng: random.Random,
+    test_samples: list[dict],
+    max_attempts: int = 3,
+):
+    indices = list(range(len(test_samples)))
+    for _ in range(max_attempts):
+        if not indices:
+            break
+        random_idx = rng.choice(indices)
+        random_row = test_samples[random_idx]
+        random_schema = random_row["schema"]
+        random_schema_dict = (
+            json.loads(random_schema)
+            if isinstance(random_schema, str)
+            else random_schema
+        )
+        random_schema_id = random_row["meta"]["schema_id"]
+        output_dict = json.loads(output) if isinstance(output, str) else output
+
+        try:
+            fastjsonschema.validate(
+                random_schema_dict, output_dict, detailed_exceptions=False
+            )
+            indices.remove(random_idx)
+        except Exception as e:
+            # Output does not match random schema, so we can use it as a negative sample
+            schema = random_schema
+            output = json_dumps_minified(
+                make_null_result_for_schema(random_schema_dict)
+            )
+            break
+    else:
+        raise ValueError("Failed to generate negative sample")
+    return input_data, schema, output, random_schema_id
+
+
+def generate_negative_samples(
+    rng: random.Random,
+    test_samples: list[dict],
+    num_negative_samples: int,
+):
+    negative_samples = []
+    source_samples = rng.sample(test_samples, k=num_negative_samples)
+    for sample in source_samples:
+        new_sample = copy.deepcopy(sample)
+        new_sample["meta"]["original_schema_id"] = sample["meta"]["schema_id"]
+        try:
+            (
+                new_sample["input_data"],
+                new_sample["schema"],
+                new_sample["output"],
+                new_sample["meta"]["schema_id"],
+            ) = generate_negative_sample(
+                input_data=sample["input_data"],
+                schema=sample["schema"],
+                output=sample["output"],
+                rng=rng,
+                test_samples=test_samples,
+            )
+        except ValueError as e:
+            logger.warning(
+                f"Failed to generate negative sample for {sample['meta']['schema_id']}: {e}"
+            )
+            continue
+        new_sample["meta"]["is_synthetic"] = True
+        new_sample["meta"]["synthetic_type"] = "negative"
+        negative_samples.append(new_sample)
+    return negative_samples
+
+
 @cli.command(
     name="export-samples",
 )
@@ -750,7 +831,23 @@ def assign_groups_command(num_groups: int | None):
     type=int,
     required=False,
 )
-def export_samples_command(output_file: str, num_samples: int | None, test_size: int):
+@click.option(
+    "--test-missing-schema-samples",
+    default=0.1,
+    type=float,
+)
+@click.option(
+    "--test-negative-samples",
+    default=0.25,
+    type=float,
+)
+def export_samples_command(
+    output_file: str,
+    num_samples: int | None,
+    test_size: int,
+    test_missing_schema_samples: float,
+    test_negative_samples: float,
+):
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         schema_conversions_query = (
             select(SchemaConversion)
@@ -824,6 +921,37 @@ def export_samples_command(output_file: str, num_samples: int | None, test_size:
                 }
             )
 
+        test_samples = [s for s in samples if s["meta"]["is_test"]]
+
+        rng = random.Random(SEED)
+
+        if test_missing_schema_samples:
+            num_missing_schema_samples = int(
+                test_missing_schema_samples * len(test_samples)
+            )
+            source_samples = rng.sample(test_samples, k=num_missing_schema_samples)
+            missing_schema_samples = []
+            for sample in source_samples:
+                new_sample = copy.deepcopy(sample)
+                new_sample["schema"] = SCHEMA_MISSING_TOKEN
+                new_sample["meta"]["is_synthetic"] = True
+                new_sample["meta"]["synthetic_type"] = "missing_schema"
+                missing_schema_samples.append(new_sample)
+            logger.info(
+                f"Generated {len(missing_schema_samples)} missing schema samples"
+            )
+            samples.extend(missing_schema_samples)
+
+        if test_negative_samples:
+            num_negative_samples = int(test_negative_samples * len(test_samples))
+            negative_samples = generate_negative_samples(
+                rng=rng,
+                test_samples=test_samples,
+                num_negative_samples=num_negative_samples,
+            )
+            logger.info(f"Generated {len(negative_samples)} negative samples")
+            samples.extend(negative_samples)
+
         with open(output_file, "w") as f:
             json.dump(samples, f, indent=2)
 
@@ -856,14 +984,25 @@ def export_hf_dataset_command(input_file: str, output_dir: str, repo_id: str):
         samples = json.load(f)
 
     train_items = [s for s in samples if not s["meta"]["is_test"]]
-    for s in train_items:
-        s["schema"] = json.dumps(s["schema"])
-        s["output"] = json.dumps(s["output"])
-
     test_items = [s for s in samples if s["meta"]["is_test"]]
+
+    for s in train_items:
+        s["schema"] = (
+            json.dumps(s["schema"]) if not isinstance(s["schema"], str) else s["schema"]
+        )
+        s["output"] = (
+            json.dumps(s["output"]) if not isinstance(s["output"], str) else s["output"]
+        )
+        s["meta"] = json.dumps(s["meta"])
+
     for s in test_items:
-        s["schema"] = json.dumps(s["schema"])
-        s["output"] = json.dumps(s["output"])
+        s["schema"] = (
+            json.dumps(s["schema"]) if not isinstance(s["schema"], str) else s["schema"]
+        )
+        s["output"] = (
+            json.dumps(s["output"]) if not isinstance(s["output"], str) else s["output"]
+        )
+        s["meta"] = json.dumps(s["meta"])
 
     train_ds = Dataset.from_list(train_items)
     test_ds = Dataset.from_list(test_items)
