@@ -62,9 +62,10 @@ python scripts/data_engine.py get-from-infinigram --num-chunks=30000
 python scripts/data_engine.py expand-refs-in-schemas
 python scripts/data_engine.py extract-sub-schemas
 python scripts/db_tools.py drop-broken-schemas
+python scripts/data_engine.py extract-sub-jsons
 python scripts/data_engine.py extract-json-chunks --frac-per-document=0.2 --max-depth=10 --max-chunks=12000
 
-python scripts/data_engine.py generate-pandas-chunks --num-chunks=5000
+python scripts/data_engine.py generate-pandas-chunks --num-chunks=10000
 python scripts/db_tools.py drop-duplicate-schemas
 python scripts/db_tools.py drop-duplicate-chunks
 python scripts/db_tools.py vacuum
@@ -86,6 +87,11 @@ python scripts/data_engine.py generate-schemas
 python scripts/db_tools.py drop-duplicate-schemas
 python scripts/data_engine.py map-chunks
 
+python scripts/db_tools.py validate_schema_mappings
+python scripts/db_tools.py vacuum
+python scripts/db_tools.py stats
+
+
 python scripts/data_engine.py generate-chunks
 python scripts/db_tools.py drop-duplicate-chunks
 python scripts/data_engine.py generate-chunks --not-only-dangling --num-schemas 10000 
@@ -93,6 +99,7 @@ python scripts/db_tools.py drop-duplicate-chunks
 python scripts/db_tools.py cull-chunks --min-length=5 --max-length=8096
 python scripts/db_tools.py vacuum
 python scripts/db_tools.py stats
+
 ```
 
 Stage 4: making format conversions

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 import sys
 from typing import Any, Dict
 from pydantic import Field, field_validator
@@ -169,21 +170,82 @@ class JSONChunkGeneratorAgent:
                 if isinstance(input_schema, dict)
                 else input_schema
             )
+
+            roles = [
+                "archaeologist",
+                "astronaut",
+                "astrophysicist",
+                "audio engineer",
+                "biomedical engineer",
+                "biologist",
+                "blockchain developer",
+                "business analyst",
+                "chef",
+                "chemist",
+                "civil engineer",
+                "climate scientist",
+                "content writer",
+                "cybersecurity analyst",
+                "data scientist",
+                "dentist",
+                "economist",
+                "electrical engineer",
+                "environmental scientist",
+                "fashion designer",
+                "financial advisor",
+                "game developer",
+                "geneticist",
+                "geologist",
+                "graphic designer",
+                "historian",
+                "industrial designer",
+                "journalist",
+                "lawyer",
+                "librarian",
+                "marine biologist",
+                "marketing specialist",
+                "mathematician",
+                "mechanical engineer",
+                "medical researcher",
+                "meteorologist",
+                "microbiologist",
+                "neuroscientist",
+                "nurse",
+                "nutritionist",
+                "occupational therapist",
+                "oceanographer",
+                "pharmacist",
+                "photographer",
+                "physical therapist",
+                "physicist",
+                "product manager",
+                "psychiatrist",
+                "psychologist",
+                "public health specialist",
+                "robotics engineer",
+                "seo specialist",
+                "social media manager",
+                "social worker",
+                "software engineer",
+                "sound designer",
+                "statistician",
+                "supply chain manager",
+                "surgeon",
+                "teacher",
+                "urban planner",
+                "ux researcher",
+                "veterinarian",
+                "video editor",
+                "zoologist",
+            ]
+
+            role = random.choice(roles)
+
             prompt = f"""
-            Generate a JSON for this schema:
+
+            As a {role}, generate a JSON for this schema:
             {input_schema_str}
             """
-
-            if ctx.deps.previous_json and ctx.deps.error_message:
-                prompt += f"""
-                Previously you generated this json:
-                {json.dumps(ctx.deps.previous_json, indent=1)}
-
-                But it failed validation with the following error:
-                {ctx.deps.error_message}
-
-                Please correct the json and return a valid JSON.
-                """
 
             return prompt
 
