@@ -483,6 +483,25 @@ def drop_dangling_schemas_command(limit: int):
         )
 
 
+@cli.command(
+    name="drop-broken-schemas",
+)
+def drop_broken_schemas_command():
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        logger.info("Querying dangling schemas")
+        schemas = db_session.execute(select(JsonSchema)).scalars().all()
+        broken_schemas = []
+        for schema in schemas:
+            try:
+                fastjsonschema.compile(schema.content, detailed_exceptions=False)
+            except Exception as e:
+                broken_schemas.append((schema, e))
+        logger.info(f"Found {len(broken_schemas)} broken schemas")
+        for schema, error in broken_schemas:
+            logger.info(f"Dropping broken schema {schema.id}: {error}")
+            db_session.delete(schema)
+
+
 @cli.command()
 def drop_xml():
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:

@@ -21,9 +21,11 @@ from any2json.data_engine.generators.converters.utils import (
 from any2json.data_engine.helpers import (
     deduplicate_chunks,
     extract_json_chunks,
+    extract_sub_jsons,
     extract_sub_schemas,
     generate_chunks_for_schemas,
     generate_schemas_for_chunks,
+    get_json_chunks,
     get_json_chunks_with_no_schema,
     get_json_chunks_with_schema,
     get_json_documents,
@@ -371,7 +373,6 @@ def extract_json_chunks_command(
 ):
     logger.info(f"Extracting json chunks from {DB_FILE}")
 
-    # TODO modify traverse not documents but nested json objects
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         documents = get_json_documents(db_session)
         logger.info(f"Found {len(documents)} documents to process")
@@ -398,7 +399,62 @@ def extract_json_chunks_command(
                 print()
 
 
-## Step 2.2: Expand refs in schemas
+# Step 2.2: Extract json chunks from nested json objects
+
+
+@cli.command(
+    name="extract-sub-jsons",
+)
+@click.option(
+    "--max-depth",
+    default=10,
+    type=int,
+    help="Maximum depth to generate chunks from",
+)
+@click.option(
+    "--frac-per-chunk",
+    default=0.2,
+    type=float,
+    help="Fraction of chunks to take from each chunk",
+)
+@click.option(
+    "--max-chunks",
+    default=None,
+    type=int,
+    help="Maximum number of chunks to generate",
+)
+def extract_sub_jsons_command(
+    max_depth: int, frac_per_chunk: float, max_chunks: int | None
+):
+    logger.info(f"Extracting sub-jsons from existing chunks in {DB_FILE}")
+
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        chunks = get_json_chunks(db_session)
+        logger.info(f"Found {len(chunks)} JSON chunks to process")
+        new_chunks = extract_sub_jsons(
+            chunks,
+            max_depth=max_depth,
+            frac_per_chunk=frac_per_chunk,
+            max_chunks=max_chunks,
+        )
+        logger.info(f"Generated {len(new_chunks)} sub-json chunks")
+
+        deduplicated_chunks = deduplicate_chunks(new_chunks)
+
+        db_session.add_all(deduplicated_chunks)
+        logger.info(f"After deduplication: adding {len(deduplicated_chunks)} chunks")
+
+        if PREVIEW:
+            print("Previewing last 10 chunks")
+            for chunk in deduplicated_chunks[-10:]:
+                print(f"{chunk.parent_chunk_id=}")
+                print(f"{chunk.content=}")
+                print()
+                print()
+                print()
+
+
+## Step 2.3: Expand refs in schemas
 
 
 @cli.command(
@@ -437,7 +493,7 @@ def expand_refs_in_schemas_command():
             logger.info("Preview mode: changes not committed")
 
 
-# Step 2.3: Extract sub-schemas from JsonSchemas
+# Step 2.4: Extract sub-schemas from JsonSchemas
 
 
 @cli.command(

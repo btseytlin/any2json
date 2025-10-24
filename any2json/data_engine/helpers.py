@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-def get_json_chunks_with_schema(db_session: Session) -> list[Chunk]:
+def get_json_chunks_with_schema_non_synthetic(db_session: Session) -> list[Chunk]:
     return (
         db_session.query(Chunk)
         .filter(Chunk.schema_id.isnot(None))
@@ -107,8 +107,8 @@ def get_chunks_from_record(
     chunks = []
 
     if isinstance(record, (list, dict)):
+        any_value = False
         if isinstance(record, dict):
-            any_value = False
             for k, v in record.items():
                 if v:
                     any_value = True
@@ -207,6 +207,65 @@ def get_json_chunks_with_no_schema(
         .offset(offset)
         .all()
     )
+
+
+def get_json_chunks(db_session: Session) -> list[Chunk]:
+    return (
+        db_session.query(Chunk)
+        .filter(Chunk.content_type == ContentType.JSON.value)
+        .filter(Chunk.content != "")
+        .filter(Chunk.content is not None)
+        .all()
+    )
+
+
+def extract_sub_jsons(
+    chunks: list[Chunk],
+    max_depth: int = 7,
+    frac_per_chunk: float = 0.2,
+    max_chunks: int | None = None,
+) -> list[Chunk]:
+    new_chunks = []
+    for chunk in chunks:
+        json_content = json.loads(chunk.content)
+
+        sub_json_objects = get_chunks_from_record(json_content, max_depth=max_depth)
+
+        sub_json_objects_filtered = []
+        for sub_json in sub_json_objects:
+            try:
+                sub_json_str = json.dumps(sub_json)
+                if len(sub_json_str) >= 100:
+                    sub_json_objects_filtered.append(sub_json)
+            except Exception as e:
+                continue
+
+        if not sub_json_objects_filtered:
+            continue
+
+        sub_json_objects = random.sample(
+            sub_json_objects_filtered,
+            max(int(len(sub_json_objects_filtered) * frac_per_chunk), 1),
+        )
+
+        for sub_json in sub_json_objects:
+            new_chunks.append(
+                Chunk(
+                    parent_chunk_id=chunk.id,
+                    content=json.dumps(sub_json),
+                    content_type=ContentType.JSON.value,
+                    is_synthetic=False,
+                    meta={
+                        "source": "extracted_sub_json",
+                        "original_chunk_id": chunk.id,
+                    },
+                )
+            )
+
+        if max_chunks and len(new_chunks) >= max_chunks:
+            break
+
+    return new_chunks
 
 
 def get_schemas_with_no_chunks(db_session: Session) -> list[JsonSchema]:
