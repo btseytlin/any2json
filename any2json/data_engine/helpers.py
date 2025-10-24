@@ -557,52 +557,89 @@ def generate_synthetic_schemas(
     return new_schemas, new_chunks, new_schema_conversions
 
 
-def fetch_schema_from_url(url: str, timeout: int = 10) -> dict | None:
+def fetch_schema_from_url(url: str, timeout: int = 10) -> dict:
     try:
         response = httpx.get(url, timeout=timeout, follow_redirects=True)
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        logger.debug(f"Failed to fetch schema from {url}: {e}")
-        return None
+        raise ValueError(f"Failed to fetch schema from {url}: {e}") from e
 
 
 def extract_schema_from_ref(
     ref_value: str, base_schema: dict | None = None
-) -> tuple[dict | None, str]:
+) -> tuple[dict, str]:
     if ref_value.startswith("http://") or ref_value.startswith("https://"):
         if "#/" in ref_value:
             url, json_pointer = ref_value.split("#/", 1)
             schema = fetch_schema_from_url(url)
-            if schema:
-                parts = json_pointer.split("/")
-                current = schema
-                for part in parts:
-                    if isinstance(current, dict) and part in current:
-                        current = current[part]
-                    else:
-                        return None, f"url:{url}#/{json_pointer}"
-                if isinstance(current, dict):
-                    return current, f"url:{url}#/{json_pointer}"
+            parts = json_pointer.split("/")
+            current = schema
+            for part in parts:
+                if isinstance(current, dict) and part in current:
+                    current = current[part]
+                else:
+                    raise ValueError(
+                        f"Cannot resolve JSON pointer {json_pointer} in schema from {url}"
+                    )
+            if not isinstance(current, dict):
+                raise ValueError(
+                    f"Reference {ref_value} does not point to a schema object"
+                )
+            return current, f"url:{url}#/{json_pointer}"
         else:
             schema = fetch_schema_from_url(ref_value)
-            if schema and isinstance(schema, dict):
-                return schema, f"url:{ref_value}"
-        return None, f"url:{ref_value}"
+            if not isinstance(schema, dict):
+                raise ValueError(
+                    f"Schema fetched from {ref_value} is not a valid object"
+                )
+            return schema, f"url:{ref_value}"
     elif ref_value.startswith("#/"):
+        if not base_schema:
+            raise ValueError(
+                f"Cannot resolve reference {ref_value} without base schema"
+            )
         pointer = ref_value[2:]
-        if base_schema:
+        parts = pointer.split("/")
+        current = base_schema
+        for part in parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                raise ValueError(
+                    f"Cannot resolve reference {ref_value} in base schema - path not found at '{part}'"
+                )
+        if not isinstance(current, dict):
+            raise ValueError(f"Reference {ref_value} does not point to a schema object")
+        return current, f"ref:{ref_value}"
+    elif "#/" in ref_value and base_schema:
+        schema_id_part, pointer = ref_value.split("#/", 1)
+        base_schema_id = base_schema.get("$id", "")
+        if base_schema_id and (
+            schema_id_part == base_schema_id
+            or schema_id_part.endswith(base_schema_id)
+            or base_schema_id.endswith(schema_id_part)
+        ):
             parts = pointer.split("/")
             current = base_schema
             for part in parts:
                 if isinstance(current, dict) and part in current:
                     current = current[part]
                 else:
-                    return None, f"ref:{ref_value}"
-            if isinstance(current, dict):
-                return current, f"ref:{ref_value}"
-        return None, f"ref:{ref_value}"
-    return None, ""
+                    raise ValueError(
+                        f"Cannot resolve reference {ref_value} in base schema with $id={base_schema_id} - path not found at '{part}'"
+                    )
+            if not isinstance(current, dict):
+                raise ValueError(
+                    f"Reference {ref_value} does not point to a schema object"
+                )
+            return current, f"ref:{ref_value}"
+        else:
+            raise ValueError(
+                f"Cannot resolve reference {ref_value} - schema $id mismatch (base has $id='{base_schema_id}')"
+            )
+    else:
+        raise ValueError(f"Unsupported reference format: {ref_value}")
 
 
 def extract_explicit_subschemas(
@@ -643,14 +680,18 @@ def extract_implicit_subschemas(
     if isinstance(schema, dict):
         if "$ref" in schema:
             ref_value = schema["$ref"]
-            ref_schema, ref_path = extract_schema_from_ref(ref_value, base_schema)
-            if ref_schema:
+            try:
+                ref_schema, ref_path = extract_schema_from_ref(ref_value, base_schema)
                 current_path = f"{path}.{ref_path}" if path else ref_path
                 if is_complex_schema(ref_schema):
                     subschemas.append((ref_schema, current_path))
                 subschemas.extend(
                     extract_implicit_subschemas(ref_schema, current_path, base_schema)
                 )
+            except ValueError as e:
+                raise ValueError(
+                    f"Failed to extract schema from $ref '{ref_value}' at path '{path}': {e}"
+                ) from e
 
         if "properties" in schema:
             for prop_key, prop_schema in schema["properties"].items():
@@ -694,19 +735,17 @@ def extract_implicit_subschemas(
 
 
 def expand_refs_in_schema(schema: dict, base_schema: dict) -> dict:
-    if not isinstance(schema, dict):
-        return schema
-
     if "$ref" in schema:
         ref_value = schema["$ref"]
-        ref_schema, _ = extract_schema_from_ref(ref_value, base_schema)
-        if ref_schema:
+        try:
+            ref_schema, _ = extract_schema_from_ref(ref_value, base_schema)
             expanded = expand_refs_in_schema(ref_schema, base_schema)
             other_keys = {k: v for k, v in schema.items() if k != "$ref"}
             if other_keys:
                 expanded = {**expanded, **other_keys}
             return expanded
-        return schema
+        except ValueError as e:
+            raise ValueError(f"Failed to expand $ref '{ref_value}': {e}") from e
 
     expanded = {}
     for key, value in schema.items():
@@ -803,3 +842,38 @@ def extract_sub_schemas(
             continue
 
     return all_new_schemas
+
+
+def expand_refs_in_schemas(
+    schemas: list[JsonSchema],
+) -> tuple[list[JsonSchema], int, int]:
+    updated_schemas = []
+    skipped_count = 0
+
+    for schema in schemas:
+        schema_content = (
+            schema.content
+            if isinstance(schema.content, dict)
+            else json.loads(schema.content)
+        )
+
+        original_content_str = json.dumps(schema_content, sort_keys=True)
+
+        expanded_content = expand_refs_in_schema(schema_content, schema_content)
+
+        if "$defs" in expanded_content:
+            del expanded_content["$defs"]
+        if "definitions" in expanded_content:
+            del expanded_content["definitions"]
+
+        expanded_content_str = json.dumps(expanded_content, sort_keys=True)
+
+        if original_content_str != expanded_content_str and validate_schema(
+            expanded_content
+        ):
+            schema.content = expanded_content
+            updated_schemas.append(schema)
+        else:
+            skipped_count += 1
+
+    return updated_schemas, len(updated_schemas), skipped_count

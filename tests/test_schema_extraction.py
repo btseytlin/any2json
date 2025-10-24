@@ -9,6 +9,7 @@ from any2json.data_engine.helpers import (
     fetch_schema_from_url,
     validate_schema,
     expand_refs_in_schema,
+    expand_refs_in_schemas,
 )
 from any2json.database.models import JsonSchema
 
@@ -299,9 +300,8 @@ class TestUrlSchemaExtraction:
     def test_fetch_schema_from_url_failure(self, mock_get):
         mock_get.side_effect = Exception("Network error")
 
-        result = fetch_schema_from_url("https://example.com/schema.json")
-
-        assert result is None
+        with pytest.raises(ValueError, match="Failed to fetch schema"):
+            fetch_schema_from_url("https://example.com/schema.json")
 
     def test_extract_schema_from_ref_internal(self):
         base_schema = {
@@ -319,10 +319,8 @@ class TestUrlSchemaExtraction:
     def test_extract_schema_from_ref_internal_not_found(self):
         base_schema = {"type": "object", "$defs": {}}
 
-        schema, path = extract_schema_from_ref("#/$defs/NonExistent", base_schema)
-
-        assert schema is None
-        assert path == "ref:#/$defs/NonExistent"
+        with pytest.raises(ValueError, match="Cannot resolve reference"):
+            extract_schema_from_ref("#/$defs/NonExistent", base_schema)
 
     @patch("any2json.data_engine.helpers.fetch_schema_from_url")
     def test_extract_schema_from_ref_url_simple(self, mock_fetch):
@@ -357,12 +355,10 @@ class TestUrlSchemaExtraction:
 
     @patch("any2json.data_engine.helpers.fetch_schema_from_url")
     def test_extract_schema_from_ref_url_failure(self, mock_fetch):
-        mock_fetch.return_value = None
+        mock_fetch.side_effect = ValueError("Failed to fetch schema")
 
-        schema, path = extract_schema_from_ref("https://example.com/schema.json", None)
-
-        assert schema is None
-        assert path == "url:https://example.com/schema.json"
+        with pytest.raises(ValueError, match="Failed to fetch schema"):
+            extract_schema_from_ref("https://example.com/schema.json", None)
 
 
 class TestImplicitSubschemasWithRefs:
@@ -385,7 +381,12 @@ class TestImplicitSubschemasWithRefs:
     def test_extract_ref_url(self, mock_fetch):
         mock_fetch.return_value = {
             "type": "object",
-            "properties": {"specialty": {"type": "string"}},
+            "$defs": {
+                "culinarySpecialty": {
+                    "type": "object",
+                    "properties": {"specialty": {"type": "string"}},
+                }
+            },
         }
 
         schema = {
@@ -718,3 +719,205 @@ class TestRealWorldComplexSchema:
             assert schema.meta["original_schema_id"] == 100
             assert "extraction_path" in schema.meta
             assert validate_schema(schema.content)
+
+
+class TestExpandRefsInSchemas:
+    def test_expand_schemas_with_refs(self):
+        schema1 = JsonSchema(
+            id=1,
+            content={
+                "$defs": {
+                    "Item": {
+                        "type": "object",
+                        "properties": {"id": {"type": "integer"}},
+                    }
+                },
+                "type": "object",
+                "properties": {
+                    "items": {"type": "array", "items": {"$ref": "#/$defs/Item"}}
+                },
+            },
+            is_synthetic=False,
+        )
+
+        schema2 = JsonSchema(
+            id=2,
+            content={
+                "$defs": {
+                    "User": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                    }
+                },
+                "properties": {"user": {"$ref": "#/$defs/User"}},
+                "type": "object",
+            },
+            is_synthetic=False,
+        )
+
+        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas(
+            [schema1, schema2]
+        )
+
+        assert updated_count == 2
+        assert skipped_count == 0
+        assert len(updated_schemas) == 2
+
+        assert "$defs" not in json.dumps(schema1.content)
+        assert "$ref" not in json.dumps(schema1.content)
+        assert schema1.content["properties"]["items"]["items"] == {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}},
+        }
+
+        assert "$defs" not in json.dumps(schema2.content)
+        assert "$ref" not in json.dumps(schema2.content)
+        assert schema2.content["properties"]["user"] == {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        }
+
+    def test_skip_already_expanded_schemas(self):
+        schema1 = JsonSchema(
+            id=1,
+            content={"type": "object", "properties": {"name": {"type": "string"}}},
+            is_synthetic=False,
+        )
+
+        schema2 = JsonSchema(
+            id=2,
+            content={"type": "array", "items": {"type": "string"}},
+            is_synthetic=False,
+        )
+
+        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas(
+            [schema1, schema2]
+        )
+
+        assert updated_count == 0
+        assert skipped_count == 2
+        assert len(updated_schemas) == 0
+
+    def test_mix_of_schemas_some_need_expansion(self):
+        schema_needs_expansion = JsonSchema(
+            id=1,
+            content={
+                "$defs": {
+                    "Person": {
+                        "type": "object",
+                        "properties": {"age": {"type": "integer"}},
+                    }
+                },
+                "type": "object",
+                "properties": {"person": {"$ref": "#/$defs/Person"}},
+            },
+            is_synthetic=False,
+        )
+
+        schema_already_expanded = JsonSchema(
+            id=2,
+            content={"type": "object", "properties": {"name": {"type": "string"}}},
+            is_synthetic=False,
+        )
+
+        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas(
+            [schema_needs_expansion, schema_already_expanded]
+        )
+
+        assert updated_count == 1
+        assert skipped_count == 1
+        assert len(updated_schemas) == 1
+        assert updated_schemas[0].id == 1
+
+    def test_nested_refs_expansion(self):
+        schema = JsonSchema(
+            id=1,
+            content={
+                "$defs": {
+                    "Address": {
+                        "type": "object",
+                        "properties": {"street": {"type": "string"}},
+                    },
+                    "Person": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "address": {"$ref": "#/$defs/Address"},
+                        },
+                    },
+                },
+                "type": "object",
+                "properties": {"person": {"$ref": "#/$defs/Person"}},
+            },
+            is_synthetic=False,
+        )
+
+        expected = {
+            "type": "object",
+            "properties": {
+                "person": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "address": {
+                            "type": "object",
+                            "properties": {"street": {"type": "string"}},
+                        },
+                    },
+                }
+            },
+        }
+
+        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas([schema])
+
+        assert len(updated_schemas) == 1
+        assert updated_count == 1
+        assert skipped_count == 0
+
+        content_str = json.dumps(schema.content)
+        assert "$defs" not in content_str
+        assert "$ref" not in content_str
+
+        assert schema.content == expected
+
+    def test_removes_definitions_field(self):
+        schema = JsonSchema(
+            id=1,
+            content={
+                "definitions": {
+                    "User": {
+                        "type": "object",
+                        "properties": {"id": {"type": "integer"}},
+                    }
+                },
+                "type": "object",
+                "properties": {"user": {"$ref": "#/definitions/User"}},
+            },
+            is_synthetic=False,
+        )
+
+        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas([schema])
+
+        assert updated_count == 1
+        assert "definitions" not in schema.content
+        assert "$ref" not in json.dumps(schema.content)
+
+    def test_expansion_fails_with_unresolvable_ref(self):
+        schema = JsonSchema(
+            id=1,
+            content={
+                "type": "object",
+                "properties": {"item": {"$ref": "#/$defs/NonExistent"}},
+            },
+            is_synthetic=False,
+        )
+
+        with pytest.raises(ValueError, match="Cannot resolve reference"):
+            expand_refs_in_schemas([schema])
+
+    def test_empty_schema_list(self):
+        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas([])
+
+        assert updated_count == 0
+        assert skipped_count == 0
+        assert len(updated_schemas) == 0
