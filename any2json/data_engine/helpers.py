@@ -21,6 +21,24 @@ from tqdm.auto import tqdm
 from tqdm.asyncio import tqdm as tqdm_asyncio
 
 
+import random
+import click
+import logging
+import json
+import os
+import httpx
+from tqdm.auto import tqdm
+import instructor
+from any2json.agents.schema_generator import JSONSchemaGeneratorAgent
+from any2json.agents.chunk_generator import JSONChunkGeneratorAgent
+from any2json.database.models import Chunk, JsonSchema
+from any2json.enums import ContentType
+from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+
 def get_json_chunks_with_schema(db_session: Session) -> list[Chunk]:
     return (
         db_session.query(Chunk)
@@ -174,23 +192,6 @@ def extract_json_chunks(
             break
 
     return chunks
-
-
-import random
-import click
-import logging
-import json
-import os
-from tqdm.auto import tqdm
-import instructor
-from any2json.agents.schema_generator import JSONSchemaGeneratorAgent
-from any2json.agents.chunk_generator import JSONChunkGeneratorAgent
-from any2json.database.models import Chunk, JsonSchema
-from any2json.enums import ContentType
-from sqlalchemy.orm import Session
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
 def get_json_chunks_with_no_schema(
@@ -554,3 +555,251 @@ def generate_synthetic_schemas(
     pbar.close()
 
     return new_schemas, new_chunks, new_schema_conversions
+
+
+def fetch_schema_from_url(url: str, timeout: int = 10) -> dict | None:
+    try:
+        response = httpx.get(url, timeout=timeout, follow_redirects=True)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.debug(f"Failed to fetch schema from {url}: {e}")
+        return None
+
+
+def extract_schema_from_ref(
+    ref_value: str, base_schema: dict | None = None
+) -> tuple[dict | None, str]:
+    if ref_value.startswith("http://") or ref_value.startswith("https://"):
+        if "#/" in ref_value:
+            url, json_pointer = ref_value.split("#/", 1)
+            schema = fetch_schema_from_url(url)
+            if schema:
+                parts = json_pointer.split("/")
+                current = schema
+                for part in parts:
+                    if isinstance(current, dict) and part in current:
+                        current = current[part]
+                    else:
+                        return None, f"url:{url}#/{json_pointer}"
+                if isinstance(current, dict):
+                    return current, f"url:{url}#/{json_pointer}"
+        else:
+            schema = fetch_schema_from_url(ref_value)
+            if schema and isinstance(schema, dict):
+                return schema, f"url:{ref_value}"
+        return None, f"url:{ref_value}"
+    elif ref_value.startswith("#/"):
+        pointer = ref_value[2:]
+        if base_schema:
+            parts = pointer.split("/")
+            current = base_schema
+            for part in parts:
+                if isinstance(current, dict) and part in current:
+                    current = current[part]
+                else:
+                    return None, f"ref:{ref_value}"
+            if isinstance(current, dict):
+                return current, f"ref:{ref_value}"
+        return None, f"ref:{ref_value}"
+    return None, ""
+
+
+def extract_explicit_subschemas(
+    schema: dict,
+) -> list[tuple[dict, str]]:
+    subschemas = []
+
+    if "$defs" in schema:
+        for def_key, def_schema in schema["$defs"].items():
+            if isinstance(def_schema, dict):
+                subschemas.append((def_schema, f"$defs.{def_key}"))
+
+    if "definitions" in schema:
+        for def_key, def_schema in schema["definitions"].items():
+            if isinstance(def_schema, dict):
+                subschemas.append((def_schema, f"definitions.{def_key}"))
+
+    return subschemas
+
+
+def is_complex_schema(schema: dict) -> bool:
+    schema_type = schema.get("type")
+    if isinstance(schema_type, list):
+        return "object" in schema_type or "array" in schema_type
+    return schema_type in ["object", "array"]
+
+
+def extract_implicit_subschemas(
+    schema: dict,
+    path: str = "",
+    base_schema: dict | None = None,
+) -> list[tuple[dict, str]]:
+    subschemas = []
+
+    if base_schema is None:
+        base_schema = schema
+
+    if isinstance(schema, dict):
+        if "$ref" in schema:
+            ref_value = schema["$ref"]
+            ref_schema, ref_path = extract_schema_from_ref(ref_value, base_schema)
+            if ref_schema:
+                current_path = f"{path}.{ref_path}" if path else ref_path
+                if is_complex_schema(ref_schema):
+                    subschemas.append((ref_schema, current_path))
+                subschemas.extend(
+                    extract_implicit_subschemas(ref_schema, current_path, base_schema)
+                )
+
+        if "properties" in schema:
+            for prop_key, prop_schema in schema["properties"].items():
+                if isinstance(prop_schema, dict):
+                    current_path = (
+                        f"{path}.properties.{prop_key}"
+                        if path
+                        else f"properties.{prop_key}"
+                    )
+                    if is_complex_schema(prop_schema):
+                        subschemas.append((prop_schema, current_path))
+                    subschemas.extend(
+                        extract_implicit_subschemas(
+                            prop_schema, current_path, base_schema
+                        )
+                    )
+
+        if "items" in schema:
+            items_schema = schema["items"]
+            if isinstance(items_schema, dict):
+                current_path = f"{path}.items" if path else "items"
+                if is_complex_schema(items_schema):
+                    subschemas.append((items_schema, current_path))
+                subschemas.extend(
+                    extract_implicit_subschemas(items_schema, current_path, base_schema)
+                )
+
+        if "additionalProperties" in schema:
+            add_props = schema["additionalProperties"]
+            if isinstance(add_props, dict):
+                current_path = (
+                    f"{path}.additionalProperties" if path else "additionalProperties"
+                )
+                if is_complex_schema(add_props):
+                    subschemas.append((add_props, current_path))
+                subschemas.extend(
+                    extract_implicit_subschemas(add_props, current_path, base_schema)
+                )
+
+    return subschemas
+
+
+def expand_refs_in_schema(schema: dict, base_schema: dict) -> dict:
+    if not isinstance(schema, dict):
+        return schema
+
+    if "$ref" in schema:
+        ref_value = schema["$ref"]
+        ref_schema, _ = extract_schema_from_ref(ref_value, base_schema)
+        if ref_schema:
+            expanded = expand_refs_in_schema(ref_schema, base_schema)
+            other_keys = {k: v for k, v in schema.items() if k != "$ref"}
+            if other_keys:
+                expanded = {**expanded, **other_keys}
+            return expanded
+        return schema
+
+    expanded = {}
+    for key, value in schema.items():
+        if isinstance(value, dict):
+            expanded[key] = expand_refs_in_schema(value, base_schema)
+        elif isinstance(value, list):
+            expanded[key] = [
+                (
+                    expand_refs_in_schema(item, base_schema)
+                    if isinstance(item, dict)
+                    else item
+                )
+                for item in value
+            ]
+        else:
+            expanded[key] = value
+
+    return expanded
+
+
+def validate_schema(schema: dict) -> bool:
+    try:
+        fastjsonschema.compile(schema)
+        return True
+    except Exception as e:
+        logger.debug(f"Schema validation failed: {e}")
+        return False
+
+
+def extract_subschemas_from_schema(
+    schema: JsonSchema,
+) -> list[JsonSchema]:
+    schema_content = (
+        schema.content
+        if isinstance(schema.content, dict)
+        else json.loads(schema.content)
+    )
+
+    explicit_subschemas = extract_explicit_subschemas(schema_content)
+    implicit_subschemas = extract_implicit_subschemas(schema_content)
+
+    all_subschemas = explicit_subschemas + implicit_subschemas
+
+    new_schemas = []
+    for subschema_content, path in all_subschemas:
+        expanded_content = expand_refs_in_schema(subschema_content, schema_content)
+
+        if "$defs" in expanded_content:
+            del expanded_content["$defs"]
+        if "definitions" in expanded_content:
+            del expanded_content["definitions"]
+
+        if not validate_schema(expanded_content):
+            logger.debug(
+                f"Skipping invalid subschema at path {path} from schema {schema.id}"
+            )
+            continue
+
+        meta = {
+            "source": "extracted_subschema",
+            "original_schema_id": schema.id,
+            "extraction_path": path,
+        }
+        if schema.meta:
+            meta["original_schema_meta"] = schema.meta
+
+        new_schema = JsonSchema(
+            content=expanded_content,
+            is_synthetic=False,
+            parent_schema_id=schema.id,
+            meta=meta,
+        )
+        new_schemas.append(new_schema)
+
+    return new_schemas
+
+
+def extract_sub_schemas(
+    schemas: list[JsonSchema],
+    max_schemas: int | None = None,
+) -> list[JsonSchema]:
+    all_new_schemas = []
+
+    for schema in tqdm(schemas, desc="Extracting subschemas"):
+        try:
+            new_schemas = extract_subschemas_from_schema(schema)
+            all_new_schemas.extend(new_schemas)
+
+            if max_schemas and len(all_new_schemas) >= max_schemas:
+                all_new_schemas = all_new_schemas[:max_schemas]
+                break
+        except Exception as e:
+            logger.debug(f"Error extracting subschemas from schema {schema.id}: {e}")
+            continue
+
+    return all_new_schemas

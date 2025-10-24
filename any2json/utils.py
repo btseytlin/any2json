@@ -123,7 +123,7 @@ def parse_string(source_str: str, format: str) -> Any:
 
 def stringify_content(content: Any, format: ContentType | str) -> str:
     if isinstance(format, str):
-        format = ContentType(format)
+        format = ContentType(format.upper())
     match format:
         case ContentType.JSON:
             return json.dumps(content, indent=1, ensure_ascii=False)

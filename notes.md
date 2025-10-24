@@ -44,6 +44,8 @@ python scripts/data_engine.py process-dataset data/raw/interstellarninja/json-mo
 python scripts/data_engine.py process-dataset data/raw/interstellarninja/json-mode-verifiable
 python scripts/data_engine.py process-dataset data/raw/interstellarninja/json-mode-agentic-reasoning
 python scripts/data_engine.py process-dataset data/raw/interstellarninja/json-schema-store-reasoning
+python scripts/data_engine.py process-dataset data/raw/SchemaStore/schemastore
+
 
 python scripts/db_tools.py drop-duplicate-schemas
 python scripts/db_tools.py drop-duplicate-documents
@@ -56,8 +58,9 @@ python scripts/db_tools.py stats
 Stage 2: infinigram, mining chunks, pandas
 
 ```
-python scripts/data_engine.py get-from-infinigram --num-chunks=5000
+python scripts/data_engine.py get-from-infinigram --num-chunks=30000
 python scripts/data_engine.py extract-json-chunks --frac-per-document=0.2 --max-depth=10 --max-chunks=12000
+python scripts/data_engine.py extract-sub-schemas --max-schemas=1
 python scripts/data_engine.py generate-pandas-chunks --num-chunks=5000
 python scripts/db_tools.py drop-duplicate-schemas
 python scripts/db_tools.py drop-duplicate-chunks
@@ -655,7 +658,7 @@ CORRECT RESULTS SURE THIS TIME (I HOPE)
 ```
 
 f2yvr0zy-v6
-```
+```json
 {
   "percentage_request_errors": 0.0,
   "percentage_json_errors": 0.002,
@@ -668,3 +671,30 @@ f2yvr0zy-v6
   "inference_ms_mean": 630.843
 }
 ```
+
+ACTUALLY ITS FUCKING NOT, I FORGOT TO COMMIT
+
+LETS RUN IT AGAIN AAAAAA
+
+### 
+
+Let's strip augmentations to barebones minimum, train smollm again.
+
+Will train with this config:
+
+```python
+augmentations: dict[Callable, float] = {
+  aug_drop_schema: 0.1,
+  aug_vary_schema_and_output: 0.1,
+  aug_vary_input_json_presentation: 0.1,
+  # aug_corrupt_input: 0.1,
+  aug_negative_sample: 0.1,
+}
+```
+
+Also longer training:
+
+https://wandb.ai/btseytlin/any2json/runs/mcqfyndf?nw=nwuserbtseytlin
+
+
+### Recreate dataset

@@ -21,6 +21,7 @@ from any2json.data_engine.generators.converters.utils import (
 from any2json.data_engine.helpers import (
     deduplicate_chunks,
     extract_json_chunks,
+    extract_sub_schemas,
     generate_chunks_for_schemas,
     generate_schemas_for_chunks,
     get_json_chunks_with_no_schema,
@@ -368,8 +369,10 @@ def extract_json_chunks_command(
 ):
     logger.info(f"Extracting json chunks from {DB_FILE}")
 
+    # TODO modify traverse not documents but nested json objects
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         documents = get_json_documents(db_session)
+        logger.info(f"Found {len(documents)} documents to process")
         chunks = extract_json_chunks(
             documents,
             max_depth=max_depth,
@@ -388,6 +391,57 @@ def extract_json_chunks_command(
             for chunk in deduplicated_chunks[-10:]:
                 print(f"{chunk.parent_document_id=}")
                 print(f"{chunk.content=}")
+                print()
+                print()
+                print()
+
+
+# Step 2.2: Extract sub-schemas from JsonSchemas
+
+
+@cli.command(
+    name="extract-sub-schemas",
+)
+@click.option(
+    "--max-schemas",
+    default=None,
+    type=int,
+    help="Maximum number of schemas to generate",
+)
+def extract_sub_schemas_command(max_schemas: int | None):
+    logger.info(f"Extracting sub-schemas from {DB_FILE}")
+
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        schemas = db_session.query(JsonSchema).all()
+        logger.info(f"Found {len(schemas)} schemas to process")
+
+        new_schemas = extract_sub_schemas(
+            schemas,
+            max_schemas=max_schemas,
+        )
+        logger.info(f"Extracted {len(new_schemas)} sub-schemas")
+
+        deduplicated_schemas = []
+        seen_hashes = set()
+        for schema in new_schemas:
+            schema_str = json.dumps(schema.content, sort_keys=True)
+            hash_value = hash(schema_str)
+            if hash_value not in seen_hashes:
+                seen_hashes.add(hash_value)
+                deduplicated_schemas.append(schema)
+
+        logger.info(
+            f"After deduplication: {len(deduplicated_schemas)} unique sub-schemas"
+        )
+
+        db_session.add_all(deduplicated_schemas)
+
+        if PREVIEW:
+            print("Previewing last 10 schemas")
+            for schema in deduplicated_schemas[-10:]:
+                print(f"{schema.parent_schema_id=}")
+                print(f"{schema.meta=}")
+                print(f"{schema.content=}")
                 print()
                 print()
                 print()

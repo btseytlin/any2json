@@ -12,18 +12,16 @@ echo "Code and dependencies updated"
 
 echo "Setup complete, running command"
 
-# For A40 GPU, gemma3 270m, 3096 max seq len
-
-export BATCH_SIZE=3
-export NUM_EPOCHS=2
+export BATCH_SIZE=4
+export NUM_EPOCHS=3
 # export MODEL=google/gemma-3-270m
 export MODEL=HuggingFaceTB/SmolLM2-135M
 
 python /code/any2json/any2json/training/train.py train \
     --model-name=$MODEL \
-    --max-sequence-length 3096 \
+    --max-sequence-length 3072 \
     --group-by-length True --length-column-name length \
-    --learning_rate=5e-5 --warmup-ratio 0.03 --weight-decay 0.01 \
+    --learning_rate=5e-5 --warmup-ratio 0.05 \
     --eval-on-start True \
     --eval-strategy steps  --report_to wandb --save-strategy steps --save-total-limit 3 \
     --eval-steps 0.05 --save-steps 0.2 \
