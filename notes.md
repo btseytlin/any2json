@@ -88,6 +88,7 @@ python scripts/db_tools.py drop-duplicate-schemas
 python scripts/data_engine.py map-chunks
 
 python scripts/db_tools.py validate_schema_mappings
+python scripts/db_tools.py clear-broken-schema-mappings
 python scripts/db_tools.py vacuum
 python scripts/db_tools.py stats
 

@@ -551,7 +551,7 @@ def drop_xml():
 
 
 @cli.command()
-def validate_schema_mappings():
+def clear_broken_schema_mappings():
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         chunks = (
             db_session.execute(
@@ -569,7 +569,8 @@ def validate_schema_mappings():
                 logger.warning(
                     f"Chunk {chunk.id} has no schema even though {chunk.schema_id=}"
                 )
-                total_errors += 1
+                chunk.schema_id = None
+                db_session.add(chunk)
                 continue
 
             try:
@@ -582,6 +583,9 @@ def validate_schema_mappings():
                     f"Chunk {chunk.id} has schema {schema.id} but validation failed: {e}"
                 )
                 total_errors += 1
+                chunk.schema_id = None
+                db_session.add(chunk)
+
         logger.info(f"Total errors: {total_errors}")
 
 

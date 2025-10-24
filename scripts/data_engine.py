@@ -740,12 +740,13 @@ def generate_chunks_command(
         if only_dangling:
             logger.info("Only generating chunks for schemas that have no chunks")
             schema_ids = get_dangling_schema_ids(db_session)
+            schemas = (
+                db_session.query(JsonSchema).filter(JsonSchema.id.in_(schema_ids)).all()
+            )
         else:
             logger.info("Generating chunks for schemas with or without chunks")
-            schema_ids = db_session.execute(select(JsonSchema.id)).scalars().all()
-        schemas = (
-            db_session.query(JsonSchema).filter(JsonSchema.id.in_(schema_ids)).all()
-        )
+            schemas = db_session.query(JsonSchema).all()
+
         random.shuffle(schemas)
 
         if num_schemas:
