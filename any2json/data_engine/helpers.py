@@ -224,6 +224,7 @@ def extract_sub_jsons(
     max_depth: int = 7,
     frac_per_chunk: float = 0.2,
     max_chunks: int | None = None,
+    min_chunk_chars: int = 200,
 ) -> list[Chunk]:
     new_chunks = []
     for chunk in chunks:
@@ -235,7 +236,9 @@ def extract_sub_jsons(
         for sub_json in sub_json_objects:
             try:
                 sub_json_str = json.dumps(sub_json)
-                if len(sub_json_str) >= 100:
+                if sub_json == json_content:
+                    continue
+                if len(sub_json_str) >= min_chunk_chars:
                     sub_json_objects_filtered.append(sub_json)
             except Exception as e:
                 continue

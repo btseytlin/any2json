@@ -114,14 +114,27 @@ class TestExtractSubJsons:
             id=1,
             content=json.dumps(
                 {
-                    "user": {"name": "John", "age": 30, "email": "john@example.com"},
-                    "address": {"street": "123 Main St", "city": "NYC", "zip": "10001"},
+                    "user": {
+                        "name": "John" * 20,
+                        "age": 30,
+                        "email": "john@example.com" * 5,
+                    },
+                    "address": {
+                        "street": "123 Main St" * 10,
+                        "city": "NYC",
+                        "zip": "10001",
+                    },
                 }
             ),
             content_type=ContentType.JSON.value,
             is_synthetic=False,
         )
-        result = extract_sub_jsons([chunk], max_depth=2, frac_per_chunk=1.0)
+        result = extract_sub_jsons(
+            [chunk],
+            max_depth=2,
+            frac_per_chunk=1.0,
+            min_chunk_chars=100,
+        )
 
         assert len(result) >= 1
         parent_chunk_ids = [r.parent_chunk_id for r in result]
@@ -139,7 +152,12 @@ class TestExtractSubJsons:
             content_type=ContentType.JSON.value,
             is_synthetic=False,
         )
-        result = extract_sub_jsons([chunk], max_depth=2, frac_per_chunk=1.0)
+        result = extract_sub_jsons(
+            [chunk],
+            max_depth=2,
+            frac_per_chunk=1.0,
+            min_chunk_chars=100,
+        )
 
         for r in result:
             assert len(r.content) >= 100
@@ -153,8 +171,18 @@ class TestExtractSubJsons:
             is_synthetic=False,
         )
 
-        result_full = extract_sub_jsons([chunk], max_depth=2, frac_per_chunk=1.0)
-        result_half = extract_sub_jsons([chunk], max_depth=2, frac_per_chunk=0.5)
+        result_full = extract_sub_jsons(
+            [chunk],
+            max_depth=2,
+            frac_per_chunk=1.0,
+            min_chunk_chars=100,
+        )
+        result_half = extract_sub_jsons(
+            [chunk],
+            max_depth=2,
+            frac_per_chunk=0.5,
+            min_chunk_chars=100,
+        )
 
         assert len(result_half) <= len(result_full)
 
@@ -208,7 +236,12 @@ class TestExtractSubJsons:
             is_synthetic=False,
         )
 
-        result = extract_sub_jsons([chunk1, chunk2], max_depth=2, frac_per_chunk=1.0)
+        result = extract_sub_jsons(
+            [chunk1, chunk2],
+            max_depth=2,
+            frac_per_chunk=1.0,
+            min_chunk_chars=100,
+        )
 
         parent_ids = {r.parent_chunk_id for r in result}
         assert len(parent_ids) >= 1
@@ -256,7 +289,12 @@ class TestExtractSubJsons:
             is_synthetic=False,
         )
 
-        result = extract_sub_jsons([chunk], max_depth=2, frac_per_chunk=1.0)
+        result = extract_sub_jsons(
+            [chunk],
+            max_depth=2,
+            frac_per_chunk=1.0,
+            min_chunk_chars=100,
+        )
 
         assert len(result) > 0
         for r in result:
@@ -269,16 +307,21 @@ class TestExtractSubJsons:
             id=1,
             content=json.dumps(
                 [
-                    {"id": 1, "name": "Item 1" * 10},
-                    {"id": 2, "name": "Item 2" * 10},
-                    {"id": 3, "name": "Item 3" * 10},
+                    {"id": 1, "name": "Item 1" * 10, "description": "A" * 50},
+                    {"id": 2, "name": "Item 2" * 10, "description": "B" * 50},
+                    {"id": 3, "name": "Item 3" * 10, "description": "C" * 50},
                 ]
             ),
             content_type=ContentType.JSON.value,
             is_synthetic=False,
         )
 
-        result = extract_sub_jsons([chunk], max_depth=2, frac_per_chunk=1.0)
+        result = extract_sub_jsons(
+            [chunk],
+            max_depth=2,
+            frac_per_chunk=1.0,
+            min_chunk_chars=100,
+        )
 
         assert len(result) >= 1
         assert all(r.parent_chunk_id == 1 for r in result)
@@ -316,10 +359,14 @@ class TestExtractSubJsons:
             is_synthetic=False,
         )
 
-        result = extract_sub_jsons([chunk], max_depth=5, frac_per_chunk=1.0)
+        result = extract_sub_jsons(
+            [chunk],
+            max_depth=5,
+            frac_per_chunk=1.0,
+            min_chunk_chars=100,
+        )
 
         expected_sub_jsons = [
-            input_data,
             input_data["company"],
             input_data["company"]["employees"],
             {
@@ -360,6 +407,10 @@ class TestExtractSubJsons:
             assert (
                 expected_obj in result_contents
             ), f"Expected sub-json not found: {expected_obj}"
+
+        assert (
+            input_data not in result_contents
+        ), "Original JSON should not be in results"
 
         for r in result:
             assert r.parent_chunk_id == 1
