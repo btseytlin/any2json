@@ -59,8 +59,10 @@ Stage 2: infinigram, mining chunks, pandas
 
 ```
 python scripts/data_engine.py get-from-infinigram --num-chunks=30000
+python scripts/data_engine.py extract-sub-schemas
+python scripts/data_engine.py expand-refs-in-schemas
 python scripts/data_engine.py extract-json-chunks --frac-per-document=0.2 --max-depth=10 --max-chunks=12000
-python scripts/data_engine.py extract-sub-schemas --max-schemas=1
+
 python scripts/data_engine.py generate-pandas-chunks --num-chunks=5000
 python scripts/db_tools.py drop-duplicate-schemas
 python scripts/db_tools.py drop-duplicate-chunks

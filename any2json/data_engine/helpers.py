@@ -888,11 +888,15 @@ def expand_refs_in_schemas(
 
             expanded_content_str = json.dumps(expanded_content, sort_keys=True)
 
-            if original_content_str != expanded_content_str and validate_schema(
-                expanded_content
-            ):
-                schema.content = expanded_content
-                updated_schemas.append(schema)
+            if original_content_str != expanded_content_str:
+                if validate_schema(expanded_content):
+                    schema.content = expanded_content
+                    updated_schemas.append(schema)
+                else:
+                    logger.info(
+                        f"Removing schema {schema.id} due to failed validation after expansion"
+                    )
+                    delete_schemas.append(schema)
             else:
                 skipped_count += 1
         except ValueError as e:

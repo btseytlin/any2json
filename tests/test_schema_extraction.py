@@ -1201,3 +1201,168 @@ class TestExpandRefsInSchemas:
         assert len(updated_schemas) == 0
         assert len(delete_schemas) == 1
         assert delete_schemas[0].id == 1
+
+    def test_schema_with_refs_typo_skipped(self):
+        schema = JsonSchema(
+            id=1,
+            content={
+                "$schema": "http://json-schema.org/draft-04/schema#",
+                "properties": {
+                    "$defs": {
+                        "chain_info": {
+                            "properties": {
+                                "chain-name": {"type": ["string", "null"]},
+                                "client-id": {"type": ["string", "null"]},
+                                "connection-id": {"type": ["string", "null"]},
+                            },
+                            "type": ["object", "null"],
+                        },
+                        "channel_info": {
+                            "properties": {
+                                "channel-id": {"type": ["string", "null"]},
+                                "port-id": {"type": ["string", "null"]},
+                            },
+                            "type": ["object", "null"],
+                        },
+                    },
+                    "chain-1": {
+                        "items": {"$refs": "#/$defs/chain_info"},
+                        "type": ["object", "null"],
+                    },
+                    "chain-2": {
+                        "items": {"$refs": "#/$defs/chain_info"},
+                        "type": ["object", "null"],
+                    },
+                    "channels": {
+                        "items": [
+                            {
+                                "properties": {
+                                    "chain-1": {
+                                        "items": {"$refs": "#/$defs/channel_info"},
+                                        "type": ["object", "null"],
+                                    },
+                                    "chain-2": {
+                                        "items": {"$refs": "#/$defs/channel_info"},
+                                        "type": ["object", "null"],
+                                    },
+                                    "description": {"type": ["string", "null"]},
+                                    "ordering": {},
+                                    "tags": {
+                                        "properties": {
+                                            "dex": {"type": ["string", "null"]},
+                                            "preferred": {"type": ["boolean", "null"]},
+                                            "properties": {"type": ["string", "null"]},
+                                            "status": {},
+                                        },
+                                        "type": ["object", "null"],
+                                    },
+                                    "version": {"type": ["string", "null"]},
+                                },
+                                "type": ["object", "null"],
+                            }
+                        ],
+                        "type": ["array", "null"],
+                    },
+                },
+                "type": ["object", "null"],
+            },
+            is_synthetic=False,
+        )
+
+        (
+            updated_schemas,
+            delete_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema])
+
+        assert updated_count == 0
+        assert skipped_count == 1
+        assert len(updated_schemas) == 0
+        assert len(delete_schemas) == 0
+
+    def test_complex_yoga_schema_with_conflicting_items_marked_for_deletion(self):
+        schema = JsonSchema(
+            id=1,
+            content={
+                "$defs": {
+                    "breathing_technique": {
+                        "properties": {
+                            "description": {"$ref": "#/$defs/routine_description"},
+                            "name": {"$ref": "#/$defs/breathing_technique_name"},
+                        },
+                        "type": ["object", "null"],
+                    },
+                    "breathing_technique_name": {"type": ["string", "null"]},
+                    "breathing_techniques": {
+                        "items": {"$ref": "#/$defs/breathing_technique"},
+                        "type": ["array", "null"],
+                    },
+                    "modification": {
+                        "properties": {
+                            "description": {"$ref": "#/$defs/routine_description"},
+                            "name": {"$ref": "#/$defs/modification_name"},
+                        },
+                        "type": ["object", "null"],
+                    },
+                    "modification_name": {"type": ["string", "null"]},
+                    "modifications": {
+                        "items": {"$ref": "#/$defs/modification"},
+                        "type": ["array", "null"],
+                    },
+                    "pose": {
+                        "properties": {
+                            "description": {"$ref": "#/$defs/routine_description"},
+                            "duration": {"type": ["integer", "null"]},
+                            "level": {"type": ["integer", "null"]},
+                            "name": {"$ref": "#/$defs/pose_name"},
+                        },
+                        "type": ["object", "null"],
+                    },
+                    "pose_name": {"type": ["string", "null"]},
+                    "poses": {
+                        "items": {"$ref": "#/$defs/pose"},
+                        "type": ["array", "null"],
+                    },
+                    "routine_description": {"type": ["string", "null"]},
+                    "routine_name": {"type": ["string", "null"]},
+                    "sequence": {
+                        "properties": {
+                            "description": {"$ref": "#/$defs/routine_description"},
+                            "name": {"$ref": "#/$defs/sequence_name"},
+                            "poses": {"$ref": "#/$defs/poses"},
+                        },
+                        "type": ["object", "null"],
+                    },
+                    "sequence_name": {"type": ["string", "null"]},
+                    "sequences": {"type": ["array", "null"]},
+                },
+                "$schema": "https://json-schema.org/draft-07/schema#",
+                "properties": {
+                    "breathing_techniques": {"$ref": "#/$defs/breathing_techniques"},
+                    "description": {"$ref": "#/$defs/routine_description"},
+                    "modifications": {"$ref": "#/$defs/modifications"},
+                    "name": {"$ref": "#/$defs/routine_name"},
+                    "poses": {"$ref": "#/$defs/poses"},
+                    "sequences": {
+                        "$ref": "#/$defs/sequences",
+                        "items": {"$ref": "#/$defs/sequence"},
+                    },
+                },
+                "type": ["object", "null"],
+            },
+            is_synthetic=False,
+        )
+
+        (
+            updated_schemas,
+            delete_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema])
+
+        assert updated_count == 0
+        assert skipped_count == 0
+        assert len(updated_schemas) == 0
+        assert len(delete_schemas) == 1
+        assert delete_schemas[0].id == 1
