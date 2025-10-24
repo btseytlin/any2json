@@ -499,6 +499,52 @@ class TestExpandRefsInSchema:
         assert "id" in expanded["properties"]
         assert expanded.get("description") == "An item"
 
+    def test_expand_url_ref_matching_schema_id(self):
+        base_schema = {
+            "$defs": {
+                "culinarySpecialty": {
+                    "properties": {
+                        "description": {"type": ["string", "null"]},
+                        "name": {"type": ["string", "null"]},
+                    },
+                    "type": ["object", "null"],
+                }
+            },
+            "$id": "https://example.com/japan-foodie-destinations",
+            "items": {
+                "properties": {
+                    "city": {"type": ["string", "null"]},
+                    "culinarySpecialties": {
+                        "items": {
+                            "$ref": "https://example.com/japan-foodie-destinations#/$defs/culinarySpecialty"
+                        },
+                        "type": ["array", "null"],
+                    },
+                },
+                "type": ["object", "null"],
+            },
+            "type": ["array", "null"],
+        }
+
+        expanded = expand_refs_in_schema(base_schema, base_schema)
+
+        assert expanded["$id"] == "https://example.com/japan-foodie-destinations"
+        assert expanded["type"] == ["array", "null"]
+        assert "items" in expanded
+        assert "culinarySpecialties" in expanded["items"]["properties"]
+
+        culinary_items = expanded["items"]["properties"]["culinarySpecialties"]["items"]
+        assert culinary_items["type"] == ["object", "null"]
+        assert "name" in culinary_items["properties"]
+        assert "description" in culinary_items["properties"]
+        assert culinary_items["properties"]["name"] == {"type": ["string", "null"]}
+        assert culinary_items["properties"]["description"] == {
+            "type": ["string", "null"]
+        }
+
+        assert "$ref" not in json.dumps(expanded)
+        assert "$defs" in expanded
+
 
 class TestExtractSubschemasWithValidation:
     def test_extract_only_valid_schemas(self):
@@ -757,14 +803,14 @@ class TestExpandRefsInSchemas:
 
         (
             updated_schemas,
-            recursive_schemas,
+            delete_schemas,
             updated_count,
             skipped_count,
         ) = expand_refs_in_schemas([schema1, schema2])
 
         assert updated_count == 2
         assert skipped_count == 0
-        assert len(recursive_schemas) == 0
+        assert len(delete_schemas) == 0
         assert len(updated_schemas) == 2
 
         assert "$defs" not in json.dumps(schema1.content)
@@ -796,14 +842,14 @@ class TestExpandRefsInSchemas:
 
         (
             updated_schemas,
-            recursive_schemas,
+            delete_schemas,
             updated_count,
             skipped_count,
         ) = expand_refs_in_schemas([schema1, schema2])
 
         assert updated_count == 0
         assert skipped_count == 2
-        assert len(recursive_schemas) == 0
+        assert len(delete_schemas) == 0
         assert len(updated_schemas) == 0
 
     def test_mix_of_schemas_some_need_expansion(self):
@@ -830,14 +876,14 @@ class TestExpandRefsInSchemas:
 
         (
             updated_schemas,
-            recursive_schemas,
+            delete_schemas,
             updated_count,
             skipped_count,
         ) = expand_refs_in_schemas([schema_needs_expansion, schema_already_expanded])
 
         assert updated_count == 1
         assert skipped_count == 1
-        assert len(recursive_schemas) == 0
+        assert len(delete_schemas) == 0
         assert len(updated_schemas) == 1
         assert updated_schemas[0].id == 1
 
@@ -882,7 +928,7 @@ class TestExpandRefsInSchemas:
 
         (
             updated_schemas,
-            recursive_schemas,
+            delete_schemas,
             updated_count,
             skipped_count,
         ) = expand_refs_in_schemas([schema])
@@ -890,7 +936,7 @@ class TestExpandRefsInSchemas:
         assert len(updated_schemas) == 1
         assert updated_count == 1
         assert skipped_count == 0
-        assert len(recursive_schemas) == 0
+        assert len(delete_schemas) == 0
 
         content_str = json.dumps(schema.content)
         assert "$defs" not in content_str
@@ -916,13 +962,13 @@ class TestExpandRefsInSchemas:
 
         (
             updated_schemas,
-            recursive_schemas,
+            delete_schemas,
             updated_count,
             skipped_count,
         ) = expand_refs_in_schemas([schema])
 
         assert updated_count == 1
-        assert len(recursive_schemas) == 0
+        assert len(delete_schemas) == 0
         assert "definitions" not in schema.content
         assert "$ref" not in json.dumps(schema.content)
 
@@ -936,13 +982,22 @@ class TestExpandRefsInSchemas:
             is_synthetic=False,
         )
 
-        with pytest.raises(ValueError, match="Cannot resolve reference"):
-            expand_refs_in_schemas([schema])
+        (
+            updated_schemas,
+            delete_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema])
+
+        assert updated_count == 0
+        assert skipped_count == 0
+        assert len(delete_schemas) == 1
+        assert len(updated_schemas) == 0
 
     def test_empty_schema_list(self):
         (
             updated_schemas,
-            recursive_schemas,
+            delete_schemas,
             updated_count,
             skipped_count,
         ) = expand_refs_in_schemas([])
@@ -950,7 +1005,7 @@ class TestExpandRefsInSchemas:
         assert updated_count == 0
         assert skipped_count == 0
         assert len(updated_schemas) == 0
-        assert len(recursive_schemas) == 0
+        assert len(delete_schemas) == 0
 
     def test_recursive_self_referencing_schema_marked_for_deletion(self):
         schema = JsonSchema(
@@ -989,7 +1044,7 @@ class TestExpandRefsInSchemas:
 
         (
             updated_schemas,
-            recursive_schemas,
+            delete_schemas,
             updated_count,
             skipped_count,
         ) = expand_refs_in_schemas([schema])
@@ -997,5 +1052,152 @@ class TestExpandRefsInSchemas:
         assert updated_count == 0
         assert skipped_count == 0
         assert len(updated_schemas) == 0
-        assert len(recursive_schemas) == 1
-        assert recursive_schemas[0].id == 1
+        assert len(delete_schemas) == 1
+        assert delete_schemas[0].id == 1
+
+    def test_schema_with_missing_ref_marked_for_deletion(self):
+        schema = JsonSchema(
+            id=1,
+            content={
+                "$id": "#/properties",
+                "type": ["object", "null"],
+                "properties": {
+                    "results": {
+                        "type": ["array", "null"],
+                        "items": {"$ref": "#/$defs/property_result"},
+                    }
+                },
+                "$defs": {
+                    "property_result": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "id": {"type": ["string", "null"]},
+                            "address": {"$ref": "#/$defs/address"},
+                            "price": {"type": ["number", "null"]},
+                            "size": {"type": ["integer", "null"]},
+                            "selected": {"type": ["boolean", "null"]},
+                        },
+                    }
+                },
+            },
+            is_synthetic=False,
+        )
+
+        (
+            updated_schemas,
+            delete_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema])
+
+        assert updated_count == 0
+        assert skipped_count == 0
+        assert len(updated_schemas) == 0
+        assert len(delete_schemas) == 1
+        assert delete_schemas[0].id == 1
+
+    def test_schema_with_root_ref_marked_for_deletion(self):
+        schema = JsonSchema(
+            id=1,
+            content={
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "type": ["object", "null"],
+                "properties": {
+                    "departmentName": {"type": ["string", "null"]},
+                    "employees": {
+                        "type": ["array", "null"],
+                        "items": {
+                            "type": ["object", "null"],
+                            "properties": {
+                                "name": {"type": ["string", "null"]},
+                                "jobTitle": {"type": ["string", "null"]},
+                                "contactInformation": {
+                                    "type": ["object", "null"],
+                                    "properties": {
+                                        "phone": {"type": ["string", "null"]},
+                                        "email": {"type": ["string", "null"]},
+                                    },
+                                },
+                                "directSupervisor": {"$ref": "#/$defs/employee"},
+                            },
+                        },
+                    },
+                },
+                "$defs": {"employee": {"$ref": "#"}},
+            },
+            is_synthetic=False,
+        )
+
+        (
+            updated_schemas,
+            delete_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema])
+
+        assert updated_count == 0
+        assert skipped_count == 0
+        assert len(updated_schemas) == 0
+        assert len(delete_schemas) == 1
+        assert delete_schemas[0].id == 1
+
+    def test_schema_with_malformed_ref_marked_for_deletion(self):
+        schema = JsonSchema(
+            id=1,
+            content={
+                "type": ["object", "null"],
+                "properties": {
+                    "hiv_life_cycle": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "transmission_methods": {
+                                "type": ["array", "null"],
+                                "items": {"$ref": "#/$defs/transmission_method"},
+                            },
+                            "symptoms": {
+                                "type": ["array", "null"],
+                                "items": {"$ref": "#$defs/symptom"},
+                            },
+                            "stages_progression_aids": {
+                                "type": ["object", "null"],
+                                "properties": {
+                                    "stage1": {"type": ["string", "null"]},
+                                    "stage2": {"type": ["string", "null"]},
+                                    "stage3": {"type": ["string", "null"]},
+                                },
+                            },
+                        },
+                    }
+                },
+                "$defs": {
+                    "transmission_method": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "method_name": {"type": ["string", "null"]},
+                            "description": {"type": ["string", "null"]},
+                        },
+                    },
+                    "symptom": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "symptom_name": {"type": ["string", "null"]},
+                            "description": {"type": ["string", "null"]},
+                        },
+                    },
+                },
+            },
+            is_synthetic=False,
+        )
+
+        (
+            updated_schemas,
+            delete_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema])
+
+        assert updated_count == 0
+        assert skipped_count == 0
+        assert len(updated_schemas) == 0
+        assert len(delete_schemas) == 1
+        assert delete_schemas[0].id == 1

@@ -408,39 +408,33 @@ def expand_refs_in_schemas_command():
     logger.info(f"Expanding refs in schemas from {DB_FILE}")
 
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
-
         schemas = db_session.query(JsonSchema).all()
         logger.info(f"Found {len(schemas)} schemas to process")
 
-        try:
-            (
-                updated_schemas,
-                recursive_schemas,
-                updated_count,
-                skipped_count,
-            ) = expand_refs_in_schemas(schemas)
+        (
+            updated_schemas,
+            delete_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas(schemas)
 
-            for schema in updated_schemas:
-                db_session.add(schema)
+        for schema in updated_schemas:
+            db_session.add(schema)
 
-                if PREVIEW and len(updated_schemas) <= 3:
-                    schema_str = json.dumps(schema.content, sort_keys=True)
-                    logger.info(f"Example schema {schema.id} expanded:")
-                    logger.info(f"  Content: {schema_str[:150]}...")
+            if PREVIEW and len(updated_schemas) <= 3:
+                schema_str = json.dumps(schema.content, sort_keys=True)
+                logger.info(f"Example schema {schema.id} expanded:")
+                logger.info(f"  Content: {schema_str[:150]}...")
 
-            for schema in recursive_schemas:
-                db_session.delete(schema)
+        for schema in delete_schemas:
+            db_session.delete(schema)
 
-            logger.info(
-                f"Updated {updated_count} schemas, skipped {skipped_count} (already expanded), deleted {len(recursive_schemas)} (recursive)"
-            )
+        logger.info(
+            f"Updated {updated_count} schemas, skipped {skipped_count} (already expanded), deleted {len(delete_schemas)} (recursive or unresolved references)"
+        )
 
-            if PREVIEW:
-                logger.info("Preview mode: changes not committed")
-
-        except Exception as e:
-            logger.error(f"Error expanding schemas: {e}")
-            raise
+        if PREVIEW:
+            logger.info("Preview mode: changes not committed")
 
 
 # Step 2.3: Extract sub-schemas from JsonSchemas

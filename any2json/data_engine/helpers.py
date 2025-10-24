@@ -569,31 +569,12 @@ def fetch_schema_from_url(url: str, timeout: int = 10) -> dict:
 def extract_schema_from_ref(
     ref_value: str, base_schema: dict | None = None
 ) -> tuple[dict, str]:
-    if ref_value.startswith("http://") or ref_value.startswith("https://"):
-        if "#/" in ref_value:
-            url, json_pointer = ref_value.split("#/", 1)
-            schema = fetch_schema_from_url(url)
-            parts = json_pointer.split("/")
-            current = schema
-            for part in parts:
-                if isinstance(current, dict) and part in current:
-                    current = current[part]
-                else:
-                    raise ValueError(
-                        f"Cannot resolve JSON pointer {json_pointer} in schema from {url}"
-                    )
-            if not isinstance(current, dict):
-                raise ValueError(
-                    f"Reference {ref_value} does not point to a schema object"
-                )
-            return current, f"url:{url}#/{json_pointer}"
-        else:
-            schema = fetch_schema_from_url(ref_value)
-            if not isinstance(schema, dict):
-                raise ValueError(
-                    f"Schema fetched from {ref_value} is not a valid object"
-                )
-            return schema, f"url:{ref_value}"
+    if ref_value == "#":
+        if not base_schema:
+            raise ValueError(
+                f"Cannot resolve reference {ref_value} without base schema"
+            )
+        return base_schema, "ref:#"
     elif ref_value.startswith("#/"):
         if not base_schema:
             raise ValueError(
@@ -634,10 +615,32 @@ def extract_schema_from_ref(
                     f"Reference {ref_value} does not point to a schema object"
                 )
             return current, f"ref:{ref_value}"
+
+    if ref_value.startswith("http://") or ref_value.startswith("https://"):
+        if "#/" in ref_value:
+            url, json_pointer = ref_value.split("#/", 1)
+            schema = fetch_schema_from_url(url)
+            parts = json_pointer.split("/")
+            current = schema
+            for part in parts:
+                if isinstance(current, dict) and part in current:
+                    current = current[part]
+                else:
+                    raise ValueError(
+                        f"Cannot resolve JSON pointer {json_pointer} in schema from {url}"
+                    )
+            if not isinstance(current, dict):
+                raise ValueError(
+                    f"Reference {ref_value} does not point to a schema object"
+                )
+            return current, f"url:{url}#/{json_pointer}"
         else:
-            raise ValueError(
-                f"Cannot resolve reference {ref_value} - schema $id mismatch (base has $id='{base_schema_id}')"
-            )
+            schema = fetch_schema_from_url(ref_value)
+            if not isinstance(schema, dict):
+                raise ValueError(
+                    f"Schema fetched from {ref_value} is not a valid object"
+                )
+            return schema, f"url:{ref_value}"
     else:
         raise ValueError(f"Unsupported reference format: {ref_value}")
 
@@ -758,7 +761,9 @@ def expand_refs_in_schema(
             visited_refs.discard(ref_value)
             return expanded
         except ValueError as e:
-            raise ValueError(f"Failed to expand $ref '{ref_value}': {e}") from e
+            raise ValueError(
+                f"Failed to expand $ref '{ref_value}' in schema {base_schema}: {e}"
+            ) from e
 
     expanded = {}
     for key, value in schema.items():
@@ -861,10 +866,10 @@ def expand_refs_in_schemas(
     schemas: list[JsonSchema],
 ) -> tuple[list[JsonSchema], list[JsonSchema], int, int]:
     updated_schemas = []
-    recursive_schemas = []
+    delete_schemas = []
     skipped_count = 0
 
-    for schema in schemas:
+    for schema in tqdm(schemas, desc="Expanding refs in schemas"):
         schema_content = (
             schema.content
             if isinstance(schema.content, dict)
@@ -893,8 +898,11 @@ def expand_refs_in_schemas(
         except ValueError as e:
             if "Recursive reference detected" in str(e):
                 logger.info(f"Removing recursive schema {schema.id}")
-                recursive_schemas.append(schema)
+                delete_schemas.append(schema)
             else:
-                raise
+                logger.info(
+                    f"Removing schema {schema.id} due to failed reference resolution: {e}"
+                )
+                delete_schemas.append(schema)
 
-    return updated_schemas, recursive_schemas, len(updated_schemas), skipped_count
+    return updated_schemas, delete_schemas, len(updated_schemas), skipped_count
