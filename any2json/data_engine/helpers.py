@@ -734,15 +734,28 @@ def extract_implicit_subschemas(
     return subschemas
 
 
-def expand_refs_in_schema(schema: dict, base_schema: dict) -> dict:
+def expand_refs_in_schema(
+    schema: dict, base_schema: dict, visited_refs: set[str] | None = None
+) -> dict:
+    if visited_refs is None:
+        visited_refs = set()
+
     if "$ref" in schema:
         ref_value = schema["$ref"]
+
+        if ref_value in visited_refs:
+            raise ValueError(f"Recursive reference detected: {ref_value}")
+
+        visited_refs.add(ref_value)
+
         try:
             ref_schema, _ = extract_schema_from_ref(ref_value, base_schema)
-            expanded = expand_refs_in_schema(ref_schema, base_schema)
+            expanded = expand_refs_in_schema(ref_schema, base_schema, visited_refs)
             other_keys = {k: v for k, v in schema.items() if k != "$ref"}
             if other_keys:
                 expanded = {**expanded, **other_keys}
+
+            visited_refs.discard(ref_value)
             return expanded
         except ValueError as e:
             raise ValueError(f"Failed to expand $ref '{ref_value}': {e}") from e
@@ -750,11 +763,11 @@ def expand_refs_in_schema(schema: dict, base_schema: dict) -> dict:
     expanded = {}
     for key, value in schema.items():
         if isinstance(value, dict):
-            expanded[key] = expand_refs_in_schema(value, base_schema)
+            expanded[key] = expand_refs_in_schema(value, base_schema, visited_refs)
         elif isinstance(value, list):
             expanded[key] = [
                 (
-                    expand_refs_in_schema(item, base_schema)
+                    expand_refs_in_schema(item, base_schema, visited_refs)
                     if isinstance(item, dict)
                     else item
                 )
@@ -768,7 +781,7 @@ def expand_refs_in_schema(schema: dict, base_schema: dict) -> dict:
 
 def validate_schema(schema: dict) -> bool:
     try:
-        fastjsonschema.compile(schema)
+        fastjsonschema.compile(schema, detailed_exceptions=False)
         return True
     except Exception as e:
         logger.debug(f"Schema validation failed: {e}")
@@ -846,8 +859,9 @@ def extract_sub_schemas(
 
 def expand_refs_in_schemas(
     schemas: list[JsonSchema],
-) -> tuple[list[JsonSchema], int, int]:
+) -> tuple[list[JsonSchema], list[JsonSchema], int, int]:
     updated_schemas = []
+    recursive_schemas = []
     skipped_count = 0
 
     for schema in schemas:
@@ -859,21 +873,28 @@ def expand_refs_in_schemas(
 
         original_content_str = json.dumps(schema_content, sort_keys=True)
 
-        expanded_content = expand_refs_in_schema(schema_content, schema_content)
+        try:
+            expanded_content = expand_refs_in_schema(schema_content, schema_content)
 
-        if "$defs" in expanded_content:
-            del expanded_content["$defs"]
-        if "definitions" in expanded_content:
-            del expanded_content["definitions"]
+            if "$defs" in expanded_content:
+                del expanded_content["$defs"]
+            if "definitions" in expanded_content:
+                del expanded_content["definitions"]
 
-        expanded_content_str = json.dumps(expanded_content, sort_keys=True)
+            expanded_content_str = json.dumps(expanded_content, sort_keys=True)
 
-        if original_content_str != expanded_content_str and validate_schema(
-            expanded_content
-        ):
-            schema.content = expanded_content
-            updated_schemas.append(schema)
-        else:
-            skipped_count += 1
+            if original_content_str != expanded_content_str and validate_schema(
+                expanded_content
+            ):
+                schema.content = expanded_content
+                updated_schemas.append(schema)
+            else:
+                skipped_count += 1
+        except ValueError as e:
+            if "Recursive reference detected" in str(e):
+                logger.info(f"Removing recursive schema {schema.id}")
+                recursive_schemas.append(schema)
+            else:
+                raise
 
-    return updated_schemas, len(updated_schemas), skipped_count
+    return updated_schemas, recursive_schemas, len(updated_schemas), skipped_count

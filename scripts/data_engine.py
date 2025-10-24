@@ -413,9 +413,12 @@ def expand_refs_in_schemas_command():
         logger.info(f"Found {len(schemas)} schemas to process")
 
         try:
-            updated_schemas, updated_count, skipped_count = expand_refs_in_schemas(
-                schemas
-            )
+            (
+                updated_schemas,
+                recursive_schemas,
+                updated_count,
+                skipped_count,
+            ) = expand_refs_in_schemas(schemas)
 
             for schema in updated_schemas:
                 db_session.add(schema)
@@ -425,8 +428,11 @@ def expand_refs_in_schemas_command():
                     logger.info(f"Example schema {schema.id} expanded:")
                     logger.info(f"  Content: {schema_str[:150]}...")
 
+            for schema in recursive_schemas:
+                db_session.delete(schema)
+
             logger.info(
-                f"Updated {updated_count} schemas, skipped {skipped_count} (already expanded)"
+                f"Updated {updated_count} schemas, skipped {skipped_count} (already expanded), deleted {len(recursive_schemas)} (recursive)"
             )
 
             if PREVIEW:

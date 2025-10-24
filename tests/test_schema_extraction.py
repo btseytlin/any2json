@@ -755,12 +755,16 @@ class TestExpandRefsInSchemas:
             is_synthetic=False,
         )
 
-        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas(
-            [schema1, schema2]
-        )
+        (
+            updated_schemas,
+            recursive_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema1, schema2])
 
         assert updated_count == 2
         assert skipped_count == 0
+        assert len(recursive_schemas) == 0
         assert len(updated_schemas) == 2
 
         assert "$defs" not in json.dumps(schema1.content)
@@ -790,12 +794,16 @@ class TestExpandRefsInSchemas:
             is_synthetic=False,
         )
 
-        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas(
-            [schema1, schema2]
-        )
+        (
+            updated_schemas,
+            recursive_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema1, schema2])
 
         assert updated_count == 0
         assert skipped_count == 2
+        assert len(recursive_schemas) == 0
         assert len(updated_schemas) == 0
 
     def test_mix_of_schemas_some_need_expansion(self):
@@ -820,12 +828,16 @@ class TestExpandRefsInSchemas:
             is_synthetic=False,
         )
 
-        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas(
-            [schema_needs_expansion, schema_already_expanded]
-        )
+        (
+            updated_schemas,
+            recursive_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema_needs_expansion, schema_already_expanded])
 
         assert updated_count == 1
         assert skipped_count == 1
+        assert len(recursive_schemas) == 0
         assert len(updated_schemas) == 1
         assert updated_schemas[0].id == 1
 
@@ -868,11 +880,17 @@ class TestExpandRefsInSchemas:
             },
         }
 
-        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas([schema])
+        (
+            updated_schemas,
+            recursive_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema])
 
         assert len(updated_schemas) == 1
         assert updated_count == 1
         assert skipped_count == 0
+        assert len(recursive_schemas) == 0
 
         content_str = json.dumps(schema.content)
         assert "$defs" not in content_str
@@ -896,9 +914,15 @@ class TestExpandRefsInSchemas:
             is_synthetic=False,
         )
 
-        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas([schema])
+        (
+            updated_schemas,
+            recursive_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema])
 
         assert updated_count == 1
+        assert len(recursive_schemas) == 0
         assert "definitions" not in schema.content
         assert "$ref" not in json.dumps(schema.content)
 
@@ -916,8 +940,62 @@ class TestExpandRefsInSchemas:
             expand_refs_in_schemas([schema])
 
     def test_empty_schema_list(self):
-        updated_schemas, updated_count, skipped_count = expand_refs_in_schemas([])
+        (
+            updated_schemas,
+            recursive_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([])
 
         assert updated_count == 0
         assert skipped_count == 0
         assert len(updated_schemas) == 0
+        assert len(recursive_schemas) == 0
+
+    def test_recursive_self_referencing_schema_marked_for_deletion(self):
+        schema = JsonSchema(
+            id=1,
+            content={
+                "$schema": "https://json-schema.org/draft-07/schema#",
+                "type": ["object", "null"],
+                "properties": {
+                    "name": {"type": ["string", "null"]},
+                    "description": {"type": ["string", "null"]},
+                    "location": {"type": ["string", "null"]},
+                    "numEmployees": {"type": ["integer", "null"], "minimum": 0},
+                    "subdepartments": {
+                        "type": ["array", "null"],
+                        "items": {"$ref": "#/$defs/subdepartment"},
+                    },
+                },
+                "$defs": {
+                    "subdepartment": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "name": {"type": ["string", "null"]},
+                            "description": {"type": ["string", "null"]},
+                            "location": {"type": ["string", "null"]},
+                            "numEmployees": {"type": ["integer", "null"], "minimum": 0},
+                            "subdepartments": {
+                                "type": ["array", "null"],
+                                "items": {"$ref": "#/$defs/subdepartment"},
+                            },
+                        },
+                    }
+                },
+            },
+            is_synthetic=False,
+        )
+
+        (
+            updated_schemas,
+            recursive_schemas,
+            updated_count,
+            skipped_count,
+        ) = expand_refs_in_schemas([schema])
+
+        assert updated_count == 0
+        assert skipped_count == 0
+        assert len(updated_schemas) == 0
+        assert len(recursive_schemas) == 1
+        assert recursive_schemas[0].id == 1
