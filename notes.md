@@ -118,14 +118,6 @@ python scripts/data_engine.py export-hf-dataset --repo-id btseytlin/any2json
 
 
 ```
-inp, schema, outpt
-42354	67682	42353
-52376	72693	52375
-53662	73336	53661
-95650	51290	2288
-95655	6087	92947
-95689	46191	87704
-95771	17540	19951
 
 
 # Benchmarks
