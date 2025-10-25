@@ -1,4 +1,5 @@
 import json
+import logging
 import fastjsonschema
 import pandas as pd
 from faker import Faker
@@ -109,7 +110,7 @@ class PandasGenerator(SampleGenerator):
             ]
         )
         self.num_rows = random.randint(1, 5)
-        self.num_cols = random.randint(2, 20)
+        self.num_cols = random.randint(2, 10)
 
         self.csv_sep = random.choice([",", "\t", ";", "|"])
         self.column_sep = random.choice(["_", "-", " ", ""])
@@ -128,11 +129,11 @@ class PandasGenerator(SampleGenerator):
         ]
         self.input_format = random.choice(conversion_options)
         self.input_orient = None
-        if self.input_format in ("yaml", "python_string"):
+        if self.input_format in ("yaml",):
             self.input_orient = random.choice(
                 ["dict", "list", "split", "tight", "index", "columns"]
             )
-        if self.input_format == "json":
+        if self.input_format in ("json", "python_string"):
             self.input_orient = random.choice(["split", "index", "columns"])
 
         if self.input_orient in ("values", "split"):
@@ -143,6 +144,12 @@ class PandasGenerator(SampleGenerator):
             self.column_sep = "_"
 
         self.column_configs = self.get_random_column_configs()
+
+        logger.debug(f"Input format: {self.input_format}")
+        logger.debug(f"Input orient: {self.input_orient}")
+        logger.debug(f"Column name format: {self.column_name_format}")
+        logger.debug(f"Column sep: {self.column_sep}")
+        logger.debug(f"Column configs: {self.column_configs}")
 
     def get_state(self) -> Dict[str, Any]:
         return {
@@ -335,6 +342,7 @@ class PandasGenerator(SampleGenerator):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
     generator = PandasGenerator()
     generator.setup()
     input_data, schema, output_data = generator.generate_triplet()

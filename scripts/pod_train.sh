@@ -13,7 +13,7 @@ echo "Code and dependencies updated"
 echo "Setup complete, running command"
 
 export BATCH_SIZE=4
-export NUM_EPOCHS=3
+export NUM_EPOCHS=1
 # export MODEL=google/gemma-3-270m
 export MODEL=HuggingFaceTB/SmolLM2-135M
 

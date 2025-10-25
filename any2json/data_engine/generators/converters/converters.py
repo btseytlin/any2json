@@ -578,6 +578,14 @@ class ToSQLInsertConverter(Converter):
         if not keys:
             return ""
 
+        for item in data:
+            for key in keys:
+                value = item[key]
+                if isinstance(value, (dict, list)):
+                    raise ValueError(
+                        f"Nested data not supported: key '{key}' has nested value"
+                    )
+
         values_list = []
         for item in data:
             values = []
@@ -585,9 +593,6 @@ class ToSQLInsertConverter(Converter):
                 value = item[key]
                 if isinstance(value, str):
                     values.append(f"'{value}'")
-                elif isinstance(value, (dict, list)):
-                    json_str = json.dumps(value, separators=(",", ":"))
-                    values.append(f"'{json_str}'")
                 elif value is None:
                     values.append("NULL")
                 else:

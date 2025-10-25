@@ -419,35 +419,25 @@ class TestToSQLInsertConverter:
 
     def test_convert_nested_dict_values(self):
         data = {"name": "Alice", "details": {"age": 30, "city": "NYC"}}
-        result = self.converter.convert(data)
 
-        expected = 'INSERT INTO users (name, details) VALUES (\'Alice\', \'{"age":30,"city":"NYC"}\');'
-
-        assert isinstance(result, str)
-        assert result == expected
+        with pytest.raises(ValueError):
+            self.converter.convert(data)
 
     def test_convert_nested_dict_list(self):
         data = [
             {"name": "Alice", "details": {"age": 30, "city": "NYC"}},
             {"name": "Bob", "details": {"age": 25, "city": "LA"}},
         ]
-        result = self.converter.convert(data)
-        expected = 'INSERT INTO users (name, details) VALUES (\'Alice\', \'{"age":30,"city":"NYC"}\'), (\'Bob\', \'{"age":25,"city":"LA"}\');'
-
-        assert isinstance(result, str)
-        assert result == expected
+        with pytest.raises(ValueError):
+            self.converter.convert(data)
 
     def test_convert_nested_dict_list_of_dicts(self):
         data = [
             {"name": "Alice", "details": [{"age": 30, "city": "NYC"}]},
             {"name": "Bob", "details": [{"age": 25, "city": "LA"}]},
         ]
-        result = self.converter.convert(data)
-
-        expected = 'INSERT INTO users (name, details) VALUES (\'Alice\', \'[{"age":30,"city":"NYC"}]\'), (\'Bob\', \'[{"age":25,"city":"LA"}]\');'
-
-        assert isinstance(result, str)
-        assert result == expected
+        with pytest.raises(ValueError):
+            self.converter.convert(data)
 
 
 class TestToCSVConverter:

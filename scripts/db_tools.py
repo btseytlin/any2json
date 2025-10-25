@@ -250,6 +250,15 @@ def init():
 
 
 @cli.command()
+@click.argument("sql_file", type=click.Path(exists=True, dir_okay=False))
+def execute_sql(sql_file: str):
+    with open(sql_file, "r") as f:
+        sql = f.read()
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        db_session.execute(text(sql))
+
+
+@cli.command()
 def stats():
     """Calculate:
     - Number of source documents,
