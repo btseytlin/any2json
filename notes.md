@@ -87,7 +87,6 @@ python scripts/data_engine.py generate-schemas
 python scripts/db_tools.py drop-duplicate-schemas
 python scripts/data_engine.py map-chunks
 
-python scripts/db_tools.py validate_schema_mappings
 python scripts/db_tools.py clear-broken-schema-mappings
 python scripts/db_tools.py vacuum
 python scripts/db_tools.py stats
@@ -119,6 +118,15 @@ python scripts/data_engine.py export-hf-dataset --repo-id btseytlin/any2json
 
 
 ```
+inp, schema, outpt
+42354	67682	42353
+52376	72693	52375
+53662	73336	53661
+95650	51290	2288
+95655	6087	92947
+95689	46191	87704
+95771	17540	19951
+
 
 # Benchmarks
 

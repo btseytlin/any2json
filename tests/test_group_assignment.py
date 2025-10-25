@@ -287,7 +287,7 @@ class TestGroupAssignment:
             schema_content={"key2": 2},
             output_text="Output 2",
         )
-        c3 = make_conversion(  # Same schema as c1
+        c3 = make_conversion(
             id=3,
             input_text="input 3",
             schema_content={"key1": 1},
@@ -296,4 +296,198 @@ class TestGroupAssignment:
         groups = group_conversions([c1, c2, c3])
         assert groups is not None
         assert groups[1] != groups[2]
+        assert groups[1] == groups[3]
+
+    def test_parent_chunk_id_same_group(self):
+        parent_chunk = Chunk(
+            id=100, content='{"x": 1}', content_type=ContentType.JSON.value
+        )
+        child_chunk = Chunk(
+            id=101,
+            content='{"x": 1}',
+            content_type=ContentType.JSON.value,
+            parent_chunk_id=100,
+        )
+
+        c1 = make_conversion(
+            id=1,
+            input_text="input 1",
+            schema_content={"key1": 1},
+            output_text="irrelevant",
+        )
+        c1.output_chunk = parent_chunk
+
+        c2 = make_conversion(
+            id=2,
+            input_text="input 2",
+            schema_content={"key2": 2},
+            output_text="different",
+        )
+        c2.output_chunk = child_chunk
+
+        groups = group_conversions([c1, c2])
+        assert groups is not None and groups[1] == groups[2]
+
+    def test_parent_schema_id_same_group(self):
+        parent_schema = JsonSchema(
+            id=200, content={"type": "object", "properties": {"x": {"type": "number"}}}
+        )
+        child_schema = JsonSchema(
+            id=201,
+            content={"type": "object", "properties": {"x": {"type": "string"}}},
+            parent_schema_id=200,
+        )
+
+        c1 = make_conversion(
+            id=1,
+            input_text="input 1",
+            schema_content={"irrelevant": 1},
+            output_text="output 1",
+        )
+        c1.schema = parent_schema
+
+        c2 = make_conversion(
+            id=2,
+            input_text="input 2",
+            schema_content={"different": 2},
+            output_text="output 2",
+        )
+        c2.schema = child_schema
+
+        groups = group_conversions([c1, c2])
+        assert groups is not None and groups[1] == groups[2]
+
+    def test_multiple_derived_chunks_same_group(self):
+        parent_chunk = Chunk(
+            id=300, content='{"a": 1}', content_type=ContentType.JSON.value
+        )
+        child1_chunk = Chunk(
+            id=301,
+            content='{"b": 2}',
+            content_type=ContentType.JSON.value,
+            parent_chunk_id=300,
+        )
+        child2_chunk = Chunk(
+            id=302,
+            content='{"c": 3}',
+            content_type=ContentType.JSON.value,
+            parent_chunk_id=300,
+        )
+
+        c1 = make_conversion(
+            id=1,
+            input_text="input 1",
+            schema_content={"s": 1},
+            output_text="out 1",
+        )
+        c1.output_chunk = parent_chunk
+
+        c2 = make_conversion(
+            id=2,
+            input_text="input 2",
+            schema_content={"s": 2},
+            output_text="out 2",
+        )
+        c2.output_chunk = child1_chunk
+
+        c3 = make_conversion(
+            id=3,
+            input_text="input 3",
+            schema_content={"s": 3},
+            output_text="out 3",
+        )
+        c3.output_chunk = child2_chunk
+
+        groups = group_conversions([c1, c2, c3])
+        assert groups is not None
+        assert groups[1] == groups[2]
+        assert groups[1] == groups[3]
+
+    def test_parent_relationships_prevent_train_test_leakage(self):
+        parent_chunk = Chunk(
+            id=400, content='{"original": "data"}', content_type=ContentType.JSON.value
+        )
+        derived1 = Chunk(
+            id=401,
+            content='{"derived": "v1"}',
+            content_type=ContentType.JSON.value,
+            parent_chunk_id=400,
+        )
+        derived2 = Chunk(
+            id=402,
+            content='{"derived": "v2"}',
+            content_type=ContentType.JSON.value,
+            parent_chunk_id=400,
+        )
+
+        parent_schema = JsonSchema(
+            id=500,
+            content={"type": "object", "properties": {"original": {"type": "string"}}},
+        )
+        derived_schema = JsonSchema(
+            id=501,
+            content={"type": "object", "properties": {"derived": {"type": "string"}}},
+            parent_schema_id=500,
+        )
+
+        c1 = make_conversion(
+            id=1, input_text="in1", schema_content={}, output_text="out1"
+        )
+        c1.output_chunk = parent_chunk
+        c1.schema = parent_schema
+
+        c2 = make_conversion(
+            id=2, input_text="in2", schema_content={}, output_text="out2"
+        )
+        c2.output_chunk = derived1
+        c2.schema = derived_schema
+
+        c3 = make_conversion(
+            id=3, input_text="in3", schema_content={}, output_text="out3"
+        )
+        c3.output_chunk = derived2
+        c3.schema = parent_schema
+
+        groups = group_conversions([c1, c2, c3])
+        assert groups is not None
+        assert groups[1] == groups[2]
+        assert groups[1] == groups[3]
+
+    def test_multi_level_parent_chain_same_group(self):
+        root_chunk = Chunk(
+            id=600, content='{"root": "data"}', content_type=ContentType.JSON.value
+        )
+        child1_chunk = Chunk(
+            id=601,
+            content='{"child1": "data"}',
+            content_type=ContentType.JSON.value,
+            parent_chunk_id=600,
+        )
+        child1_chunk.parent_chunk = root_chunk
+        grandchild_chunk = Chunk(
+            id=602,
+            content='{"grandchild": "data"}',
+            content_type=ContentType.JSON.value,
+            parent_chunk_id=601,
+        )
+        grandchild_chunk.parent_chunk = child1_chunk
+
+        c1 = make_conversion(
+            id=1, input_text="in1", schema_content={"s": 1}, output_text="out1"
+        )
+        c1.output_chunk = root_chunk
+
+        c2 = make_conversion(
+            id=2, input_text="in2", schema_content={"s": 2}, output_text="out2"
+        )
+        c2.output_chunk = child1_chunk
+
+        c3 = make_conversion(
+            id=3, input_text="in3", schema_content={"s": 3}, output_text="out3"
+        )
+        c3.output_chunk = grandchild_chunk
+
+        groups = group_conversions([c1, c2, c3])
+        assert groups is not None
+        assert groups[1] == groups[2]
         assert groups[1] == groups[3]

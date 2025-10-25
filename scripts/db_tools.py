@@ -599,6 +599,33 @@ def clear_broken_schema_mappings():
 
 
 @cli.command()
+@click.option(
+    "--delete-invalid",
+    is_flag=True,
+    help="Delete invalid schema conversions",
+)
+def validate_schema_conversions(delete_invalid: bool):
+    with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
+        valid_schema_conversions = 0
+        invalid_schema_conversions = 0
+        for schema_conversion in tqdm(
+            db_session.execute(select(SchemaConversion)).scalars()
+        ):
+            if (
+                schema_conversion.schema is None
+                or schema_conversion.output_chunk is None
+                or schema_conversion.input_chunk is None
+            ):
+                invalid_schema_conversions += 1
+                if delete_invalid:
+                    db_session.delete(schema_conversion)
+            else:
+                valid_schema_conversions += 1
+        logger.info(f"Valid schema conversions: {valid_schema_conversions}")
+        logger.info(f"Invalid schema conversions: {invalid_schema_conversions}")
+
+
+@cli.command()
 def fix_schema_conversions():
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         schema_conversions = (

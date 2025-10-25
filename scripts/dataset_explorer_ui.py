@@ -1,62 +1,74 @@
 from dotenv import load_dotenv
 import streamlit as st
 import json
-from datasets import load_dataset
-from collections import Counter
-from typing import Optional
 import os
-from any2json.training.utils import load_hf_dataset
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+
+from any2json.database.client import get_db_session
+from any2json.database.models import Chunk, JsonSchema, SchemaConversion
 from any2json.utils import configure_loggers
+from sqlalchemy import func, select
 
 st.set_page_config(
     page_title="Any2JSON Dataset Explorer", page_icon="🔍", layout="wide"
 )
 
 
+@dataclass
+class Sample:
+    id: int
+    input_content: str
+    input_content_type: str
+    schema_content: dict
+    output_content: str
+    is_synthetic: bool
+    schema_id: int
+    input_chunk_id: int
+    output_chunk_id: int
+    meta: dict | None
+
+
 @st.cache_resource
-def load_hf_dataset_cached(repo_id: str):
-    return load_hf_dataset(repo_id)
+def get_session(db_path: str):
+    return get_db_session(f"sqlite:///{db_path}")
 
 
 @st.cache_data
-def compute_metadata(_ds):
-    content_types = []
-    groups = []
-    schema_ids = []
-    synthetic_types = []
-    parsed_metas = []
+def load_samples(_session) -> list[Sample]:
+    conversions = _session.query(SchemaConversion).order_by(SchemaConversion.id).all()
 
-    for sample in _ds:
-        meta = parse_meta(sample["meta"])
-        parsed_metas.append(meta)
-        content_types.append(meta.get("input_chunk_content_type", "unknown"))
-        groups.append(meta.get("group"))
-        schema_ids.append(meta.get("schema_id"))
-        if meta.get("is_synthetic"):
-            synthetic_types.append(meta.get("synthetic_type", "unknown"))
+    samples = []
+    for conv in conversions:
+        sample = Sample(
+            id=conv.id,
+            input_content=conv.input_chunk.content,
+            input_content_type=conv.input_chunk.content_type,
+            schema_content=conv.schema.content,
+            output_content=conv.output_chunk.content,
+            is_synthetic=conv.input_chunk.is_synthetic,
+            schema_id=conv.schema_id,
+            input_chunk_id=conv.input_chunk_id,
+            output_chunk_id=conv.output_chunk_id,
+            meta=conv.input_chunk.meta or {},
+        )
+        samples.append(sample)
 
-    return content_types, groups, schema_ids, synthetic_types, parsed_metas
-
-
-def parse_meta(meta_str: str) -> dict:
-    if isinstance(meta_str, str):
-        return json.loads(meta_str)
-    return meta_str
+    return samples
 
 
-def parse_schema(schema_str: str) -> dict | str:
-    if isinstance(schema_str, str):
-        try:
-            return json.loads(schema_str)
-        except:
-            return schema_str
-    return schema_str
+@st.cache_data
+def compute_stats(samples: list[Sample]):
+    content_types = [s.input_content_type for s in samples]
+    groups = [s.meta.get("group") for s in samples if s.meta]
+    schema_ids = [s.schema_id for s in samples]
+    synthetic_flags = [s.is_synthetic for s in samples]
+    synthetic_types = [
+        s.meta.get("synthetic_type") for s in samples if s.is_synthetic and s.meta
+    ]
 
-
-def parse_output(output_str: str) -> dict:
-    if isinstance(output_str, str):
-        return json.loads(output_str)
-    return output_str
+    return content_types, groups, schema_ids, synthetic_flags, synthetic_types
 
 
 def main():
@@ -65,38 +77,38 @@ def main():
         "Explore the training dataset for universal structured data to JSON conversion"
     )
 
-    repo_id = st.sidebar.text_input(
-        "HuggingFace Dataset ID", value="btseytlin/any2json"
-    )
+    db_path = st.sidebar.text_input("Database Path", value="data/database.db")
 
-    with st.spinner("Loading dataset..."):
+    if not Path(db_path).exists():
+        st.error(f"Database not found at {db_path}")
+        return
+
+    with st.spinner("Loading samples from database..."):
         try:
-            dataset = load_hf_dataset_cached(repo_id)
+            session = get_session(db_path)
+            samples = load_samples(session)
         except Exception as e:
-            st.error(f"Failed to load dataset: {e}")
+            st.error(f"Failed to load samples: {e}")
             return
 
     st.sidebar.markdown("### Dataset Info")
-    st.sidebar.metric("Train Samples", len(dataset["train"]))
-    st.sidebar.metric("Test Samples", len(dataset["test"]))
-
-    split = st.sidebar.selectbox("Split", ["train", "test"])
-    ds = dataset[split]
+    st.sidebar.metric("Total Samples", len(samples))
 
     st.sidebar.markdown("---")
 
-    content_types, groups, schema_ids, synthetic_types, parsed_metas = compute_metadata(
-        ds
+    content_types, groups, schema_ids, synthetic_flags, synthetic_types = compute_stats(
+        samples
     )
     content_type_counts = Counter(content_types)
-    group_counts = Counter(groups)
+    group_counts = Counter([g for g in groups if g is not None])
 
     st.sidebar.markdown("### Content Types")
     for ct, count in content_type_counts.most_common():
         st.sidebar.text(f"{ct}: {count}")
 
     st.sidebar.markdown("### Synthetic Samples")
-    st.sidebar.metric("Total Synthetic", len(synthetic_types))
+    synthetic_count = sum(synthetic_flags)
+    st.sidebar.metric("Total Synthetic", synthetic_count)
     for syn_type, count in Counter(synthetic_types).most_common():
         st.sidebar.text(f"{syn_type}: {count}")
 
@@ -124,67 +136,65 @@ def main():
                 "Filter Synthetic", options=["all", "only_synthetic", "only_real"]
             )
 
-        filtered_indices = []
-        for idx in range(len(ds)):
-            meta = parsed_metas[idx]
-
+        filtered_samples = []
+        for sample in samples:
             if "all" not in filter_content_type:
-                if meta.get("input_chunk_content_type") not in filter_content_type:
+                if sample.input_content_type not in filter_content_type:
                     continue
 
             if "all" not in filter_group:
-                if meta.get("group") not in filter_group:
+                if sample.meta.get("group") not in filter_group:
                     continue
 
-            if filter_synthetic == "only_synthetic" and not meta.get("is_synthetic"):
+            if filter_synthetic == "only_synthetic" and not sample.is_synthetic:
                 continue
-            if filter_synthetic == "only_real" and meta.get("is_synthetic"):
+            if filter_synthetic == "only_real" and sample.is_synthetic:
                 continue
 
-            filtered_indices.append(idx)
+            filtered_samples.append(sample)
 
-        st.markdown(f"**Showing {len(filtered_indices)} samples**")
+        st.markdown(f"**Showing {len(filtered_samples)} samples**")
 
         with col2:
-            if filtered_indices:
+            if filtered_samples:
                 sample_idx = st.selectbox(
                     "Select Sample",
-                    options=filtered_indices,
-                    format_func=lambda x: f"Sample {x}",
+                    options=range(len(filtered_samples)),
+                    format_func=lambda x: f"Conversion ID {filtered_samples[x].id}",
                 )
 
-                sample = ds[sample_idx]
-                meta = parsed_metas[sample_idx]
+                sample = filtered_samples[sample_idx]
 
                 st.markdown("### Sample Details")
 
                 col_a, col_b = st.columns(2)
                 with col_a:
-                    st.metric("Content Type", meta.get("input_chunk_content_type"))
-                    st.metric("Group", meta.get("group", "N/A"))
+                    st.metric("Content Type", sample.input_content_type)
+                    st.metric("Group", sample.meta.get("group", "N/A"))
                 with col_b:
-                    st.metric("Schema ID", meta.get("schema_id"))
-                    st.metric("Synthetic", "Yes" if meta.get("is_synthetic") else "No")
+                    st.metric("Schema ID", sample.schema_id)
+                    st.metric("Synthetic", "Yes" if sample.is_synthetic else "No")
 
-                if meta.get("is_synthetic"):
-                    st.info(f"Synthetic Type: {meta.get('synthetic_type', 'unknown')}")
+                if sample.is_synthetic:
+                    st.info(
+                        f"Synthetic Type: {sample.meta.get('synthetic_type', 'unknown')}"
+                    )
 
                 st.markdown("### Input Data")
-                st.code(sample["input_data"], language="text")
+                st.code(sample.input_content, language="text")
 
                 st.markdown("### Schema")
-                schema = parse_schema(sample["schema"])
-                if isinstance(schema, dict):
-                    st.json(schema)
-                else:
-                    st.code(schema, language="text")
+                st.json(sample.schema_content)
 
                 st.markdown("### Output")
-                output = parse_output(sample["output"])
-                st.json(output)
+                try:
+                    output = json.loads(sample.output_content)
+                    st.json(output)
+                except:
+                    st.code(sample.output_content, language="text")
 
                 with st.expander("📋 Full Metadata"):
-                    st.json(meta)
+                    st.json(sample.meta)
             else:
                 st.info("No samples match the current filters")
 
@@ -206,50 +216,47 @@ def main():
         st.metric("Number of Unique Schemas", len(set(schema_ids)))
 
         st.markdown("#### Synthetic vs Real")
-        synthetic_count = sum(1 for s in synthetic_types if s)
-        real_count = len(ds) - synthetic_count
+        real_count = len(samples) - synthetic_count
         st.bar_chart({"Real": real_count, "Synthetic": synthetic_count})
 
     with tab3:
         if st.button("🎲 Get Random Sample"):
             import random
 
-            random_idx = random.randint(0, len(ds) - 1)
-            sample = ds[random_idx]
-            meta = parsed_metas[random_idx]
+            random_idx = random.randint(0, len(samples) - 1)
+            sample = samples[random_idx]
 
-            st.markdown(f"### Sample #{random_idx}")
+            st.markdown(f"### Conversion ID {sample.id}")
 
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("Content Type", meta.get("input_chunk_content_type"))
-                st.metric("Group", meta.get("group", "N/A"))
+                st.metric("Content Type", sample.input_content_type)
+                st.metric("Group", sample.meta.get("group", "N/A"))
             with col2:
-                st.metric("Schema ID", meta.get("schema_id"))
-                st.metric("Synthetic", "Yes" if meta.get("is_synthetic") else "No")
+                st.metric("Schema ID", sample.schema_id)
+                st.metric("Synthetic", "Yes" if sample.is_synthetic else "No")
 
             st.markdown("### Input Data")
-            st.code(sample["input_data"], language="text")
+            st.code(sample.input_content, language="text")
 
             st.markdown("### Schema")
-            schema = parse_schema(sample["schema"])
-            if isinstance(schema, dict):
-                st.json(schema)
-            else:
-                st.code(schema, language="text")
+            st.json(sample.schema_content)
 
             st.markdown("### Output")
-            output = parse_output(sample["output"])
-            st.json(output)
+            try:
+                output = json.loads(sample.output_content)
+                st.json(output)
+            except:
+                st.code(sample.output_content, language="text")
 
             with st.expander("📋 Full Metadata"):
-                st.json(meta)
+                st.json(sample.meta)
 
 
 if __name__ == "__main__":
     load_dotenv(override=False)
     configure_loggers(
         level=os.getenv("LOG_LEVEL", "INFO"),
-        basic_level=os.getenv("LOG_LEVEL_BASIC", "WARNING"),
+        basic_level=os.getenv("LOG_LEVEL_BASIC", "INFO"),
     )
     main()

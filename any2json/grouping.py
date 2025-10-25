@@ -6,11 +6,39 @@ import hashlib
 from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
-from any2json.database.models import Chunk, SchemaConversion
+from any2json.database.models import Chunk, JsonSchema, SchemaConversion
 from any2json.enums import ContentType
 from any2json.utils import logger, stringify_content
 from sqlalchemy.orm import Session
 from tqdm.auto import tqdm
+
+
+def get_root_chunk_id(chunk: Chunk) -> int | None:
+    if not chunk.id:
+        return None
+    current = chunk
+    visited = set()
+    while current.parent_chunk_id and current.parent_chunk_id not in visited:
+        visited.add(current.id)
+        if current.parent_chunk:
+            current = current.parent_chunk
+        else:
+            return current.parent_chunk_id
+    return current.id
+
+
+def get_root_schema_id(schema: JsonSchema) -> int | None:
+    if not schema.id:
+        return None
+    current = schema
+    visited = set()
+    while current.parent_schema_id and current.parent_schema_id not in visited:
+        visited.add(current.id)
+        if current.parent_schema:
+            current = current.parent_schema
+        else:
+            return current.parent_schema_id
+    return current.id
 
 
 def stringify_for_hash(value: object, format: ContentType | str) -> str:
@@ -57,6 +85,9 @@ def dataset_signature_from_conversion(
 def build_signatures(schema_conversion: SchemaConversion) -> set[str]:
     sigs: set[str] = set()
     if schema_conversion.input_chunk:
+        root_id = get_root_chunk_id(schema_conversion.input_chunk)
+        if root_id is not None:
+            sigs.add(f"parent_chunk:{root_id}")
         s = stringify_for_hash(
             schema_conversion.input_chunk.content,
             schema_conversion.input_chunk.content_type,
@@ -64,6 +95,9 @@ def build_signatures(schema_conversion: SchemaConversion) -> set[str]:
         h = digest_string(s)
         sigs.add(f"input:{h}")
     if schema_conversion.schema:
+        root_id = get_root_schema_id(schema_conversion.schema)
+        if root_id is not None:
+            sigs.add(f"parent_schema:{root_id}")
         s = stringify_for_hash(
             schema_conversion.schema.content,
             ContentType.JSON,
@@ -71,6 +105,9 @@ def build_signatures(schema_conversion: SchemaConversion) -> set[str]:
         h = digest_string(s)
         sigs.add(f"schema:{h}")
     if schema_conversion.output_chunk:
+        root_id = get_root_chunk_id(schema_conversion.output_chunk)
+        if root_id is not None:
+            sigs.add(f"parent_chunk:{root_id}")
         s = stringify_for_hash(
             schema_conversion.output_chunk.content,
             schema_conversion.output_chunk.content_type,

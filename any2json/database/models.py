@@ -11,6 +11,8 @@ from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
+# TODO replace autoincrement ids with uuid
+
 
 class SourceDocument(Base):
     __tablename__ = "source_documents"

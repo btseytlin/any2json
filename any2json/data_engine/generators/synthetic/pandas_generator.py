@@ -116,14 +116,14 @@ class PandasGenerator(SampleGenerator):
         self.column_sep = random.choice(["_", "-", " ", ""])
 
         conversion_options = [
-            "yaml",
+            # "yaml",
+            # "python_string",
+            # "xml",
+            # "csv",
+            # "markdown",
+            # "string",
+            # "html",
             "sql",
-            "python_string",
-            "xml",
-            "csv",
-            "markdown",
-            "string",
-            "html",
             "latex",
             "json",
         ]
