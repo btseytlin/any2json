@@ -256,7 +256,7 @@ class TestSupportedSchema:
             },
         }
 
-    def test_refs_minimal(self):
+    def test_refs_no_expansion(self):
         schema = {
             "$id": "https://example.com/spanish-flu",
             "type": "object",
@@ -272,7 +272,6 @@ class TestSupportedSchema:
                         "city_name": {"type": "string"},
                         "mortality_rate": {"type": "integer"},
                         "population_size": {"type": "integer"},
-                        # "government_response": {"$ref": "#/$defs/GovernmentResponse"},
                     },
                     "required": ["city_name"],
                     "additionalProperties": False,
@@ -303,7 +302,53 @@ class TestSupportedSchema:
             "additionalProperties": False,
         }
 
-        assert to_supported_json_schema(schema) == expected
+        assert to_supported_json_schema(schema, expand_refs=False) == expected
+        assert fastjsonschema.compile(expected)
+
+    def test_refs_expanded(self):
+        schema = {
+            "$id": "https://example.com/spanish-flu",
+            "type": "object",
+            "properties": {
+                "cities": {"$ref": "#/$defs/CityData"},
+            },
+            "additionalProperties": False,
+            "$defs": {
+                "CityData": {
+                    "$id": "https://example.com/city-data",
+                    "type": "object",
+                    "properties": {
+                        "city_name": {"type": "string"},
+                        "mortality_rate": {"type": "integer"},
+                        "population_size": {"type": "integer"},
+                    },
+                    "required": ["city_name"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+
+        expected = {
+            "$id": "https://example.com/spanish-flu",
+            "type": ["object", "null"],
+            "properties": {
+                "cities": {
+                    "$id": "https://example.com/city-data",
+                    "type": ["object", "null"],
+                    "properties": {
+                        "city_name": {"type": ["string", "null"]},
+                        "mortality_rate": {"type": ["integer", "null"]},
+                        "population_size": {"type": ["integer", "null"]},
+                    },
+                    "required": ["city_name", "mortality_rate", "population_size"],
+                    "additionalProperties": False,
+                },
+            },
+            "required": ["cities"],
+            "additionalProperties": False,
+        }
+
+        assert to_supported_json_schema(schema, expand_refs=True) == expected
         assert fastjsonschema.compile(expected)
 
     def test_required_and_additional_properties_are_set(self):

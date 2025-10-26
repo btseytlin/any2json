@@ -1,16 +1,17 @@
 import pytest
 import json
 from unittest.mock import patch, MagicMock
-from any2json.data_engine.helpers import (
+from any2json.schema_utils import (
     extract_explicit_subschemas,
     extract_implicit_subschemas,
     extract_subschemas_from_schema,
     extract_schema_from_ref,
     fetch_schema_from_url,
+    to_supported_json_schema,
     validate_schema,
     expand_refs_in_schema,
-    expand_refs_in_schemas,
 )
+from any2json.data_engine.helpers import expand_refs_in_schemas
 from any2json.database.models import JsonSchema
 
 
@@ -279,7 +280,7 @@ class TestSchemaValidation:
 
 
 class TestUrlSchemaExtraction:
-    @patch("any2json.data_engine.helpers.httpx.get")
+    @patch("any2json.schema_utils.httpx.get")
     def test_fetch_schema_from_url_success(self, mock_get):
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -296,7 +297,7 @@ class TestUrlSchemaExtraction:
         }
         mock_get.assert_called_once()
 
-    @patch("any2json.data_engine.helpers.httpx.get")
+    @patch("any2json.schema_utils.httpx.get")
     def test_fetch_schema_from_url_failure(self, mock_get):
         mock_get.side_effect = Exception("Network error")
 
@@ -322,7 +323,7 @@ class TestUrlSchemaExtraction:
         with pytest.raises(ValueError, match="Cannot resolve reference"):
             extract_schema_from_ref("#/$defs/NonExistent", base_schema)
 
-    @patch("any2json.data_engine.helpers.fetch_schema_from_url")
+    @patch("any2json.schema_utils.fetch_schema_from_url")
     def test_extract_schema_from_ref_url_simple(self, mock_fetch):
         mock_fetch.return_value = {
             "type": "object",
@@ -334,7 +335,7 @@ class TestUrlSchemaExtraction:
         assert schema == {"type": "object", "properties": {"name": {"type": "string"}}}
         assert path == "url:https://example.com/schema.json"
 
-    @patch("any2json.data_engine.helpers.fetch_schema_from_url")
+    @patch("any2json.schema_utils.fetch_schema_from_url")
     def test_extract_schema_from_ref_url_with_pointer(self, mock_fetch):
         mock_fetch.return_value = {
             "type": "object",
@@ -353,7 +354,7 @@ class TestUrlSchemaExtraction:
         assert schema == {"type": "object", "properties": {"name": {"type": "string"}}}
         assert path == "url:https://example.com/schema.json#/$defs/culinarySpecialty"
 
-    @patch("any2json.data_engine.helpers.fetch_schema_from_url")
+    @patch("any2json.schema_utils.fetch_schema_from_url")
     def test_extract_schema_from_ref_url_failure(self, mock_fetch):
         mock_fetch.side_effect = ValueError("Failed to fetch schema")
 
@@ -377,7 +378,7 @@ class TestImplicitSubschemasWithRefs:
         paths = [path for _, path in subschemas]
         assert any("ref:#/$defs/Person" in path for path in paths)
 
-    @patch("any2json.data_engine.helpers.fetch_schema_from_url")
+    @patch("any2json.schema_utils.fetch_schema_from_url")
     def test_extract_ref_url(self, mock_fetch):
         mock_fetch.return_value = {
             "type": "object",
@@ -542,8 +543,83 @@ class TestExpandRefsInSchema:
             "type": ["string", "null"]
         }
 
-        assert "$ref" not in json.dumps(expanded)
-        assert "$defs" in expanded
+        assert "$ref" not in expanded
+        assert "$defs" not in expanded
+
+    def test_expand_nested_refs_university_schema(self):
+        base_schema = {
+            "$defs": {
+                "admission_requirement": {
+                    "additionalProperties": False,
+                    "properties": {
+                        "description": {"type": ["string", "null"]},
+                        "requirement_name": {"type": ["string", "null"]},
+                    },
+                    "required": ["requirement_name", "description"],
+                    "type": ["object", "null"],
+                },
+                "university": {
+                    "additionalProperties": False,
+                    "properties": {
+                        "admission_requirements": {
+                            "items": {"$ref": "#/$defs/admission_requirement"},
+                            "type": ["array", "null"],
+                        },
+                        "english_taught_programs": {"type": ["boolean", "null"]},
+                        "location": {"type": ["string", "null"]},
+                        "name": {"type": ["string", "null"]},
+                        "program_name": {"type": ["string", "null"]},
+                    },
+                    "required": [
+                        "name",
+                        "location",
+                        "program_name",
+                        "admission_requirements",
+                        "english_taught_programs",
+                    ],
+                    "type": ["object", "null"],
+                },
+            },
+            "items": {"$ref": "#/$defs/university"},
+            "type": ["array", "null"],
+        }
+
+        expanded = expand_refs_in_schema(base_schema, base_schema)
+
+        expected = {
+            "items": {
+                "additionalProperties": False,
+                "properties": {
+                    "admission_requirements": {
+                        "items": {
+                            "additionalProperties": False,
+                            "properties": {
+                                "description": {"type": ["string", "null"]},
+                                "requirement_name": {"type": ["string", "null"]},
+                            },
+                            "required": ["requirement_name", "description"],
+                            "type": ["object", "null"],
+                        },
+                        "type": ["array", "null"],
+                    },
+                    "english_taught_programs": {"type": ["boolean", "null"]},
+                    "location": {"type": ["string", "null"]},
+                    "name": {"type": ["string", "null"]},
+                    "program_name": {"type": ["string", "null"]},
+                },
+                "required": [
+                    "name",
+                    "location",
+                    "program_name",
+                    "admission_requirements",
+                    "english_taught_programs",
+                ],
+                "type": ["object", "null"],
+            },
+            "type": ["array", "null"],
+        }
+
+        assert expanded == expected
 
 
 class TestExtractSubschemasWithValidation:
@@ -1202,70 +1278,77 @@ class TestExpandRefsInSchemas:
         assert len(delete_schemas) == 1
         assert delete_schemas[0].id == 1
 
-    def test_schema_with_refs_typo_skipped(self):
+    def test_schema_with_refs_typo_deleted(self):
         schema = JsonSchema(
             id=1,
-            content={
-                "$schema": "http://json-schema.org/draft-04/schema#",
-                "properties": {
-                    "$defs": {
-                        "chain_info": {
-                            "properties": {
-                                "chain-name": {"type": ["string", "null"]},
-                                "client-id": {"type": ["string", "null"]},
-                                "connection-id": {"type": ["string", "null"]},
-                            },
-                            "type": ["object", "null"],
-                        },
-                        "channel_info": {
-                            "properties": {
-                                "channel-id": {"type": ["string", "null"]},
-                                "port-id": {"type": ["string", "null"]},
-                            },
-                            "type": ["object", "null"],
-                        },
-                    },
-                    "chain-1": {
-                        "items": {"$refs": "#/$defs/chain_info"},
-                        "type": ["object", "null"],
-                    },
-                    "chain-2": {
-                        "items": {"$refs": "#/$defs/chain_info"},
-                        "type": ["object", "null"],
-                    },
-                    "channels": {
-                        "items": [
-                            {
+            content=to_supported_json_schema(
+                {
+                    "$schema": "http://json-schema.org/draft-04/schema#",
+                    "properties": {
+                        "$defs": {
+                            "chain_info": {
                                 "properties": {
-                                    "chain-1": {
-                                        "items": {"$refs": "#/$defs/channel_info"},
-                                        "type": ["object", "null"],
-                                    },
-                                    "chain-2": {
-                                        "items": {"$refs": "#/$defs/channel_info"},
-                                        "type": ["object", "null"],
-                                    },
-                                    "description": {"type": ["string", "null"]},
-                                    "ordering": {},
-                                    "tags": {
-                                        "properties": {
-                                            "dex": {"type": ["string", "null"]},
-                                            "preferred": {"type": ["boolean", "null"]},
-                                            "properties": {"type": ["string", "null"]},
-                                            "status": {},
-                                        },
-                                        "type": ["object", "null"],
-                                    },
-                                    "version": {"type": ["string", "null"]},
+                                    "chain-name": {"type": ["string", "null"]},
+                                    "client-id": {"type": ["string", "null"]},
+                                    "connection-id": {"type": ["string", "null"]},
                                 },
                                 "type": ["object", "null"],
-                            }
-                        ],
-                        "type": ["array", "null"],
+                            },
+                            "channel_info": {
+                                "properties": {
+                                    "channel-id": {"type": ["string", "null"]},
+                                    "port-id": {"type": ["string", "null"]},
+                                },
+                                "type": ["object", "null"],
+                            },
+                        },
+                        "chain-1": {
+                            "items": {"$refs": "#/$defs/chain_info"},
+                            "type": ["object", "null"],
+                        },
+                        "chain-2": {
+                            "items": {"$refs": "#/$defs/chain_info"},
+                            "type": ["object", "null"],
+                        },
+                        "channels": {
+                            "items": [
+                                {
+                                    "properties": {
+                                        "chain-1": {
+                                            "items": {"$refs": "#/$defs/channel_info"},
+                                            "type": ["object", "null"],
+                                        },
+                                        "chain-2": {
+                                            "items": {"$refs": "#/$defs/channel_info"},
+                                            "type": ["object", "null"],
+                                        },
+                                        "description": {"type": ["string", "null"]},
+                                        "ordering": {},
+                                        "tags": {
+                                            "properties": {
+                                                "dex": {"type": ["string", "null"]},
+                                                "preferred": {
+                                                    "type": ["boolean", "null"]
+                                                },
+                                                "properties": {
+                                                    "type": ["string", "null"]
+                                                },
+                                                "status": {},
+                                            },
+                                            "type": ["object", "null"],
+                                        },
+                                        "version": {"type": ["string", "null"]},
+                                    },
+                                    "type": ["object", "null"],
+                                }
+                            ],
+                            "type": ["array", "null"],
+                        },
                     },
+                    "type": ["object", "null"],
                 },
-                "type": ["object", "null"],
-            },
+                expand_refs=False,
+            ),
             is_synthetic=False,
         )
 
@@ -1277,9 +1360,9 @@ class TestExpandRefsInSchemas:
         ) = expand_refs_in_schemas([schema])
 
         assert updated_count == 0
-        assert skipped_count == 1
+        assert skipped_count == 0
         assert len(updated_schemas) == 0
-        assert len(delete_schemas) == 0
+        assert len(delete_schemas) == 1
 
     def test_complex_yoga_schema_with_conflicting_items_marked_for_deletion(self):
         schema = JsonSchema(

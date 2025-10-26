@@ -912,9 +912,7 @@ def generate_negative_sample(
         output_dict = json.loads(output) if isinstance(output, str) else output
 
         try:
-            fastjsonschema.validate(
-                random_schema_dict, output_dict, detailed_exceptions=False
-            )
+            fastjsonschema.validate(random_schema_dict, output_dict)
             indices.remove(random_idx)
         except Exception as e:
             # Output does not match random schema, so we can use it as a negative sample

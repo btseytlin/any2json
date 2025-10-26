@@ -36,7 +36,7 @@ Stage 1: loading
 ```
 python scripts/db_tools.py init
 python scripts/data_engine.py download-datasets
-python scripts/data_engine.py process-dataset data/raw/wikimedia/structured-wikipedia
+<!-- python scripts/data_engine.py process-dataset data/raw/wikimedia/structured-wikipedia -->
 python scripts/data_engine.py process-dataset data/raw/ChristianAzinn/json-training
 python scripts/data_engine.py process-dataset data/raw/dataunitylab/json-schema
 python scripts/data_engine.py process-dataset data/raw/dataunitylab/json-schema-descriptions

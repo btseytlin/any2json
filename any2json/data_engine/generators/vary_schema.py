@@ -478,7 +478,6 @@ class VaryJSONSchemaGenerator(SampleGenerator):
 
         compiled_schema = fastjsonschema.compile(
             new_schema,
-            detailed_exceptions=False,
         )
         compiled_schema(final_transformed)
 
@@ -552,7 +551,6 @@ class VaryJSONSchemaGenerator(SampleGenerator):
         assert source_schema["type"] == "object", "Source schema must be an object"
         compiled_schema = fastjsonschema.compile(
             source_schema,
-            detailed_exceptions=False,
         )
         compiled_schema(source_data)
 

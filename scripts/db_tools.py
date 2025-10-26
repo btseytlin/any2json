@@ -497,12 +497,12 @@ def drop_dangling_schemas_command(limit: int):
 )
 def drop_broken_schemas_command():
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
-        logger.info("Querying dangling schemas")
+        logger.info("Querying schemas")
         schemas = db_session.execute(select(JsonSchema)).scalars().all()
         broken_schemas = []
         for schema in schemas:
             try:
-                fastjsonschema.compile(schema.content, detailed_exceptions=False)
+                fastjsonschema.compile(schema.content)
             except Exception as e:
                 broken_schemas.append((schema, e))
         logger.info(f"Found {len(broken_schemas)} broken schemas")
@@ -584,13 +584,14 @@ def clear_broken_schema_mappings():
 
             try:
                 compiled_schema = fastjsonschema.compile(
-                    schema.content, detailed_exceptions=False
+                    schema.content,
                 )
                 compiled_schema(json.loads(chunk.content))
             except Exception as e:
                 logger.warning(
                     f"Chunk {chunk.id} has schema {schema.id} but validation failed: {e}"
                 )
+                logger.error(e, exc_info=True)
                 total_errors += 1
                 chunk.schema_id = None
                 db_session.add(chunk)

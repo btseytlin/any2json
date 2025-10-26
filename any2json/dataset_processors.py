@@ -14,13 +14,27 @@ from tqdm import tqdm
 import yaml
 
 from any2json.containers import InputJSONChunk
-from any2json.data_engine.helpers import deduplicate_chunks
+from any2json.data_engine.helpers import deduplicate_chunks, expand_refs_in_schema
 from any2json.database.client import create_tables, get_db_session
 from any2json.database.models import Chunk, JsonSchema, SchemaConversion, SourceDocument
 from any2json.encoder import DateTimeEncoder
 from any2json.enums import ContentType
 from any2json.utils import logger
 from any2json.schema_utils import to_supported_json_schema
+
+
+def validate_schema_and_response(
+    schema: dict | str,
+    response: dict | str,
+) -> bool:
+    if isinstance(schema, str):
+        schema = json.loads(schema)
+
+    if isinstance(response, str):
+        response = json.loads(response)
+
+    validator = fastjsonschema.compile(schema, use_formats=False)
+    validator(response)
 
 
 def validate_schema_quality(schema: dict) -> bool:
@@ -92,22 +106,20 @@ def processor_christian_azinn_json_training(
             if "definitions" in record["schema"]:
                 record["schema"] = record["schema"].replace("definitions", "$defs")
 
-            schema = json.loads(record["schema"])
-            schema = to_supported_json_schema(schema)
             response = json.loads(record["response"])
+            schema = json.loads(record["schema"])
+            schema = expand_refs_in_schema(schema, schema)
+            schema = to_supported_json_schema(schema)
 
-            validator = fastjsonschema.compile(schema)
-            validator(response)
-
-            metadata = {
-                "source_dataset_index": i,
-            }
+            validate_schema_and_response(schema, response)
 
             source_document = SourceDocument(
                 source=dirname_to_dataset_id(dataset_dir),
                 content="",
                 content_type=ContentType.JSON.value,
-                meta=metadata,
+                meta={
+                    "source_dataset_index": i,
+                },
             )
             db_session.add(source_document)
 
@@ -197,7 +209,9 @@ def processor_interstellarninja_json_mode_reasoning(
             response = json.loads(response_text)
 
             schema_original = json.loads(record["schema"])
-            schema_supported = to_supported_json_schema(schema_original)
+            schema_supported = to_supported_json_schema(
+                schema_original, expand_refs=True
+            )
 
             if not validate_schema_quality(schema_supported):
                 logger.debug(f"Skipping record {i} because schema is low quality")
@@ -206,12 +220,10 @@ def processor_interstellarninja_json_mode_reasoning(
 
             validator_original = fastjsonschema.compile(
                 schema_original,
-                detailed_exceptions=False,
                 use_formats=False,
             )
             validator_supported = fastjsonschema.compile(
                 schema_supported,
-                detailed_exceptions=False,
                 use_formats=False,
             )
 
@@ -328,12 +340,10 @@ def processor_dataunitylab_json_schema(
 
             fastjsonschema.compile(
                 schema_original,
-                detailed_exceptions=False,
                 use_formats=False,
             )
             fastjsonschema.compile(
                 schema_supported,
-                detailed_exceptions=False,
                 use_formats=False,
             )
 
@@ -419,15 +429,13 @@ def processor_schemastore_schemastore(
 
             validator_original = fastjsonschema.compile(
                 schema,
-                detailed_exceptions=False,
                 use_formats=False,
             )
 
-            schema = to_supported_json_schema(schema)
+            schema = to_supported_json_schema(schema, expand_refs=True)
 
             validator_processed = fastjsonschema.compile(
                 schema,
-                detailed_exceptions=False,
                 use_formats=False,
             )
 
