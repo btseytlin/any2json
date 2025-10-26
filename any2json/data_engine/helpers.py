@@ -727,6 +727,7 @@ def schemas_to_supported_format(
             logger.error(
                 f"Error converting schema {schema.id} to supported format: {e}"
             )
+            delete_schemas.append(schema)
             continue
 
     return updated_schemas, delete_schemas, skipped_count

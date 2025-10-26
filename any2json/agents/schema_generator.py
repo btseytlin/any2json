@@ -20,18 +20,21 @@ AGENT_MAX_RETRIES = 4
 # AGENT_WAIT_MAX = 20
 
 SYSTEM_PROMPT = """
+## Task
 You are a JSON-Schema specialist.  
-Task: read the given JSON sample and output a JSON-Schema that:
+Read the given JSON sample and output a JSON-Schema according to the following rules:
 
 1. Uses only these keywords: type, properties, items, $defs.  
 2. Uses only these primitive types: string, number, integer, boolean, array, object, null.  
    • Every type MUST be expressed as an array that always includes "null".  
-3. Never include: required, additionalProperties, enum, format, pattern, default, description, title, allOf, oneOf, anyOf, not, min*/max*, uniqueItems, dependent*.  
+3. Never include: enum, format, pattern, default, description, title, allOf, oneOf, anyOf, not, min*/max*, uniqueItems, dependent*.  
 4. If a field is an object, describe its properties recursively with the same rules.  
 5. If a field is an array, describe its items with the same rules.  
 6. If the source has a "date" format, map it to type ["string","null"].  
 7. Do NOT collapse the schema to {} or true; always emit a meaningful structure.
 8. Make sure every type is nullable
+9. Every property must be required
+10. additionalProperties must be false for every object
 
 Examples:
 
@@ -48,18 +51,26 @@ Output: {
             "items": {"type": ["string", "null"]}
         }
     }
+    "required": ["name", "age", "isStudent", "courses"],
+    "additionalProperties": false
 }
 
 Example 2 - Nested object:
 Input: {"user": {"id": 123, "profile": {"email": "test@example.com", "score": 95.5}}}
 Output: {
+    "required": ["user"],
+    "additionalProperties": false,
     "type": ["object", "null"],
     "properties": {
         "user": {
+            "required": ["id", "profile"],
+            "additionalProperties": false,
             "type": ["object", "null"],
             "properties": {
                 "id": {"type": ["integer", "null"]},
                 "profile": {
+                    "required": ["email", "score"],
+                    "additionalProperties": false,
                     "type": ["object", "null"],
                     "properties": {
                         "email": {"type": ["string", "null"]},
@@ -76,6 +87,8 @@ Input: [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
 Output: {
     "type": ["array", "null"],
     "items": {
+        "required": ["id", "name"],
+        "additionalProperties": false,
         "type": ["object", "null"],
         "properties": {
             "id": {"type": ["integer", "null"]},
@@ -88,6 +101,8 @@ Example 4 - Mixed types array:
 Input: {"data": [42, "text", true, null]}
 Output: {
     "type": ["object", "null"],
+    "required": ["data"],
+    "additionalProperties": false,
     "properties": {
         "data": {
             "type": ["array", "null"],

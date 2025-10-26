@@ -116,13 +116,13 @@ class PandasGenerator(SampleGenerator):
         self.column_sep = random.choice(["_", "-", " ", ""])
 
         conversion_options = [
-            # "yaml",
-            # "python_string",
-            # "xml",
-            # "csv",
-            # "markdown",
-            # "string",
-            # "html",
+            "yaml",
+            "python_string",
+            "xml",
+            "csv",
+            "markdown",
+            "string",
+            "html",
             "sql",
             "latex",
             "json",
@@ -317,7 +317,7 @@ class PandasGenerator(SampleGenerator):
         df = self.generate_synthetic_dataframe()
 
         inferred_schema = self.infer_schema_from_dataframe(df)
-        inferred_schema = to_supported_json_schema(inferred_schema)
+        inferred_schema = to_supported_json_schema(inferred_schema, expand_refs=True)
         validate = fastjsonschema.compile(inferred_schema)
 
         if inferred_schema["type"][0] == "array":
@@ -329,7 +329,7 @@ class PandasGenerator(SampleGenerator):
 
         formatted_str = self.convert_dataframe_to_format(
             df, self.input_format, self.input_orient
-        )
+        ).strip()
 
         logger.debug(
             f"Generated data: {json.dumps(json.loads(json_output_data), indent=1)}"
