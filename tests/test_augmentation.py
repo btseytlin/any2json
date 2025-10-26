@@ -4,7 +4,14 @@ import random
 import fastjsonschema
 from datasets import Dataset
 from any2json.data_engine.generators.vary_schema import VaryJSONSchemaGenerator
-from any2json.training.augment import Augmentor, aug_negative_sample
+from any2json.training.augment import (
+    Augmentor,
+    aug_corrupt_input,
+    aug_drop_schema,
+    aug_negative_sample,
+    aug_vary_input_json_presentation,
+    aug_vary_schema_and_output,
+)
 from any2json.training.constants import SCHEMA_MISSING_TOKEN
 from any2json.utils import json_dumps_minified
 
@@ -523,6 +530,8 @@ class TestVaryJSONSchemaGenerator:
                 "age": {"type": ["integer", "null"]},
                 "score": {"type": ["number", "null"]},
             },
+            "required": ["name", "age", "score"],
+            "additionalProperties": False,
         }
 
         result = generator.generate(source_data, source_schema)
@@ -554,6 +563,12 @@ class TestVaryJSONSchemaGenerator:
                 "decision": {"type": ["string", "null"]},
                 "score": {"type": ["string", "null"]},
             },
+            "required": [
+                "name",
+                "score",
+                "decision",
+            ],
+            "additionalProperties": False,
         }
 
         compiled = fastjsonschema.compile(new_schema)
@@ -755,15 +770,24 @@ class TestAugmentor:
     def test_same_seed_same_results(self):
         seed = 40
         augmentor = Augmentor()
+        augmentor.augmentations = {
+            aug_drop_schema: 0.1,
+            aug_vary_schema_and_output: 0.1,
+            aug_vary_input_json_presentation: 0.1,
+            aug_corrupt_input: 0.3,
+            aug_negative_sample: 0.1,
+        }
 
         input_data, schema, output = (
             "info: data",
             json.dumps(
                 {
-                    "type": "object",
+                    "type": ["object", "null"],
                     "properties": {
                         "info": {"type": ["string", "null"]},
                     },
+                    "required": ["info"],
+                    "additionalProperties": False,
                 }
             ),
             json.dumps({"info": "data"}),
@@ -772,13 +796,15 @@ class TestAugmentor:
         result = augmentor.apply(input_data, schema, output, random.Random(seed))
 
         expected_input_data, expected_schema, expected_output = (
-            "_i_'nf!o: da|ta",
+            "info:| —data",
             json_dumps_minified(
                 {
                     "type": ["object", "null"],
                     "properties": {
                         "info": {"type": ["string", "null"]},
                     },
+                    "required": ["info"],
+                    "additionalProperties": False,
                 }
             ),
             json_dumps_minified({"info": "data"}),

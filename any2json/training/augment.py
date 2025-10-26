@@ -203,7 +203,9 @@ class Augmentor:
             f"Applying augmentations.\n\nInput_data: {repr(input_data)}\nSchema: {repr(schema)}\nOutput: {repr(output)}"
         )
         for fn, proba in self.augmentations.items():
-            if rng.random() < proba:
+            dice_roll = rng.random()
+
+            if dice_roll < proba:
                 logger.debug(f"Applying augmentation: {fn.__name__}")
                 try:
                     input_data, schema, output = fn(

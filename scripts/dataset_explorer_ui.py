@@ -124,6 +124,7 @@ def get_export_preview(db_session, num_samples: int):
                 Chunk.content_type == ContentType.JSON.value
             )
         )
+        .order_by(func.random())
         .limit(num_samples)
     )
 
@@ -147,6 +148,9 @@ def get_export_preview(db_session, num_samples: int):
                     "schema_conversion_id": conv.id,
                     "group": conv.meta.get("group"),
                 },
+                "input_chunk_meta": conv.input_chunk.meta,
+                "output_chunk_meta": conv.output_chunk.meta,
+                "schema_meta": conv.schema.meta,
             }
         )
 
@@ -290,18 +294,40 @@ def render_export_preview_page(db_session):
         st.subheader(f"Preview of {len(samples)} samples")
 
         for i, sample in enumerate(samples):
-            with st.expander(f"Sample {i+1} - Group: {sample['meta'].get('group')}"):
+
+            sample_id = sample["meta"]["schema_conversion_id"]
+            group = sample["meta"].get("group")
+            input_content_type = sample["meta"]["input_chunk_content_type"]
+
+            with st.expander(
+                f"Sample {sample_id} - Group: {group} - Content Type: {input_content_type}"
+            ):
                 st.subheader("Input Data")
                 st.code(sample["input_data"], language="text")
 
-                st.subheader("Schema")
-                st.json(sample["schema"])
+                col1, col2 = st.columns(2)
 
-                st.subheader("Output")
-                st.json(sample["output"])
+                with col1:
+                    st.subheader("Schema")
+                    st.json(sample["schema"])
 
-                st.subheader("Metadata")
-                st.json(sample["meta"])
+                with col2:
+                    st.subheader("Output")
+                    st.json(sample["output"])
+
+                st.divider()
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.subheader("Sample metadata")
+                    st.json(sample["meta"])
+                    st.subheader("Input Chunk Metadata")
+                    st.json(sample["input_chunk_meta"])
+                with col2:
+                    st.subheader("Output Chunk Metadata")
+                    st.json(sample["output_chunk_meta"])
+                    st.subheader("Schema Metadata")
+                    st.json(sample["schema_meta"])
 
 
 def main():

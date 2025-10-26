@@ -46,7 +46,6 @@ def to_supported_json_schema(
         "maxProperties",
         "minLength",
         "maxLength",
-        "required",
         "dependentRequired",
         "dependentSchemas",
         "if",
@@ -54,7 +53,6 @@ def to_supported_json_schema(
         "else",
         "enum",
         "format",
-        "additionalProperties",
         "pattern",
         "patternProperties",
         "default",
@@ -69,6 +67,10 @@ def to_supported_json_schema(
 
     if isinstance(schema, dict):
         schema = {k: v for k, v in schema.items() if k not in drop_keys}
+
+        if "properties" in schema:
+            schema["required"] = list(schema["properties"].keys())
+            schema["additionalProperties"] = False
 
         for k, v in schema.items():
             if k in error_on_keys:

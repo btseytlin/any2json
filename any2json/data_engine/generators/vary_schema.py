@@ -77,6 +77,8 @@ def drop_schema_keys_recursive(
 
         for key in this_path_keys:
             del result_schema["properties"][key]
+            if "required" in result_schema:
+                result_schema["required"].remove(key)
 
         for key in list(result_schema["properties"].keys()):
             result_schema["properties"][key] = drop_schema_keys_recursive(
@@ -157,12 +159,16 @@ def add_schema_keys_recursive(
             if current_path == "":
                 if "." not in path and "[]" not in path:
                     result_schema["properties"][path] = field_def
+                    if "required" in result_schema:
+                        result_schema["required"].append(path)
             else:
                 expected_prefix = f"{current_path}."
                 if path.startswith(expected_prefix):
                     remaining_path = path[len(expected_prefix) :]
                     if "." not in remaining_path and "[]" not in remaining_path:
                         result_schema["properties"][remaining_path] = field_def
+                        if "required" in result_schema:
+                            result_schema["required"].append(remaining_path)
 
         for key in list(result_schema["properties"].keys()):
             result_schema["properties"][key] = add_schema_keys_recursive(

@@ -709,3 +709,119 @@ https://wandb.ai/btseytlin/any2json/runs/mcqfyndf?nw=nwuserbtseytlin
 
 
 ### Recreate dataset
+
+
+Bug
+
+Chunk 21851 obtained from infinigram
+
+```json
+{
+    "babel": {
+        "env": {
+            "test": {
+                "plugins": [
+                    "__coverage__"
+                ]
+            }
+        },
+        "presets": [
+            "es2015"
+        ]
+    }
+}
+```
+
+Has schema 63591:
+
+```json 
+{
+    "properties": {
+        "plugins": {
+            "type": [
+                "object",
+                "null"
+            ]
+        }
+    },
+    "type": [
+        "object",
+        "null"
+    ]
+}
+```
+
+Which was obtained by extracting subschema from 16863
+
+```json
+{
+    "$id": "https://construct.net/sdk/schema/plugin.lang.schema.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+        "fileDescription": {
+            "type": [
+                "string",
+                "null"
+            ]
+        },
+        "languageTag": {
+            "type": [
+                "string",
+                "null"
+            ]
+        },
+        "text": {
+            "properties": {
+                "plugins": {
+                    "type": [
+                        "object",
+                        "null"
+                    ]
+                }
+            },
+            "type": [
+                "object",
+                "null"
+            ]
+        }
+    },
+    "type": [
+        "object",
+        "null"
+    ]
+}
+```
+
+Does chunk validate against assinged schema? Yes
+Should it? No
+It would if all properties were required. 
+
+Original schema also matches the input json, but it shouldn't
+
+This is how this shit happened:
+1. During matching schema got looked up
+2. Validation was checked
+3. Validation passed
+4. Schema was assigned to that chunk even though they dont really match
+
+Does chunk validate against original schema?
+
+Solution: we need to make all properties required and disallow additional properties.
+
+This is the correct way to represent the schema:
+```
+{
+    "properties": {
+        "plugins": {
+            "type": [
+                "object"
+            ]
+        }
+    },
+    "type": [
+        "object"
+    ],
+    "required": ["plugins"],
+    "additionalProperties": false
+}
+```

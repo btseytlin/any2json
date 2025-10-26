@@ -30,10 +30,14 @@ class TestSupportedSchema:
                         "properties": {
                             "departureTime": {"type": ["string", "null"]},
                         },
+                        "required": ["departureTime"],
+                        "additionalProperties": False,
                     },
                 },
                 "queryTime": {"type": ["string", "null"]},
             },
+            "required": ["flights", "queryTime"],
+            "additionalProperties": False,
         }
 
         assert to_supported_json_schema(schema) == expected
@@ -66,10 +70,14 @@ class TestSupportedSchema:
                         "properties": {
                             "departureTime": {"type": ["string", "null"]},
                         },
+                        "required": ["departureTime"],
+                        "additionalProperties": False,
                     },
                 },
                 "queryTime": {"type": ["string", "null"]},
             },
+            "required": ["flights", "queryTime"],
+            "additionalProperties": False,
         }
 
         assert to_supported_json_schema(schema) == expected
@@ -134,11 +142,24 @@ class TestSupportedSchema:
                                         "type": ["number", "null"],
                                     },
                                 },
+                                "required": ["currency", "amount"],
+                                "additionalProperties": False,
                             },
                         },
+                        "required": [
+                            "flightNumber",
+                            "departureAirport",
+                            "arrivalCity",
+                            "departureTime",
+                            "arrivalTime",
+                            "price",
+                        ],
+                        "additionalProperties": False,
                     },
                 }
             },
+            "required": ["flights"],
+            "additionalProperties": False,
         }
 
         assert to_supported_json_schema(schema) == expected
@@ -274,8 +295,53 @@ class TestSupportedSchema:
                         "mortality_rate": {"type": ["integer", "null"]},
                         "population_size": {"type": ["integer", "null"]},
                     },
+                    "required": ["city_name", "mortality_rate", "population_size"],
+                    "additionalProperties": False,
                 },
             },
+            "required": ["cities"],
+            "additionalProperties": False,
+        }
+
+        assert to_supported_json_schema(schema) == expected
+        assert fastjsonschema.compile(expected)
+
+    def test_required_and_additional_properties_are_set(self):
+        schema = {
+            "properties": {"plugins": {"type": ["object"]}},
+            "type": ["object"],
+        }
+        expected = {
+            "properties": {"plugins": {"type": ["object", "null"]}},
+            "type": ["object", "null"],
+            "required": ["plugins"],
+            "additionalProperties": False,
+        }
+
+        assert to_supported_json_schema(schema) == expected
+        assert fastjsonschema.compile(expected)
+
+        schema = {
+            "properties": {
+                "plugins": {
+                    "type": ["object"],
+                    "properties": {"name": {"type": ["string"]}},
+                }
+            },
+            "type": ["object"],
+        }
+        expected = {
+            "properties": {
+                "plugins": {
+                    "type": ["object", "null"],
+                    "properties": {"name": {"type": ["string", "null"]}},
+                    "required": ["name"],
+                    "additionalProperties": False,
+                }
+            },
+            "type": ["object", "null"],
+            "required": ["plugins"],
+            "additionalProperties": False,
         }
 
         assert to_supported_json_schema(schema) == expected
