@@ -37,7 +37,10 @@ from any2json.data_engine.helpers import (
 )
 
 from any2json.database.client import db_session_scope
-from any2json.database.helpers import get_dangling_schema_ids
+from any2json.database.helpers import (
+    get_dangling_schema_ids,
+    get_dangling_schema_ids_query,
+)
 from any2json.database.models import Chunk, JsonSchema, SchemaConversion
 from any2json.enums import ContentType
 from any2json.grouping import assign_groups, train_test_split_groups
@@ -596,10 +599,24 @@ def generate_pandas_chunks(num_chunks: int):
 @cli.command(
     name="map-chunks",
 )
-def map_chunks_command():
+@click.option(
+    "--limit",
+    default=None,
+    type=int,
+    help="Maximum number of chunks to map",
+)
+@click.option(
+    "--k",
+    default=3,
+    type=int,
+    help="Number of schemas to consider for mapping",
+)
+def map_chunks_command(limit: int | None, k: int):
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         chunks = get_json_chunks_with_no_schema(db_session)
-        updated_chunks = map_chunks_to_existing_schemas(db_session, chunks)
+        if limit:
+            chunks = chunks[:limit]
+        updated_chunks = map_chunks_to_existing_schemas(db_session, chunks, k=k)
 
         db_session.add_all(updated_chunks)
 
@@ -739,9 +756,11 @@ def generate_chunks_command(
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         if only_dangling:
             logger.info("Only generating chunks for schemas that have no chunks")
-            schema_ids = get_dangling_schema_ids(db_session)
+            schema_ids_query = get_dangling_schema_ids_query()
             schemas = (
-                db_session.query(JsonSchema).filter(JsonSchema.id.in_(schema_ids)).all()
+                db_session.query(JsonSchema)
+                .filter(JsonSchema.id.in_(schema_ids_query))
+                .all()
             )
         else:
             logger.info("Generating chunks for schemas with or without chunks")

@@ -278,6 +278,10 @@ class JSONSchemaGeneratorAgent:
         validate = fastjsonschema.compile(generated_schema)
         validate(input_json)
 
+        supported = to_supported_json_schema(generated_schema)
+        validate = fastjsonschema.compile(supported)
+        validate(input_json)
+
     async def generate_and_validate_schema(self, input_json: dict) -> tuple[dict, str]:
         error_message = ""
         previous_schema = None

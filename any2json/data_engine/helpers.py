@@ -302,6 +302,7 @@ def check_if_schema_for_json_exists_in_db(
 def map_chunks_to_existing_schemas(
     db_session: Session,
     chunks: list[Chunk],
+    k: int = 3,
 ) -> list[Chunk]:
     existing_schemas = db_session.query(JsonSchema).all()
     index = IndexedJsonSet(
@@ -314,11 +315,11 @@ def map_chunks_to_existing_schemas(
     for chunk in tqdm(chunks):
         json_content = json.loads(chunk.content)
         try:
-            schema_id = check_if_schema_for_json_exists_in_db(
-                json_content,
-                index,
-            )
+            schema_id = check_if_schema_for_json_exists_in_db(json_content, index, k=k)
             chunk.schema_id = schema_id
+            if not chunk.meta:
+                chunk.meta = {}
+            chunk.meta["schema_source"] = "mapped"
             updated_chunks.append(chunk)
         except Exception as e:
             logger.debug(f"Error mapping chunk {chunk.id} to existing schema: {e}")
@@ -392,6 +393,7 @@ async def generate_schemas_for_chunks(
                 "generator_state": schema_agent.get_state(),
                 "model_name": model_name,
             },
+            is_synthetic=True,
         )
         db_session.add(schema_entity)
 
