@@ -56,7 +56,8 @@ def aug_negative_sample(
 
         try:
             fastjsonschema.validate(
-                json.loads(random_schema), json.loads(output), detailed_exceptions=False
+                json.loads(random_schema),
+                json.loads(output),
             )
             indices.remove(random_idx)
         except Exception as e:
@@ -185,7 +186,7 @@ class Augmentor:
     augmentations: dict[Callable, float] = {
         aug_drop_schema: 0.1,
         aug_vary_schema_and_output: 0.1,
-        aug_vary_input_json_presentation: 0.1,
+        aug_vary_input_json_presentation: 0.5,
         # aug_corrupt_input: 0.1,
         aug_negative_sample: 0.1,
     }
