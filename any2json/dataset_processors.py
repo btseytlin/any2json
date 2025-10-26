@@ -108,8 +108,7 @@ def processor_christian_azinn_json_training(
 
             response = json.loads(record["response"])
             schema = json.loads(record["schema"])
-            schema = expand_refs_in_schema(schema, schema)
-            schema = to_supported_json_schema(schema)
+            schema = to_supported_json_schema(schema, expand_refs=True)
 
             validate_schema_and_response(schema, response)
 
@@ -331,7 +330,9 @@ def processor_dataunitylab_json_schema(
 
             schema_original = json.loads(schema_text)
 
-            schema_supported = to_supported_json_schema(schema_original)
+            schema_supported = to_supported_json_schema(
+                schema_original, expand_refs=True
+            )
 
             if not validate_schema_quality(schema_supported):
                 logger.debug(f"Skipping record {i} because schema is low quality")

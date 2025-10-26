@@ -211,7 +211,7 @@ def render_chunks_page(db_session):
             st.text(f"Schema ID: {chunk.schema_id}")
             st.text(f"Parent Document ID: {chunk.parent_document_id}")
             st.text(f"Parent Chunk ID: {chunk.parent_chunk_id}")
-            st.code(chunk.content[:1000], language="text")
+            st.code(chunk.content, language="text")
             if chunk.meta:
                 st.json(chunk.meta)
 
@@ -263,7 +263,7 @@ def render_conversions_page(db_session):
             if conv.input_chunk:
                 st.subheader("Input Chunk")
                 st.text(f"Type: {conv.input_chunk.content_type}")
-                st.code(conv.input_chunk.content[:500], language="text")
+                st.code(conv.input_chunk.content, language="text")
 
             if conv.schema:
                 st.subheader("Schema")
@@ -272,7 +272,7 @@ def render_conversions_page(db_session):
             if conv.output_chunk:
                 st.subheader("Output Chunk")
                 st.text(f"Type: {conv.output_chunk.content_type}")
-                st.code(conv.output_chunk.content[:500], language="text")
+                st.code(conv.output_chunk.content, language="json")
 
             if conv.meta:
                 st.subheader("Metadata")
