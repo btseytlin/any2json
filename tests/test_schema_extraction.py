@@ -845,9 +845,9 @@ class TestRealWorldComplexSchema:
             assert extracted_schemas_by_path[expected["path"]] == expected["content"]
 
         for schema in new_schemas:
-            assert schema.parent_schema_id == 100
+            assert schema.parent_schema_id == "test-uuid-100"
             assert schema.meta["source"] == "extracted_subschema"
-            assert schema.meta["original_schema_id"] == 100
+            assert schema.meta["original_schema_id"] == "test-uuid-100"
             assert "extraction_path" in schema.meta
             assert validate_schema(schema.content)
 

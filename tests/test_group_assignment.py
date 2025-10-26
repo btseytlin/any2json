@@ -300,13 +300,15 @@ class TestGroupAssignment:
 
     def test_parent_chunk_id_same_group(self):
         parent_chunk = Chunk(
-            id="test-uuid-100", content='{"x": 1}', content_type=ContentType.JSON.value
+            id="test-uuid-100",
+            content='{"x": 1}',
+            content_type=ContentType.JSON.value,
         )
         child_chunk = Chunk(
             id="test-uuid-101",
             content='{"x": 1}',
             content_type=ContentType.JSON.value,
-            parent_chunk_id=100,
+            parent_chunk_id="test-uuid-100",
         )
 
         c1 = make_conversion(
@@ -336,7 +338,7 @@ class TestGroupAssignment:
         child_schema = JsonSchema(
             id="test-uuid-201",
             content={"type": "object", "properties": {"x": {"type": "string"}}},
-            parent_schema_id=200,
+            parent_schema_id="test-uuid-200",
         )
 
         c1 = make_conversion(
@@ -366,13 +368,13 @@ class TestGroupAssignment:
             id="test-uuid-301",
             content='{"b": 2}',
             content_type=ContentType.JSON.value,
-            parent_chunk_id=300,
+            parent_chunk_id="test-uuid-300",
         )
         child2_chunk = Chunk(
             id="test-uuid-302",
             content='{"c": 3}',
             content_type=ContentType.JSON.value,
-            parent_chunk_id=300,
+            parent_chunk_id="test-uuid-300",
         )
 
         c1 = make_conversion(
@@ -414,13 +416,13 @@ class TestGroupAssignment:
             id="test-uuid-401",
             content='{"derived": "v1"}',
             content_type=ContentType.JSON.value,
-            parent_chunk_id=400,
+            parent_chunk_id="test-uuid-400",
         )
         derived2 = Chunk(
             id="test-uuid-402",
             content='{"derived": "v2"}',
             content_type=ContentType.JSON.value,
-            parent_chunk_id=400,
+            parent_chunk_id="test-uuid-400",
         )
 
         parent_schema = JsonSchema(
@@ -430,7 +432,7 @@ class TestGroupAssignment:
         derived_schema = JsonSchema(
             id="test-uuid-501",
             content={"type": "object", "properties": {"derived": {"type": "string"}}},
-            parent_schema_id=500,
+            parent_schema_id="test-uuid-500",
         )
 
         c1 = make_conversion(
@@ -466,14 +468,14 @@ class TestGroupAssignment:
             id="test-uuid-601",
             content='{"child1": "data"}',
             content_type=ContentType.JSON.value,
-            parent_chunk_id=600,
+            parent_chunk_id="test-uuid-600",
         )
         child1_chunk.parent_chunk = root_chunk
         grandchild_chunk = Chunk(
             id="test-uuid-602",
             content='{"grandchild": "data"}',
             content_type=ContentType.JSON.value,
-            parent_chunk_id=601,
+            parent_chunk_id="test-uuid-601",
         )
         grandchild_chunk.parent_chunk = child1_chunk
 
