@@ -214,7 +214,10 @@ class TestExtractSubschemasFromSchema:
         }
 
         schema_entity = JsonSchema(
-            id=1, content=schema_content, is_synthetic=False, meta={"source": "test"}
+            id="test-uuid-1",
+            content=schema_content,
+            is_synthetic=False,
+            meta={"source": "test"},
         )
 
         new_schemas = extract_subschemas_from_schema(schema_entity)
@@ -222,9 +225,9 @@ class TestExtractSubschemasFromSchema:
         assert len(new_schemas) >= 2
 
         for new_schema in new_schemas:
-            assert new_schema.parent_schema_id == 1
+            assert new_schema.parent_schema_id == "test-uuid-1"
             assert new_schema.meta["source"] == "extracted_subschema"
-            assert new_schema.meta["original_schema_id"] == 1
+            assert new_schema.meta["original_schema_id"] == "test-uuid-1"
             assert "extraction_path" in new_schema.meta
 
     def test_meta_preservation(self):
@@ -232,7 +235,10 @@ class TestExtractSubschemasFromSchema:
 
         original_meta = {"key": "value", "nested": {"data": 123}}
         schema_entity = JsonSchema(
-            id=42, content=schema_content, is_synthetic=False, meta=original_meta
+            id="test-uuid-42",
+            content=schema_content,
+            is_synthetic=False,
+            meta=original_meta,
         )
 
         new_schemas = extract_subschemas_from_schema(schema_entity)
@@ -633,7 +639,10 @@ class TestExtractSubschemasWithValidation:
         }
 
         schema_entity = JsonSchema(
-            id=1, content=schema_content, is_synthetic=False, meta={"source": "test"}
+            id="test-uuid-1",
+            content=schema_content,
+            is_synthetic=False,
+            meta={"source": "test"},
         )
 
         new_schemas = extract_subschemas_from_schema(schema_entity)
@@ -688,7 +697,7 @@ class TestRealWorldComplexSchema:
         }
 
         schema_entity = JsonSchema(
-            id=100,
+            id="test-uuid-100",
             content=schema_content,
             is_synthetic=False,
             meta={"source": "real_world_test"},
@@ -846,7 +855,7 @@ class TestRealWorldComplexSchema:
 class TestExpandRefsInSchemas:
     def test_expand_schemas_with_refs(self):
         schema1 = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content={
                 "$defs": {
                     "Item": {
@@ -863,7 +872,7 @@ class TestExpandRefsInSchemas:
         )
 
         schema2 = JsonSchema(
-            id=2,
+            id="test-uuid-2",
             content={
                 "$defs": {
                     "User": {
@@ -905,13 +914,13 @@ class TestExpandRefsInSchemas:
 
     def test_skip_already_expanded_schemas(self):
         schema1 = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content={"type": "object", "properties": {"name": {"type": "string"}}},
             is_synthetic=False,
         )
 
         schema2 = JsonSchema(
-            id=2,
+            id="test-uuid-2",
             content={"type": "array", "items": {"type": "string"}},
             is_synthetic=False,
         )
@@ -930,7 +939,7 @@ class TestExpandRefsInSchemas:
 
     def test_mix_of_schemas_some_need_expansion(self):
         schema_needs_expansion = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content={
                 "$defs": {
                     "Person": {
@@ -945,7 +954,7 @@ class TestExpandRefsInSchemas:
         )
 
         schema_already_expanded = JsonSchema(
-            id=2,
+            id="test-uuid-2",
             content={"type": "object", "properties": {"name": {"type": "string"}}},
             is_synthetic=False,
         )
@@ -961,11 +970,11 @@ class TestExpandRefsInSchemas:
         assert skipped_count == 1
         assert len(delete_schemas) == 0
         assert len(updated_schemas) == 1
-        assert updated_schemas[0].id == 1
+        assert updated_schemas[0].id == "test-uuid-1"
 
     def test_nested_refs_expansion(self):
         schema = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content={
                 "$defs": {
                     "Address": {
@@ -1022,7 +1031,7 @@ class TestExpandRefsInSchemas:
 
     def test_removes_definitions_field(self):
         schema = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content={
                 "definitions": {
                     "User": {
@@ -1050,7 +1059,7 @@ class TestExpandRefsInSchemas:
 
     def test_expansion_fails_with_unresolvable_ref(self):
         schema = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content={
                 "type": "object",
                 "properties": {"item": {"$ref": "#/$defs/NonExistent"}},
@@ -1085,7 +1094,7 @@ class TestExpandRefsInSchemas:
 
     def test_recursive_self_referencing_schema_marked_for_deletion(self):
         schema = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content={
                 "$schema": "https://json-schema.org/draft-07/schema#",
                 "type": ["object", "null"],
@@ -1129,11 +1138,11 @@ class TestExpandRefsInSchemas:
         assert skipped_count == 0
         assert len(updated_schemas) == 0
         assert len(delete_schemas) == 1
-        assert delete_schemas[0].id == 1
+        assert delete_schemas[0].id == "test-uuid-1"
 
     def test_schema_with_missing_ref_marked_for_deletion(self):
         schema = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content={
                 "$id": "#/properties",
                 "type": ["object", "null"],
@@ -1170,11 +1179,11 @@ class TestExpandRefsInSchemas:
         assert skipped_count == 0
         assert len(updated_schemas) == 0
         assert len(delete_schemas) == 1
-        assert delete_schemas[0].id == 1
+        assert delete_schemas[0].id == "test-uuid-1"
 
     def test_schema_with_root_ref_marked_for_deletion(self):
         schema = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content={
                 "$schema": "http://json-schema.org/draft-07/schema#",
                 "type": ["object", "null"],
@@ -1215,11 +1224,11 @@ class TestExpandRefsInSchemas:
         assert skipped_count == 0
         assert len(updated_schemas) == 0
         assert len(delete_schemas) == 1
-        assert delete_schemas[0].id == 1
+        assert delete_schemas[0].id == "test-uuid-1"
 
     def test_schema_with_malformed_ref_marked_for_deletion(self):
         schema = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content={
                 "type": ["object", "null"],
                 "properties": {
@@ -1276,11 +1285,11 @@ class TestExpandRefsInSchemas:
         assert skipped_count == 0
         assert len(updated_schemas) == 0
         assert len(delete_schemas) == 1
-        assert delete_schemas[0].id == 1
+        assert delete_schemas[0].id == "test-uuid-1"
 
     def test_schema_with_refs_typo_deleted(self):
         schema = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content=to_supported_json_schema(
                 {
                     "$schema": "http://json-schema.org/draft-04/schema#",
@@ -1366,7 +1375,7 @@ class TestExpandRefsInSchemas:
 
     def test_complex_yoga_schema_with_conflicting_items_marked_for_deletion(self):
         schema = JsonSchema(
-            id=1,
+            id="test-uuid-1",
             content={
                 "$defs": {
                     "breathing_technique": {
@@ -1448,4 +1457,4 @@ class TestExpandRefsInSchemas:
         assert skipped_count == 0
         assert len(updated_schemas) == 0
         assert len(delete_schemas) == 1
-        assert delete_schemas[0].id == 1
+        assert delete_schemas[0].id == "test-uuid-1"

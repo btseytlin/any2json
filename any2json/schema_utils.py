@@ -45,8 +45,7 @@ def to_supported_json_schema(
 ) -> dict | list:
     schema = deepcopy(schema)
 
-    if expand_refs:
-        schema = expand_refs_in_schema(schema, schema)
+    original_expand_refs = expand_refs
     expand_refs = False
 
     error_on_keys = ["allOf", "oneOf", "anyOf", "not"]
@@ -112,6 +111,9 @@ def to_supported_json_schema(
                 }
             elif isinstance(v, (dict, list)):
                 schema[k] = to_supported_json_schema(v, expand_refs=expand_refs)
+
+    if original_expand_refs:
+        schema = expand_refs_in_schema(schema, schema)
     return schema
 
 

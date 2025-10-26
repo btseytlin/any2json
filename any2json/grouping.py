@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from tqdm.auto import tqdm
 
 
-def get_root_chunk_id(chunk: Chunk) -> int | None:
+def get_root_chunk_id(chunk: Chunk) -> str | None:
     if not chunk.id:
         return None
     current = chunk
@@ -27,7 +27,7 @@ def get_root_chunk_id(chunk: Chunk) -> int | None:
     return current.id
 
 
-def get_root_schema_id(schema: JsonSchema) -> int | None:
+def get_root_schema_id(schema: JsonSchema) -> str | None:
     if not schema.id:
         return None
     current = schema
@@ -120,13 +120,13 @@ def build_signatures(schema_conversion: SchemaConversion) -> set[str]:
     return sigs
 
 
-def find_parent_id(parents: dict[int, int], i: int) -> int:
+def find_parent_id(parents: dict[str, str], i: str) -> str:
     if parents[i] != i:
         parents[i] = find_parent_id(parents, parents[i])
     return parents[i]
 
 
-def union_ids(parents: dict[int, int], a: int, b: int) -> None:
+def union_ids(parents: dict[str, str], a: str, b: str) -> None:
     ra = find_parent_id(parents, a)
     rb = find_parent_id(parents, b)
     if ra == rb:
@@ -137,18 +137,18 @@ def union_ids(parents: dict[int, int], a: int, b: int) -> None:
         parents[ra] = rb
 
 
-def connected_component_groups(signature_map: dict[int, set[str]]) -> dict[int, int]:
+def connected_component_groups(signature_map: dict[str, set[str]]) -> dict[str, int]:
     ids = list(signature_map.keys())
-    parents: dict[int, int] = {i: i for i in ids}
-    seen: dict[str, int] = {}
+    parents: dict[str, str] = {i: i for i in ids}
+    seen: dict[str, str] = {}
     for i in tqdm(ids, desc="Processing entities"):
         for sig in signature_map[i]:
             if sig in seen:
                 union_ids(parents, i, seen[sig])
             else:
                 seen[sig] = i
-    roots: dict[int, int] = {}
-    groups: dict[int, int] = {}
+    roots: dict[str, int] = {}
+    groups: dict[str, int] = {}
     next_group = 0
     for i in tqdm(ids, desc="Assigning groups"):
         r = find_parent_id(parents, i)
@@ -161,9 +161,9 @@ def connected_component_groups(signature_map: dict[int, set[str]]) -> dict[int, 
 
 def group_conversions(
     conversions: list[SchemaConversion],
-) -> dict[int, int] | None:
+) -> dict[str, int] | None:
     logger.info(f"Building signatures for {len(conversions)} conversions")
-    signature_map = {int(c.id): build_signatures(c) for c in tqdm(conversions)}
+    signature_map = {c.id: build_signatures(c) for c in tqdm(conversions)}
     logger.info(f"Finding connected components")
     groups = connected_component_groups(signature_map)
     return groups

@@ -1,8 +1,8 @@
+import uuid
 from sqlalchemy import (
     Boolean,
     Column,
     ForeignKey,
-    Integer,
     String,
     Text,
     JSON,
@@ -11,12 +11,10 @@ from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
-# TODO replace autoincrement ids with uuid
-
 
 class SourceDocument(Base):
     __tablename__ = "source_documents"
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     source = Column(String, nullable=False)
     content = Column(Text, nullable=True)
     content_type = Column(String, nullable=False)
@@ -32,11 +30,11 @@ class SourceDocument(Base):
 
 class JsonSchema(Base):
     __tablename__ = "json_schemas"
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     content = Column(JSON, nullable=False, unique=False)
     is_synthetic = Column(Boolean, default=False, nullable=False)
 
-    parent_schema_id = Column(Integer, ForeignKey("json_schemas.id"), nullable=True)
+    parent_schema_id = Column(String(36), ForeignKey("json_schemas.id"), nullable=True)
     parent_schema = relationship(
         "JsonSchema", remote_side=[id], backref="derived_schemas"
     )
@@ -47,18 +45,18 @@ class JsonSchema(Base):
 
 class Chunk(Base):
     __tablename__ = "chunks"
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     content = Column(Text, nullable=False)
     content_type = Column(Text, nullable=False)
     is_synthetic = Column(Boolean, default=False, nullable=False)
 
     parent_document_id = Column(
-        Integer, ForeignKey("source_documents.id"), nullable=True
+        String(36), ForeignKey("source_documents.id"), nullable=True
     )
     parent_document = relationship("SourceDocument", back_populates="chunks")
 
     parent_chunk_id = Column(
-        Integer,
+        String(36),
         ForeignKey("chunks.id"),
         nullable=True,
         comment="Chunk that was used to generate this chunk.",
@@ -72,7 +70,7 @@ class Chunk(Base):
     parent_chunk = relationship("Chunk", remote_side=[id], backref="derived_chunks")
 
     schema_id = Column(
-        Integer,
+        String(36),
         ForeignKey("json_schemas.id"),
         nullable=True,
         comment="Schema that describes the content of this chunk if the chunk is JSON.",
@@ -88,11 +86,11 @@ class SchemaConversion(Base):
     """
 
     __tablename__ = "schema_conversions"
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
 
-    input_chunk_id = Column(Integer, ForeignKey("chunks.id"), nullable=False)
-    schema_id = Column(Integer, ForeignKey("json_schemas.id"), nullable=False)
-    output_chunk_id = Column(Integer, ForeignKey("chunks.id"), nullable=False)
+    input_chunk_id = Column(String(36), ForeignKey("chunks.id"), nullable=False)
+    schema_id = Column(String(36), ForeignKey("json_schemas.id"), nullable=False)
+    output_chunk_id = Column(String(36), ForeignKey("chunks.id"), nullable=False)
 
     input_chunk = relationship(
         "Chunk",

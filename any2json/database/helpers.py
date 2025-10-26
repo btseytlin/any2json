@@ -15,7 +15,7 @@ from any2json.database.models import Chunk, JsonSchema
 from any2json.utils import logger
 
 
-def get_dangling_schema_ids(db_session: Session, limit: int | None = None) -> list[int]:
+def get_dangling_schema_ids(db_session: Session, limit: int | None = None) -> list[str]:
     """Return schemas that have no chunks."""
     referenced_schemas_subquery = (
         select(distinct(Chunk.schema_id))

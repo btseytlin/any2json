@@ -33,6 +33,7 @@ from any2json.data_engine.helpers import (
     generate_synthetic_schemas,
     map_chunks_to_existing_schemas,
     expand_refs_in_schemas,
+    schemas_to_supported_format,
 )
 
 from any2json.database.client import db_session_scope
@@ -454,14 +455,14 @@ def extract_sub_jsons_command(
                 print()
 
 
-## Step 2.3: Expand refs in schemas
+## Step 2.3: Convert schemas to supported format
 
 
 @cli.command(
-    name="expand-refs-in-schemas",
+    name="schemas-to-supported-format",
 )
-def expand_refs_in_schemas_command():
-    logger.info(f"Expanding refs in schemas from {DB_FILE}")
+def convert_schemas_to_supported_format_command():
+    logger.info(f"Converting schemas to supported format from {DB_FILE}")
 
     with db_session_scope(f"sqlite:///{DB_FILE}", preview=PREVIEW) as db_session:
         schemas = db_session.query(JsonSchema).all()
@@ -470,9 +471,8 @@ def expand_refs_in_schemas_command():
         (
             updated_schemas,
             delete_schemas,
-            updated_count,
             skipped_count,
-        ) = expand_refs_in_schemas(schemas)
+        ) = schemas_to_supported_format(schemas)
 
         for schema in updated_schemas:
             db_session.add(schema)
@@ -486,7 +486,7 @@ def expand_refs_in_schemas_command():
             db_session.delete(schema)
 
         logger.info(
-            f"Updated {updated_count} schemas, skipped {skipped_count} (already expanded), deleted {len(delete_schemas)} (recursive or unresolved references)"
+            f"Updated {len(updated_schemas)} schemas, skipped {skipped_count} (already expanded), deleted {len(delete_schemas)} (recursive or unresolved references)"
         )
 
         if PREVIEW:

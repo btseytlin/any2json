@@ -360,7 +360,7 @@ async def generate_schemas_for_chunks(
     async def generate_schema_for_json_wrapper(
         json_content: dict,
         agent: JSONSchemaGeneratorAgent,
-        chunk_id: int,
+        chunk_id: str,
     ):
         return chunk_id, await generate_schema_for_json(
             json_content,
@@ -418,7 +418,7 @@ async def generate_chunks_for_schemas(
     async def generate_chunk_for_schema_wrapper(
         input_schema: dict,
         agent: JSONChunkGeneratorAgent,
-        schema_id: int,
+        schema_id: str,
     ):
         return schema_id, await agent.generate_and_validate_json(
             input_schema=input_schema,
@@ -691,3 +691,42 @@ def expand_refs_in_schemas(
                 delete_schemas.append(schema)
 
     return updated_schemas, delete_schemas, len(updated_schemas), skipped_count
+
+
+def schemas_to_supported_format(
+    schemas: list[JsonSchema],
+) -> tuple[list[JsonSchema], list[JsonSchema], int]:
+    updated_schemas = []
+    delete_schemas = []
+    skipped_count = 0
+
+    for schema in tqdm(schemas, desc="Converting schemas to supported format"):
+        schema_content = (
+            schema.content
+            if isinstance(schema.content, dict)
+            else json.loads(schema.content)
+        )
+
+        original_content_str = json.dumps(schema_content, sort_keys=True)
+
+        try:
+            updated_content = to_supported_json_schema(schema_content, schema_content)
+
+            updated_content_str = json.dumps(updated_content, sort_keys=True)
+
+            if original_content_str == updated_content_str:
+                skipped_count += 1
+                continue
+
+            fastjsonschema.compile(updated_content)
+
+            schema.content = updated_content
+            updated_schemas.append(schema)
+
+        except Exception as e:
+            logger.error(
+                f"Error converting schema {schema.id} to supported format: {e}"
+            )
+            continue
+
+    return updated_schemas, delete_schemas, skipped_count

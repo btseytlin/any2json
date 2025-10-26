@@ -8,7 +8,7 @@ class InputJSONChunk:
     A chunk of data mined from a dataset that can be used to generate samples.
     """
 
-    id: int | None
+    id: str | None
     data: dict | list
 
     source_dataset_name: str
@@ -35,7 +35,7 @@ class Sample:
     schema: dict
     output: dict
 
-    chunk_id: int | None
+    chunk_id: str | None
     generator: str
 
 
