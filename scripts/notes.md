@@ -859,12 +859,10 @@ i7dfz4h2
 
 Done training: https://wandb.ai/btseytlin/any2json/artifacts/model/model-i7dfz4h2/v6
 
-That cost around $5
-
 All looks good. Good eval generations, good loss curves. Loss is less than previous dataset smollm.
 
 Benchmark time:
 
-```
-source scripts/config_smollm_i7dfz4h2.env && python scripts/submit_runpod.py --name any2json-benchmark-a40-i7dfz4h2 --script scripts/pod_benchmark.sh --template-id gmu9nenh8c --keep-container-alive
+```bash
+python scripts/submit_runpod.py --name any2json-benchmark-a40-i7dfz4h2 --script scripts/pod_benchmark.sh --template-id gmu9nenh8c --keep-container-alive --additional-env-file scripts/config_smollm_i7dfz4h2.env
 ```

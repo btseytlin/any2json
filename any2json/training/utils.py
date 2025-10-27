@@ -66,7 +66,12 @@ def load_hf_dataset(path_or_repo: str) -> DatasetDict:
         dataset = load_dataset(path_or_repo)
 
     def load_meta_batch(example):
-        example["meta"] = json.loads(example["meta"])
+        example["meta"] = (
+            json.loads(example["meta"])
+            if isinstance(example["meta"], str)
+            else example["meta"]
+        )
+        example["meta"] = example["meta"] or {}
         return example
 
     dataset = dataset.map(load_meta_batch, batched=False, num_proc=8)
