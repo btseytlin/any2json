@@ -299,7 +299,11 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit, run_id):
 
     for sample in samples:
         if isinstance(sample["schema"], str):
-            sample["schema"] = json.loads(sample["schema"])
+            sample["schema"] = (
+                json.loads(sample["schema"])
+                if isinstance(sample["schema"], str)
+                else sample["schema"]
+            )
         if isinstance(sample["output"], str):
             sample["output"] = json.loads(sample["output"])
 
