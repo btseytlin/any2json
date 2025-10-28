@@ -892,3 +892,6 @@ https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json
 Wtf, 96.5% schema errors?
 
 In benchmarking something with order is broken. Model answer is seemingly for a different sample. Yet if I do inference manually the model output is correct
+
+Found a benchmarking indexing inconsistency
+

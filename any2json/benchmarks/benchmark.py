@@ -301,6 +301,7 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit, run_id):
         samples = [samples[i] for i in sample_indices]
 
     for sample_id, sample in zip(sample_indices, samples, strict=True):
+        sample["sample_id"] = sample_id
         if (
             isinstance(sample["schema"], str)
             and sample["schema"] != SCHEMA_MISSING_TOKEN
@@ -310,7 +311,6 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit, run_id):
             sample["output"] = json.loads(sample["output"])
         if isinstance(sample["meta"], str):
             sample["meta"] = json.loads(sample["meta"])
-            sample["sample_id"] = sample_id
 
     logger.info(f"Running benchmark with {len(samples)} samples")
 
