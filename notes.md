@@ -895,3 +895,4 @@ In benchmarking something with order is broken. Model answer is seemingly for a 
 
 Found a benchmarking indexing inconsistency
 
+Fixed diff metric computations in benchmarking

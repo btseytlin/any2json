@@ -183,10 +183,12 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
     if not results:
         return [], {}
 
-    metrics_details_list = []
-    for i, result in enumerate(results):
+    metrics_details = {}
+    for result in results:
         sample_metric_details = calculate_sample_metrics(result)
-        metrics_details_list.append(sample_metric_details)
+        metrics_details[result["sample_id"]] = sample_metric_details
+
+    metrics_details_list = list(metrics_details.values())
 
     aggregate_metrics = {}
     request_error = [
@@ -227,7 +229,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         ]
         aggregate_metrics[f"{metric}_mean"] = round(np.mean(all_metrics).item(), 3)
 
-    return metrics_details_list, aggregate_metrics
+    return metrics_details, aggregate_metrics
 
 
 @click.group()
@@ -388,13 +390,13 @@ def calculate_metrics_cmd(results_dir):
     with open(os.path.join(results_dir, "results.json"), "r") as f:
         results = json.load(f)
 
-    details_list, metrics = calculate_metrics(results)
+    details, metrics = calculate_metrics(results)
 
     logger.info(f"Metrics:\n{json.dumps(metrics, indent=2)}")
 
     output = {
         "metrics": metrics,
-        "details": details_list,
+        "details": details,
     }
 
     with open(os.path.join(results_dir, "metrics.json"), "w") as f:

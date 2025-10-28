@@ -103,12 +103,9 @@ def to_predictions_df(results_per_model: dict[str, dict]):
         predictions = benchmark_results["results"]
         metrics_details = benchmark_results["metrics_details"]
         for prediction in predictions:
-            sample_id = prediction["id"]
+            sample_id = prediction["sample_id"]
 
-            try:
-                metric_metails = metrics_details[sample_id]
-            except IndexError:
-                metric_metails = None
+            metric_metails = metrics_details[sample_id]
 
             predictions_records.append(
                 {
@@ -156,36 +153,7 @@ def show_predictions(results_per_model: dict[str, dict]):
 def show_prediction_explorer(results_per_model: dict[str, dict]):
     st.markdown("### Prediction Explorer")
 
-    # predictions_records = []
-    # for model_name, benchmark_results in results_per_model.items():
-    #     predictions = benchmark_results["results"]
-    #     metrics_details = benchmark_results["metrics_details"]
-    #     for prediction in predictions:
-    #         sample_id = prediction["id"]
-    #         predictions_records.append(
-    #             {
-    #                 "model_name": model_name,
-    #                 "sample_id": sample_id,
-    #                 "input_data": prediction["input_data"],
-    #                 "schema": prediction["schema"],
-    #                 "answer": prediction["answer"],
-    #                 "correct_answer": prediction["correct_answer"],
-    #                 "meta": prediction["meta"],
-    #                 "metrics_details": metrics_details[sample_id],
-    #             }
-    #         )
-
-    # df = pd.DataFrame(predictions_records)
     df = to_predictions_df(results_per_model)
-    df["correct_answer"] = df["correct_answer"].apply(lambda x: json.dumps(x, indent=1))
-    df["schema"] = df["schema"].apply(
-        lambda x: json.dumps(x, indent=1) if x and x != SCHEMA_MISSING_TOKEN else x
-    )
-    df["answer"] = df["answer"].apply(lambda x: json.dumps(x, indent=1))
-    df["meta"] = df["meta"].apply(lambda x: json.dumps(x, indent=1))
-    df["metrics_details"] = df["metrics_details"].apply(
-        lambda x: json.dumps(x, indent=1)
-    )
 
     available_sample_ids = sorted(df["sample_id"].unique())
     available_models = sorted(df["model_name"].unique())
@@ -237,7 +205,12 @@ def show_prediction_explorer(results_per_model: dict[str, dict]):
         st.markdown("#### Correct Answer")
         with st.expander("View Correct Answer", expanded=False):
             try:
-                correct_answer_obj = json.loads(first_row["correct_answer"])
+                print(first_row["correct_answer"])
+                correct_answer_obj = (
+                    json.loads(first_row["correct_answer"])
+                    if isinstance(first_row["correct_answer"], str)
+                    else first_row["correct_answer"]
+                )
                 st.json(correct_answer_obj)
             except json.JSONDecodeError:
                 st.text(first_row["correct_answer"])
@@ -270,12 +243,14 @@ def show_prediction_explorer(results_per_model: dict[str, dict]):
             st.markdown("**Metrics Details:**")
             st.json(model_row["metrics_details"])
 
+        correct_answer = first_row["correct_answer"]
+        if isinstance(correct_answer, str):
+            correct_answer = json.loads(correct_answer)
+
         with col2:
             st.markdown("**Diff with Correct Answer:**")
             try:
-                correct_formatted = json.dumps(
-                    json.loads(first_row["correct_answer"]), indent=2, sort_keys=True
-                )
+                correct_formatted = json.dumps(correct_answer, indent=2, sort_keys=True)
             except json.JSONDecodeError:
                 correct_formatted = first_row["correct_answer"]
 
@@ -291,7 +266,7 @@ def show_prediction_explorer(results_per_model: dict[str, dict]):
                     correct_formatted.splitlines(keepends=True),
                     answer_formatted.splitlines(keepends=True),
                     fromfile="Correct Answer",
-                    tofile=f"{model_name} Answer",
+                    tofile=f"Answer {model_name}",
                     lineterm="",
                 )
             )
@@ -316,8 +291,13 @@ def show_error_analysis(results_per_model: dict[str, dict]):
         lambda x: x.get("error_type")
         or ("wrong_content" if x.get("correct") is False else None)
     )
+
+    if not plot_df["error_type"].any():
+        st.warning("No errors found")
+        return
+
     plot_df = plot_df[plot_df.error_type.notna()]
-    plot_df["input_data_len"] = plot_df["input_data"].apply(len)
+    plot_df["input_data_len"] = plot_df["input_data"].astype(str).apply(len).astype(int)
 
     plot_df["input_data_len_bucket"] = pd.cut(
         plot_df["input_data_len"],
