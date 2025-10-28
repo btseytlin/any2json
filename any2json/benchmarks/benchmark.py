@@ -211,6 +211,14 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
     aggregate_metrics["percentage_schema_errors"] = round(
         len(schema_error) / len(results), 3
     )
+    content_error = [
+        m
+        for m in metrics_details_list
+        if not m.get("error_type") and not m.get("correct")
+    ]
+    aggregate_metrics["percentage_content_errors"] = round(
+        len(content_error) / len(results), 3
+    )
 
     correct = [m for m in metrics_details_list if m.get("correct")]
     aggregate_metrics["percentage_correct"] = round(len(correct) / len(results), 3)

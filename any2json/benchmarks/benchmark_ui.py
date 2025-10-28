@@ -12,6 +12,17 @@ from plotly import express as px
 import difflib
 
 
+def process_error_type(metrics_details: dict):
+    error_type = metrics_details.get("error_type")
+    correct = metrics_details.get("correct")
+    if error_type:
+        return error_type
+
+    if not error_type and correct is False:
+        return "wrong_content"
+    return "None"
+
+
 def load_results_per_model(results_dir: str) -> dict[str, dict]:
     results_per_model = {}
     for subdir in os.scandir(results_dir):
@@ -32,7 +43,7 @@ def show_metrics_table(results_per_model: dict[str, dict]):
     for model_name, benchmark_results in results_per_model.items():
         info = benchmark_results["info"]
         benchmark_durations[model_name] = info["duration_s"]
-        predictions = benchmark_results["results"]
+        # predictions = benchmark_results["results"]
         metrics = benchmark_results["metrics"]
         for metric_name, metric_value in metrics.items():
             metric_records.append(
@@ -72,6 +83,7 @@ def show_metrics_table(results_per_model: dict[str, dict]):
             "percentage_json_errors",
             "percentage_schema_errors",
             "percentage_request_errors",
+            "percentage_content_errors",
         ]
 
         # Stacked bar chart of error distributions for each model
@@ -205,7 +217,6 @@ def show_prediction_explorer(results_per_model: dict[str, dict]):
         st.markdown("#### Correct Answer")
         with st.expander("View Correct Answer", expanded=False):
             try:
-                print(first_row["correct_answer"])
                 correct_answer_obj = (
                     json.loads(first_row["correct_answer"])
                     if isinstance(first_row["correct_answer"], str)
@@ -280,45 +291,81 @@ def show_prediction_explorer(results_per_model: dict[str, dict]):
         st.divider()
 
 
+def prepare_error_buckets_df(results_per_model: dict[str, dict]):
+    preds_df = to_predictions_df(results_per_model)
+    preds_df["error_type"] = preds_df.metrics_details.apply(process_error_type)
+    preds_df["input_data_len"] = (
+        preds_df["input_data"].astype(str).apply(len).astype(int)
+    )
+    preds_df["input_data_len_bucket"] = pd.cut(
+        preds_df["input_data_len"],
+        bins=range(0, preds_df["input_data_len"].max() + 1, 500),
+    )
+
+    sample_counts = (
+        preds_df.groupby(["model_name", "input_data_len_bucket"])
+        .size()
+        .reset_index(name="sample_count")
+    )
+
+    error_counts = (
+        preds_df[preds_df.error_type.notna()]
+        .groupby(["model_name", "input_data_len_bucket", "error_type"])
+        .size()
+        .reset_index(name="error_count")
+    )
+    error_counts["input_data_len_bucket"] = error_counts[
+        "input_data_len_bucket"
+    ].astype(str)
+    error_counts["model_name"] = error_counts["model_name"].astype(str)
+
+    sample_counts["input_data_len_bucket"] = sample_counts[
+        "input_data_len_bucket"
+    ].astype(str)
+    sample_counts["model_name"] = sample_counts["model_name"].astype(str)
+
+    plot_df = error_counts.merge(
+        sample_counts, on=["model_name", "input_data_len_bucket"]
+    )
+    plot_df["error_rate"] = plot_df["error_count"] / plot_df["sample_count"] * 100
+    return plot_df
+
+
 def show_error_analysis(results_per_model: dict[str, dict]):
     st.markdown("### Error Analysis")
 
-    st.markdown(f"#### Input data len vs error rates")
+    plot_df = prepare_error_buckets_df(results_per_model)
 
-    plot_df = to_predictions_df(results_per_model)
-
-    plot_df["error_type"] = plot_df.metrics_details.apply(
-        lambda x: x.get("error_type")
-        or ("wrong_content" if x.get("correct") is False else None)
-    )
-
-    if not plot_df["error_type"].any():
+    if not plot_df["error_type"].any() or plot_df["error_count"].sum() == 0:
         st.warning("No errors found")
         return
 
-    plot_df = plot_df[plot_df.error_type.notna()]
-    plot_df["input_data_len"] = plot_df["input_data"].astype(str).apply(len).astype(int)
+    st.markdown(f"#### Input data len vs error rates")
 
-    plot_df["input_data_len_bucket"] = pd.cut(
-        plot_df["input_data_len"],
-        bins=range(0, plot_df["input_data_len"].max() + 1, 500),
-    )
-    plot_df = (
-        plot_df.groupby(["model_name", "input_data_len_bucket", "error_type"])
-        .size()
-        .reset_index(name="count")
-    )
-    plot_df["input_data_len_bucket"] = plot_df["input_data_len_bucket"].astype(str)
-    plot_df["model_name"] = plot_df["model_name"].astype(str)
     fig = px.bar(
         plot_df,
         x="input_data_len_bucket",
-        y="count",
+        y="error_count",
         color="error_type",
         barmode="stack",
         facet_col="model_name",
         width=600,
         height=400,
+    )
+    st.plotly_chart(fig)
+
+    st.markdown(f"#### Input data len vs error rates (normalized)")
+
+    fig = px.bar(
+        plot_df,
+        x="input_data_len_bucket",
+        y="error_rate",
+        color="error_type",
+        barmode="stack",
+        facet_col="model_name",
+        width=600,
+        height=400,
+        labels={"error_rate": "Error Rate (%)"},
     )
     st.plotly_chart(fig)
 

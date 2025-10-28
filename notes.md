@@ -896,3 +896,24 @@ In benchmarking something with order is broken. Model answer is seemingly for a 
 Found a benchmarking indexing inconsistency
 
 Fixed diff metric computations in benchmarking
+
+Actual results i7dfz4h2:
+
+https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json-benchmark-smollm2_i7dfz4h2_v6/v4
+
+```json
+{
+  "percentage_request_errors": 0.0,
+  "percentage_json_errors": 0.009,
+  "percentage_schema_errors": 0.113,
+  "percentage_correct": 0.828,
+  "diff_size_lines_mean": 0.225,
+  "diff_size_chars_added_mean": 3.751,
+  "diff_size_chars_missing_mean": 3.796,
+  "levenstein_distance_mean": 0.995,
+  "inference_ms_mean": 341.551
+}
+```
+
+Hell yes!
+
