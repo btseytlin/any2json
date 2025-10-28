@@ -3,6 +3,7 @@ import sys
 import click
 from dotenv import load_dotenv
 import pandas as pd
+from any2json.training.constants import SCHEMA_MISSING_TOKEN
 from any2json.utils import configure_loggers, json_dump_safe, logger
 from any2json.benchmarks.benchmark import calculate_metrics
 import json
@@ -56,7 +57,7 @@ def show_metrics_table(results_per_model: dict[str, dict]):
         st.markdown("### Latency vs quality")
         fig = px.scatter(
             df.reset_index(),
-            x="median_inference_ms",
+            x="inference_ms_mean",
             y="percentage_correct",
             color="model_name",
             width=600,
@@ -103,52 +104,88 @@ def to_predictions_df(results_per_model: dict[str, dict]):
         metrics_details = benchmark_results["metrics_details"]
         for prediction in predictions:
             sample_id = prediction["id"]
+
+            try:
+                metric_metails = metrics_details[sample_id]
+            except IndexError:
+                metric_metails = None
+
             predictions_records.append(
                 {
                     "model_name": model_name,
                     "sample_id": sample_id,
                     "input_data": prediction["input_data"],
-                    "schema": prediction["schema"],
+                    "schema": prediction["schema"] or SCHEMA_MISSING_TOKEN,
                     "answer": prediction["answer"],
                     "correct_answer": prediction["correct_answer"],
-                    "meta": prediction["meta"],
-                    "metrics_details": metrics_details[sample_id],
+                    "meta": prediction["meta"] or {},
+                    "metrics_details": metric_metails,
                 }
             )
 
     df = pd.DataFrame(predictions_records)
+    df = df.fillna("")
     return df
 
 
 def show_predictions(results_per_model: dict[str, dict]):
     df = to_predictions_df(results_per_model)
+    df["correct_answer"] = df["correct_answer"].apply(lambda x: json.dumps(x, indent=1))
+    df["schema"] = df["schema"].apply(
+        lambda x: json.dumps(x, indent=1) if x and x != SCHEMA_MISSING_TOKEN else x
+    )
+    df["answer"] = df["answer"].apply(lambda x: json.dumps(x, indent=1))
+    df["meta"] = df["meta"].apply(lambda x: json.dumps(x, indent=1))
+    df["metrics_details"] = df["metrics_details"].apply(
+        lambda x: json.dumps(x, indent=1)
+    )
+
     st.markdown("### Predictions")
-    st.dataframe(df)
+    st.dataframe(
+        df,
+        column_config={
+            "correct_answer": st.column_config.JsonColumn(),
+            "schema": st.column_config.JsonColumn(),
+            "answer": st.column_config.JsonColumn(),
+            "meta": st.column_config.JsonColumn(),
+            "metrics_details": st.column_config.JsonColumn(),
+        },
+    )
 
 
 def show_prediction_explorer(results_per_model: dict[str, dict]):
     st.markdown("### Prediction Explorer")
 
-    predictions_records = []
-    for model_name, benchmark_results in results_per_model.items():
-        predictions = benchmark_results["results"]
-        metrics_details = benchmark_results["metrics_details"]
-        for prediction in predictions:
-            sample_id = prediction["id"]
-            predictions_records.append(
-                {
-                    "model_name": model_name,
-                    "sample_id": sample_id,
-                    "input_data": prediction["input_data"],
-                    "schema": prediction["schema"],
-                    "answer": prediction["answer"],
-                    "correct_answer": prediction["correct_answer"],
-                    "meta": prediction["meta"],
-                    "metrics_details": metrics_details[sample_id],
-                }
-            )
+    # predictions_records = []
+    # for model_name, benchmark_results in results_per_model.items():
+    #     predictions = benchmark_results["results"]
+    #     metrics_details = benchmark_results["metrics_details"]
+    #     for prediction in predictions:
+    #         sample_id = prediction["id"]
+    #         predictions_records.append(
+    #             {
+    #                 "model_name": model_name,
+    #                 "sample_id": sample_id,
+    #                 "input_data": prediction["input_data"],
+    #                 "schema": prediction["schema"],
+    #                 "answer": prediction["answer"],
+    #                 "correct_answer": prediction["correct_answer"],
+    #                 "meta": prediction["meta"],
+    #                 "metrics_details": metrics_details[sample_id],
+    #             }
+    #         )
 
-    df = pd.DataFrame(predictions_records)
+    # df = pd.DataFrame(predictions_records)
+    df = to_predictions_df(results_per_model)
+    df["correct_answer"] = df["correct_answer"].apply(lambda x: json.dumps(x, indent=1))
+    df["schema"] = df["schema"].apply(
+        lambda x: json.dumps(x, indent=1) if x and x != SCHEMA_MISSING_TOKEN else x
+    )
+    df["answer"] = df["answer"].apply(lambda x: json.dumps(x, indent=1))
+    df["meta"] = df["meta"].apply(lambda x: json.dumps(x, indent=1))
+    df["metrics_details"] = df["metrics_details"].apply(
+        lambda x: json.dumps(x, indent=1)
+    )
 
     available_sample_ids = sorted(df["sample_id"].unique())
     available_models = sorted(df["model_name"].unique())
@@ -274,14 +311,14 @@ def show_error_analysis(results_per_model: dict[str, dict]):
     st.markdown(f"#### Input data len vs error rates")
 
     plot_df = to_predictions_df(results_per_model)
-    print(plot_df.head())
+
     plot_df["error_type"] = plot_df.metrics_details.apply(
         lambda x: x.get("error_type")
         or ("wrong_content" if x.get("correct") is False else None)
     )
     plot_df = plot_df[plot_df.error_type.notna()]
     plot_df["input_data_len"] = plot_df["input_data"].apply(len)
-    # bucket input lengths
+
     plot_df["input_data_len_bucket"] = pd.cut(
         plot_df["input_data_len"],
         bins=range(0, plot_df["input_data_len"].max() + 1, 500),
@@ -305,37 +342,7 @@ def show_error_analysis(results_per_model: dict[str, dict]):
     )
     st.plotly_chart(fig)
 
-    st.markdown(f"#### Input data len vs diff chars")
-
     df = to_predictions_df(results_per_model)
-
-    plot_df = df[df.metrics_details.apply(lambda x: x.get("diff_size_chars")).notna()]
-    plot_df["input_data_len"] = plot_df["input_data"].apply(len)
-    plot_df["input_data_len_bucket"] = pd.cut(
-        plot_df["input_data_len"],
-        bins=range(0, plot_df["input_data_len"].max() + 1, 500),
-    )
-    plot_df["error_chars"] = plot_df["metrics_details"].apply(
-        lambda x: float(x.get("diff_size_chars"))
-    )
-    plot_df = (
-        plot_df.groupby(["model_name", "input_data_len_bucket"])["error_chars"]
-        .mean()
-        .reset_index(name="mean_error_chars")
-    )
-    plot_df["input_data_len_bucket"] = plot_df["input_data_len_bucket"].astype(str)
-
-    plot_df["model_name"] = plot_df["model_name"].astype(str)
-    fig = px.bar(
-        plot_df,
-        x="input_data_len_bucket",
-        y="mean_error_chars",
-        color="model_name",
-        barmode="group",
-        width=600,
-        height=400,
-    )
-    st.plotly_chart(fig)
 
     st.markdown(f"#### Input data len vs inference time")
 

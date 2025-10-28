@@ -52,7 +52,7 @@ class VLLMServerModel(VLLMServerMixin):
         semaphore = asyncio.Semaphore(self.max_concurrent_requests)
 
         async def task(
-            i: int, sample: dict[str, str]
+            sample_id: int, sample: dict[str, str]
         ) -> tuple[str, dict] | tuple[Exception, str]:
             prompt = format_example(sample["input_data"], sample["schema"])
             payload = {
@@ -62,7 +62,7 @@ class VLLMServerModel(VLLMServerMixin):
             if self.guided_json and isinstance(sample["schema"], dict):
                 payload["guided_json"] = sample["schema"]
 
-            result = {"id": i}
+            result = {"sample_id": sample_id}
 
             try:
                 async with semaphore:
@@ -94,7 +94,7 @@ class VLLMServerModel(VLLMServerMixin):
                 }
             return result
 
-        tasks = [task(i, sample) for i, sample in enumerate(samples)]
+        tasks = [task(sample["sample_id"], sample) for sample in samples]
         results = await tqdm_asyncio.gather(*tasks, desc="Executing requests")
 
         errors = [result for result in results if result.get("error")]

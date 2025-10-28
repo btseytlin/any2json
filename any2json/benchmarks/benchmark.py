@@ -31,19 +31,20 @@ model_types = {
 }
 
 
-def run_benchmark(model, samples: list[dict], sample_indices: list[int]) -> list[dict]:
+def run_benchmark(model: VLLMServerModel, samples: list[dict]) -> list[dict]:
     results: list[dict] = []
     preds = model.get_predictions(samples)
-    id_to_pred = {p["id"]: p for p in preds}
-    for idx, sample in zip(sample_indices, samples, strict=True):
+    id_to_pred = {p["sample_id"]: p for p in preds}
+    for sample in samples:
+        sample_id = sample["sample_id"]
         try:
-            prediction = id_to_pred[idx]
+            prediction = id_to_pred[sample_id]
             input_data = sample["input_data"]
             if isinstance(input_data, dict):
                 input_data = json.dumps(input_data)
             results.append(
                 {
-                    "id": idx,
+                    "sample_id": sample_id,
                     "input_data": input_data,
                     "schema": sample["schema"],
                     "correct_answer": sample["output"],
@@ -56,7 +57,8 @@ def run_benchmark(model, samples: list[dict], sample_indices: list[int]) -> list
             )
         except Exception as e:
             logger.error(
-                f"Error processing prediction for sample {idx}: {e}", exc_info=True
+                f"Error processing prediction for sample {sample_id}: {e}",
+                exc_info=True,
             )
             continue
     return results
@@ -298,7 +300,7 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit, run_id):
         sample_indices = random.sample(sample_indices, limit)
         samples = [samples[i] for i in sample_indices]
 
-    for sample in samples:
+    for sample_id, sample in zip(sample_indices, samples, strict=True):
         if (
             isinstance(sample["schema"], str)
             and sample["schema"] != SCHEMA_MISSING_TOKEN
@@ -306,11 +308,14 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit, run_id):
             sample["schema"] = json.loads(sample["schema"])
         if isinstance(sample["output"], str):
             sample["output"] = json.loads(sample["output"])
+        if isinstance(sample["meta"], str):
+            sample["meta"] = json.loads(sample["meta"])
+            sample["sample_id"] = sample_id
 
     logger.info(f"Running benchmark with {len(samples)} samples")
 
     start_dt = datetime.now()
-    results = run_benchmark(model, samples, sample_indices)
+    results = run_benchmark(model, samples)
     end_dt = datetime.now()
     duration_s = (end_dt - start_dt).total_seconds()
     logger.info(f"Benchmarking took {duration_s} seconds")

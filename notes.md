@@ -868,3 +868,27 @@ Benchmark time:
 ```
 source scripts/config_smollm_i7dfz4h2.env && python scripts/submit_runpod.py --name any2json-benchmark-a40-i7dfz4h2 --script scripts/pod_benchmark.sh --template-id gmu9nenh8c --keep-container-alive
 ```
+
+Results i7dfz4h2:
+
+btseytlin/any2json-scripts/any2json-benchmark-smollm2_i7dfz4h2_v6:v1
+
+https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json-benchmark-smollm2_i7dfz4h2_v6/v1
+
+```json
+{
+  "percentage_request_errors": 0.0,
+  "percentage_json_errors": 0.015,
+  "percentage_schema_errors": 0.965,
+  "percentage_correct": 0.002,
+  "diff_size_lines_added_mean": 0.917,
+  "diff_size_lines_removed_mean": 22.167,
+  "diff_size_chars_added_mean": 1.833,
+  "diff_size_chars_removed_mean": 499.25,
+  "inference_ms_mean": 54.529
+}
+```
+
+Wtf, 96.5% schema errors?
+
+In benchmarking something with order is broken. Model answer is seemingly for a different sample. Yet if I do inference manually the model output is correct
