@@ -120,13 +120,16 @@ def calculate_sample_metrics(result: dict) -> dict:
             metrics_details["traceback"] = None
         return metrics_details
 
-    if isinstance(result["schema"], str):
-        result["schema"] = json.loads(result["schema"])
-    schema = fastjsonschema.compile(result["schema"])
+    schema_validator = None
+    if result["schema"] != SCHEMA_MISSING_TOKEN:
+        if isinstance(result["schema"], str):
+            result["schema"] = json.loads(result["schema"])
+        schema_validator = fastjsonschema.compile(result["schema"])
 
     try:
         answer = postprocess_answer(result["answer"])
-        schema(answer)
+        if schema_validator:
+            schema_validator(answer)
     except fastjsonschema.JsonSchemaException as e:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         traceback_str = "".join(
