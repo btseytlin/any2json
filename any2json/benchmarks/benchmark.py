@@ -141,10 +141,35 @@ def calculate_sample_metrics(result: dict) -> dict:
             result["schema"] = json.loads(result["schema"])
         schema_validator = fastjsonschema.compile(result["schema"])
 
+    answer = result["answer"]
+
+    metrics_details["sample_meta"] = result["sample_meta"]
+
     try:
-        answer = postprocess_answer(result["answer"])
-        if schema_validator:
+        answer = postprocess_answer(answer)
+
+        try:
+            correct_answer = result["correct_answer"]
+
+            if isinstance(correct_answer, str):
+                correct_answer = json.loads(correct_answer)
+
+            metrics_details["correct"] = answer == correct_answer
+
+            diff_metrics = calculate_diff_metrics(answer, correct_answer)
+            metrics_details.update(diff_metrics)
+        except Exception as e:
+            logger.error(
+                f"Error calculating diff metrics for sample {result['sample_id']}: {e}",
+                exc_info=True,
+            )
+
+        if (
+            metrics_details["sample_meta"].get("synthetic_type") != "negative"
+            and schema_validator
+        ):
             schema_validator(answer)
+
     except fastjsonschema.JsonSchemaException as e:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         traceback_str = "".join(
@@ -153,7 +178,6 @@ def calculate_sample_metrics(result: dict) -> dict:
         metrics_details["error_type"] = "schema_error"
         metrics_details["error"] = str(e)
         metrics_details["traceback"] = traceback_str
-        return metrics_details
     except Exception as e:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         traceback_str = "".join(
@@ -162,18 +186,6 @@ def calculate_sample_metrics(result: dict) -> dict:
         metrics_details["error_type"] = "json_error"
         metrics_details["error"] = str(e)
         metrics_details["traceback"] = traceback_str
-        return metrics_details
-
-    correct_answer = result["correct_answer"]
-
-    if isinstance(correct_answer, str):
-        correct_answer = json.loads(correct_answer)
-
-    metrics_details["correct"] = answer == correct_answer
-
-    diff_metrics = calculate_diff_metrics(answer, correct_answer)
-    metrics_details.update(diff_metrics)
-
     metrics_details["inference_ms"] = result.get("meta", {}).get("inference_ms")
 
     return metrics_details

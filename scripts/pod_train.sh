@@ -13,9 +13,20 @@ echo "Code and dependencies updated"
 echo "Setup complete, running command"
 
 export BATCH_SIZE=4
-export NUM_EPOCHS=1
-# export MODEL=google/gemma-3-270m
+export NUM_EPOCHS=2
 export MODEL=HuggingFaceTB/SmolLM2-135M
+
+export WANDB_ARTIFACT_ID=btseytlin/any2json/model-i7dfz4h2:v6
+
+if [ -n "$WANDB_ARTIFACT_ID" ]; then
+    echo "Downloading artifact: $WANDB_ARTIFACT_ID"
+    python /code/any2json/scripts/wandb_tools.py download-artifact $WANDB_ARTIFACT_ID --output-root /workspace/models
+
+    ARTIFACT_PART=$(echo "$WANDB_ARTIFACT_ID" | cut -d'/' -f3)
+
+    MODEL=/workspace/models/$ARTIFACT_PART
+    echo "Using model: $MODEL"
+fi
 
 python /code/any2json/any2json/training/train.py train \
     --model-name=$MODEL \

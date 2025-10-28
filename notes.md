@@ -906,6 +906,7 @@ https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json
   "percentage_request_errors": 0.0,
   "percentage_json_errors": 0.009,
   "percentage_schema_errors": 0.113,
+  "percentage_content_errors": 0.051,
   "percentage_correct": 0.828,
   "diff_size_lines_mean": 0.225,
   "diff_size_chars_added_mean": 3.751,
@@ -916,4 +917,7 @@ https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json
 ```
 
 Hell yes!
+
+Training from this checkpoint for 2 more epochs
+
 

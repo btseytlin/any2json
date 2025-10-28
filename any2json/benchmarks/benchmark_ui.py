@@ -386,6 +386,74 @@ def show_error_analysis(results_per_model: dict[str, dict]):
     )
     st.plotly_chart(fig)
 
+    st.markdown(f"#### Percentage Correct by Input Content Type")
+
+    content_type_df = df.copy()
+    content_type_df["correct"] = content_type_df["metrics_details"].apply(
+        lambda x: x.get("correct", False)
+    )
+    content_type_df["content_type"] = content_type_df["metrics_details"].apply(
+        lambda x: x.get("sample_meta", {}).get("input_chunk_content_type", "unknown")
+    )
+
+    content_type_stats = (
+        content_type_df.groupby(["model_name", "content_type"])["correct"]
+        .agg(["sum", "count"])
+        .reset_index()
+    )
+    content_type_stats["percentage_correct"] = (
+        content_type_stats["sum"] / content_type_stats["count"] * 100
+    )
+
+    if not content_type_stats.empty:
+        fig = px.bar(
+            content_type_stats,
+            x="content_type",
+            y="percentage_correct",
+            color="model_name",
+            barmode="group",
+            width=800,
+            height=400,
+            labels={"percentage_correct": "Percentage Correct (%)"},
+        )
+        st.plotly_chart(fig)
+    else:
+        st.warning("No content type data available")
+
+    st.markdown(f"#### Percentage Correct by Synthetic Type")
+
+    synthetic_type_df = df.copy()
+    synthetic_type_df["correct"] = synthetic_type_df["metrics_details"].apply(
+        lambda x: x.get("correct", False)
+    )
+    synthetic_type_df["synthetic_type"] = synthetic_type_df["metrics_details"].apply(
+        lambda x: x.get("sample_meta", {}).get("synthetic_type", "unknown")
+    )
+
+    synthetic_type_stats = (
+        synthetic_type_df.groupby(["model_name", "synthetic_type"])["correct"]
+        .agg(["sum", "count"])
+        .reset_index()
+    )
+    synthetic_type_stats["percentage_correct"] = (
+        synthetic_type_stats["sum"] / synthetic_type_stats["count"] * 100
+    )
+
+    if not synthetic_type_stats.empty:
+        fig = px.bar(
+            synthetic_type_stats,
+            x="synthetic_type",
+            y="percentage_correct",
+            color="model_name",
+            barmode="group",
+            width=800,
+            height=400,
+            labels={"percentage_correct": "Percentage Correct (%)"},
+        )
+        st.plotly_chart(fig)
+    else:
+        st.warning("No synthetic type data available")
+
 
 def visualize_results(results_dir: str, results_per_model: dict[str, dict]):
     st.set_page_config(page_title="Any2JSON Inference", page_icon="🔄", layout="wide")
