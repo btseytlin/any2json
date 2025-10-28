@@ -72,7 +72,7 @@ def postprocess_answer(answer: str) -> dict | str | list | int | float | bool | 
     return json.loads(answer)
 
 
-def get_levenstein_distance(true: dict, predicted: dict) -> int:
+def get_levenstein_similarity(true: dict, predicted: dict) -> int:
     true_str = json_dumps_minified(true)
     predicted_str = json_dumps_minified(predicted)
     return round(difflib.SequenceMatcher(None, true_str, predicted_str).ratio(), 4)
@@ -90,7 +90,7 @@ def calculate_diff_metrics(
     answer: dict, correct_answer: dict
 ) -> dict[str, float | int]:
 
-    levenstein_distance = get_levenstein_distance(correct_answer, answer)
+    levenstein_similarity = get_levenstein_similarity(correct_answer, answer)
     different_chars_true = count_different_chars(correct_answer, answer)
     different_chars_predicted = count_different_chars(answer, correct_answer)
 
@@ -119,7 +119,7 @@ def calculate_diff_metrics(
         "diff_size_lines": diff_size_lines,
         "diff_size_chars_added": different_chars_predicted,
         "diff_size_chars_missing": different_chars_true,
-        "levenstein_distance": levenstein_distance,
+        "levenstein_similarity": levenstein_similarity,
     }
 
 
@@ -239,7 +239,7 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
         "diff_size_lines",
         "diff_size_chars_added",
         "diff_size_chars_missing",
-        "levenstein_distance",
+        "levenstein_similarity",
         "inference_ms",
     ]
 

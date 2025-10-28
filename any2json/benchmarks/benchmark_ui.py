@@ -11,6 +11,19 @@ import streamlit as st
 from plotly import express as px
 import difflib
 
+DEFAULT_JSON_EXPANDED = 2
+DEFAULT_JSON_INDENT = 1
+
+
+def render_json_or_text(json_obj: dict | str):
+    if isinstance(json_obj, str):
+        try:
+            json.loads(json_obj)
+            return st.json(json_obj, expanded=DEFAULT_JSON_EXPANDED)
+        except json.JSONDecodeError:
+            return st.text(json_obj)
+    return st.json(json_obj, expanded=DEFAULT_JSON_EXPANDED)
+
 
 def process_error_type(metrics_details: dict):
     error_type = metrics_details.get("error_type")
@@ -109,6 +122,30 @@ def show_info(results_per_model: dict[str, dict]):
             st.json(info)
 
 
+def predictions_df_to_presentation_df(df: pd.DataFrame):
+    df = df.copy()
+    df["correct_answer"] = df["correct_answer"].apply(
+        lambda x: json.dumps(x, indent=DEFAULT_JSON_INDENT, sort_keys=True)
+    )
+    df["schema"] = df["schema"].apply(
+        lambda x: (
+            json.dumps(x, indent=DEFAULT_JSON_INDENT, sort_keys=True)
+            if x and x != SCHEMA_MISSING_TOKEN
+            else x
+        )
+    )
+    df["answer"] = df["answer"].apply(
+        lambda x: json.dumps(x, indent=DEFAULT_JSON_INDENT, sort_keys=True)
+    )
+    df["meta"] = df["meta"].apply(
+        lambda x: json.dumps(x, indent=DEFAULT_JSON_INDENT, sort_keys=True)
+    )
+    df["metrics_details"] = df["metrics_details"].apply(
+        lambda x: json.dumps(x, indent=DEFAULT_JSON_INDENT, sort_keys=True)
+    )
+    return df
+
+
 def to_predictions_df(results_per_model: dict[str, dict]):
     predictions_records = []
     for model_name, benchmark_results in results_per_model.items():
@@ -134,21 +171,13 @@ def to_predictions_df(results_per_model: dict[str, dict]):
 
     df = pd.DataFrame(predictions_records)
     df = df.fillna("")
+
     return df
 
 
 def show_predictions(results_per_model: dict[str, dict]):
     df = to_predictions_df(results_per_model)
-    df["correct_answer"] = df["correct_answer"].apply(lambda x: json.dumps(x, indent=1))
-    df["schema"] = df["schema"].apply(
-        lambda x: json.dumps(x, indent=1) if x and x != SCHEMA_MISSING_TOKEN else x
-    )
-    df["answer"] = df["answer"].apply(lambda x: json.dumps(x, indent=1))
-    df["meta"] = df["meta"].apply(lambda x: json.dumps(x, indent=1))
-    df["metrics_details"] = df["metrics_details"].apply(
-        lambda x: json.dumps(x, indent=1)
-    )
-
+    df = predictions_df_to_presentation_df(df)
     st.markdown("### Predictions")
     st.dataframe(
         df,
@@ -165,7 +194,12 @@ def show_predictions(results_per_model: dict[str, dict]):
 def show_prediction_explorer(results_per_model: dict[str, dict]):
     st.markdown("### Prediction Explorer")
 
+    only_errors = st.checkbox("Only errors", value=True)
+
     df = to_predictions_df(results_per_model)
+
+    if only_errors:
+        df = df[df["metrics_details"].apply(lambda x: x.get("correct") is not True)]
 
     available_sample_ids = sorted(df["sample_id"].unique())
     available_models = sorted(df["model_name"].unique())
@@ -202,29 +236,17 @@ def show_prediction_explorer(results_per_model: dict[str, dict]):
     with col1:
         st.markdown("#### Input Data")
         with st.expander("View Input Data", expanded=False):
-            st.text(first_row["input_data"])
+            render_json_or_text(first_row["input_data"])
 
     with col2:
         st.markdown("#### Schema")
         with st.expander("View Schema", expanded=False):
-            try:
-                schema_obj = first_row["schema"]
-                st.json(schema_obj)
-            except json.JSONDecodeError:
-                st.text(first_row["schema"])
+            render_json_or_text(first_row["schema"])
 
     with col3:
-        st.markdown("#### Correct Answer")
-        with st.expander("View Correct Answer", expanded=False):
-            try:
-                correct_answer_obj = (
-                    json.loads(first_row["correct_answer"])
-                    if isinstance(first_row["correct_answer"], str)
-                    else first_row["correct_answer"]
-                )
-                st.json(correct_answer_obj)
-            except json.JSONDecodeError:
-                st.text(first_row["correct_answer"])
+        st.markdown("#### Meta")
+        with st.expander("Metrics Details", expanded=False):
+            render_json_or_text(first_row["metrics_details"])
 
     st.markdown("#### Model Predictions and Diffs")
 
@@ -241,41 +263,37 @@ def show_prediction_explorer(results_per_model: dict[str, dict]):
 
         st.markdown(f"##### Model: {model_name}")
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
+
+        correct_answer = json.dumps(
+            model_row["correct_answer"],
+            indent=DEFAULT_JSON_INDENT,
+            sort_keys=True,
+        )
+
+        try:
+            answer = json.dumps(
+                json.loads(model_row["answer"]),
+                indent=DEFAULT_JSON_INDENT,
+                sort_keys=True,
+            )
+        except json.JSONDecodeError:
+            answer = model_row["answer"]
 
         with col1:
-            st.markdown("**Model Answer:**")
-            try:
-                answer_obj = json.loads(model_row["answer"])
-                st.json(answer_obj)
-            except json.JSONDecodeError:
-                st.text(model_row["answer"])
-
-            st.markdown("**Metrics Details:**")
-            st.json(model_row["metrics_details"])
-
-        correct_answer = first_row["correct_answer"]
-        if isinstance(correct_answer, str):
-            correct_answer = json.loads(correct_answer)
+            st.markdown("**Correct Answer:**")
+            render_json_or_text(correct_answer)
 
         with col2:
+            st.markdown("**Model Answer:**")
+            render_json_or_text(answer)
+
+        with col3:
             st.markdown("**Diff with Correct Answer:**")
-            try:
-                correct_formatted = json.dumps(correct_answer, indent=2, sort_keys=True)
-            except json.JSONDecodeError:
-                correct_formatted = first_row["correct_answer"]
-
-            try:
-                answer_formatted = json.dumps(
-                    json.loads(model_row["answer"]), indent=2, sort_keys=True
-                )
-            except json.JSONDecodeError:
-                answer_formatted = model_row["answer"]
-
             diff = list(
                 difflib.unified_diff(
-                    correct_formatted.splitlines(keepends=True),
-                    answer_formatted.splitlines(keepends=True),
+                    correct_answer.splitlines(keepends=True),
+                    answer.splitlines(keepends=True),
                     fromfile="Correct Answer",
                     tofile=f"Answer {model_name}",
                     lineterm="",

@@ -905,14 +905,14 @@ https://wandb.ai/btseytlin/any2json-scripts/artifacts/benchmark_results/any2json
 {
   "percentage_request_errors": 0.0,
   "percentage_json_errors": 0.009,
-  "percentage_schema_errors": 0.113,
+  "percentage_schema_errors": 0.004,
   "percentage_content_errors": 0.051,
-  "percentage_correct": 0.828,
-  "diff_size_lines_mean": 0.225,
-  "diff_size_chars_added_mean": 3.751,
-  "diff_size_chars_missing_mean": 3.796,
+  "percentage_correct": 0.936,
+  "diff_size_lines_mean": 0.215,
+  "diff_size_chars_added_mean": 3.705,
+  "diff_size_chars_missing_mean": 3.602,
   "levenstein_distance_mean": 0.995,
-  "inference_ms_mean": 341.551
+  "inference_ms_mean": 316.582
 }
 ```
 
@@ -920,4 +920,4 @@ Hell yes!
 
 Training from this checkpoint for 2 more epochs
 
-
+https://wandb.ai/btseytlin/any2json/runs/aeja7brk?nw=nwuserbtseytlin

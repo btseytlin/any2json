@@ -44,7 +44,7 @@ class EvalLoggerCallback(TrainerCallback):
                 "diff_size_lines",
                 "diff_size_chars_added",
                 "diff_size_chars_missing",
-                "levenstein_distance",
+                "levenstein_similarity",
                 "sample_sequence",
             ],
             log_mode="INCREMENTAL",
@@ -154,7 +154,7 @@ class EvalLoggerCallback(TrainerCallback):
                 diff_metrics.get("diff_size_lines", None),
                 diff_metrics.get("diff_size_chars_added", None),
                 diff_metrics.get("diff_size_chars_missing", None),
-                diff_metrics.get("levenstein_distance", None),
+                diff_metrics.get("levenstein_similarity", None),
                 input_data,
             )
         wandb.log({"eval_examples": self.table})
