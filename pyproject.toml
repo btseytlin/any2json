@@ -39,13 +39,14 @@ dependencies = [
     "dicttoxml>=1.7.16",
     "xmltodict>=0.14.2",
     "torchvision>=0.22.0",
-    "wandb>=0.17.0",
+    "wandb>=0.22.0",
     "runpod>=1.7.13",
     "unsloth>=2025.8.6 ; sys_platform == 'linux'",
     "plotly>=6.3.0",
     "jupyterlab>=4.4.7",
     "xgrammar>=0.1.25",
     "weave>=0.52.9",
+    "ray>=2.50.1",
 ]
 
 [tool.setuptools.packages.find]

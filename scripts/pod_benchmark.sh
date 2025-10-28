@@ -33,8 +33,8 @@ echo "Generated MODEL_NAME: $MODEL_NAME"
 
 # Optional environment variables with defaults
 : ${BENCHMARK_LIMIT:=500}
-: ${RUN_STRUCTURED_OUTPUT:=true}
-: ${RUN_NO_STRUCTURED_OUTPUT:=false}
+: ${RUN_STRUCTURED_OUTPUT:=false}
+: ${RUN_NO_STRUCTURED_OUTPUT:=true}
 : ${MODEL_PATH_OVERRIDE:=""}
 : ${NO_SO_MODEL_PATH_OVERRIDE:=""}
 

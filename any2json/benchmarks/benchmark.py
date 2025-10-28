@@ -14,6 +14,7 @@ from tqdm.auto import tqdm
 import fastjsonschema
 
 from any2json.benchmarks.models.vllm_custom import VLLMServerModel
+from any2json.training.constants import SCHEMA_MISSING_TOKEN
 from any2json.training.utils import load_hf_dataset
 from any2json.utils import (
     configure_loggers,
@@ -298,12 +299,11 @@ def run(hf_dataset, split, model_type, model_kwargs, output_dir, limit, run_id):
         samples = [samples[i] for i in sample_indices]
 
     for sample in samples:
-        if isinstance(sample["schema"], str):
-            sample["schema"] = (
-                json.loads(sample["schema"])
-                if isinstance(sample["schema"], str)
-                else sample["schema"]
-            )
+        if (
+            isinstance(sample["schema"], str)
+            and sample["schema"] != SCHEMA_MISSING_TOKEN
+        ):
+            sample["schema"] = json.loads(sample["schema"])
         if isinstance(sample["output"], str):
             sample["output"] = json.loads(sample["output"])
 
