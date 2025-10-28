@@ -10,6 +10,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, TrainingArguments
 import wandb
 from transformers.trainer_callback import TrainerCallback
+from any2json.benchmarks.benchmark import calculate_diff_metrics
 from any2json.training.utils import (
     CausalLMDataCollator,
     process_raw_to_tokenized,
@@ -41,7 +42,9 @@ class EvalLoggerCallback(TrainerCallback):
                 "completion",
                 "correct_completion",
                 "diff_size_lines",
-                "diff_size_chars",
+                "diff_size_chars_added",
+                "diff_size_chars_missing",
+                "levenstein_distance",
                 "sample_sequence",
             ],
             log_mode="INCREMENTAL",
@@ -127,8 +130,7 @@ class EvalLoggerCallback(TrainerCallback):
             )
             correct_completion = input_data.split("[OUTPUT]")[1].strip()
 
-            diff_size_lines = None
-            diff_size_chars = None
+            diff_metrics = {}
             try:
                 correct_json = json.loads(
                     correct_completion.replace(self.tokenizer.eos_token, "").strip()
@@ -136,28 +138,8 @@ class EvalLoggerCallback(TrainerCallback):
                 pred_json = json.loads(
                     completion.replace(self.tokenizer.eos_token, "").strip()
                 )
-                correct_json_dumped = json.dumps(correct_json, sort_keys=True, indent=1)
-                pred_json_dumped = json.dumps(pred_json, sort_keys=True, indent=1)
 
-                diff_parts = list(
-                    difflib.unified_diff(
-                        json.dumps(correct_json_dumped, indent=1).splitlines(
-                            keepends=True
-                        ),
-                        json.dumps(pred_json_dumped, indent=1).splitlines(
-                            keepends=True
-                        ),
-                        fromfile="Correct",
-                        tofile="Predicted",
-                        lineterm="",
-                    )
-                )
-                diff_size_lines = len(
-                    [part for part in diff_parts[3:] if part.startswith("-")]
-                )
-                diff_size_chars = sum(
-                    [len(part[1:]) for part in diff_parts[3:] if part.startswith("-")]
-                )
+                diff_metrics = calculate_diff_metrics(pred_json, correct_json)
             except Exception as e:
                 logger.error(f"Error calculating diff")
                 logger.exception(e, exc_info=True)
@@ -169,8 +151,10 @@ class EvalLoggerCallback(TrainerCallback):
                 prompt,
                 completion,
                 correct_completion,
-                diff_size_lines,
-                diff_size_chars,
+                diff_metrics.get("diff_size_lines", None),
+                diff_metrics.get("diff_size_chars_added", None),
+                diff_metrics.get("diff_size_chars_missing", None),
+                diff_metrics.get("levenstein_distance", None),
                 input_data,
             )
         wandb.log({"eval_examples": self.table})
