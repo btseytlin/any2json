@@ -72,13 +72,35 @@ def postprocess_answer(answer: str) -> dict | str | list | int | float | bool | 
     return json.loads(answer)
 
 
+def get_levenstein_distance(true: dict, predicted: dict) -> int:
+    true_str = json_dumps_minified(true)
+    predicted_str = json_dumps_minified(predicted)
+    return round(difflib.SequenceMatcher(None, true_str, predicted_str).ratio(), 4)
+
+
+def count_different_chars(true: dict, predicted: dict) -> int:
+    true_str = json_dumps_minified(true)
+    predicted_str = json_dumps_minified(predicted)
+    matcher = difflib.SequenceMatcher(None, true_str, predicted_str)
+    matches = sum(triple[-1] for triple in matcher.get_matching_blocks())
+    return min(max(len(true_str) - matches, 0), len(true_str))
+
+
 def calculate_diff_metrics(
     answer: dict, correct_answer: dict
 ) -> dict[str, float | int]:
+
+    levenstein_distance = get_levenstein_distance(correct_answer, answer)
+    different_chars_true = count_different_chars(correct_answer, answer)
+    different_chars_predicted = count_different_chars(answer, correct_answer)
+
+    correct_answer_dumped = json.dumps(correct_answer, indent=1, sort_keys=True)
+    answer_dumped = json.dumps(answer, indent=1, sort_keys=True)
+
     diff_parts = list(
         difflib.unified_diff(
-            json.dumps(correct_answer, indent=1).splitlines(keepends=True),
-            json.dumps(answer, indent=1).splitlines(keepends=True),
+            correct_answer_dumped.splitlines(keepends=True),
+            answer_dumped.splitlines(keepends=True),
             fromfile="Correct Answer",
             tofile="Model Answer",
             lineterm="",
@@ -86,25 +108,18 @@ def calculate_diff_metrics(
         )
     )
 
-    diff_size_lines_added = len(
-        [part for part in diff_parts[3:] if part.startswith("+")]
-    )
-    diff_size_lines_removed = len(
-        [part for part in diff_parts[3:] if part.startswith("-")]
-    )
+    added_lines = [part for part in diff_parts[3:] if part.startswith("+")]
+    removed_lines = [part for part in diff_parts[3:] if part.startswith("-")]
 
-    diff_size_chars_added = sum(
-        [len(part[1:]) for part in diff_parts[3:] if part.startswith("+")]
-    )
-    diff_size_chars_removed = sum(
-        [len(part[1:]) for part in diff_parts[3:] if part.startswith("-")]
-    )
+    diff_size_lines_added = len(added_lines)
+    diff_size_lines_removed = len(removed_lines)
+    diff_size_lines = max(diff_size_lines_added, diff_size_lines_removed)
 
     return {
-        "diff_size_lines_added": diff_size_lines_added,
-        "diff_size_lines_removed": diff_size_lines_removed,
-        "diff_size_chars_added": diff_size_chars_added,
-        "diff_size_chars_removed": diff_size_chars_removed,
+        "diff_size_lines": diff_size_lines,
+        "diff_size_chars_added": different_chars_predicted,
+        "diff_size_chars_missing": different_chars_true,
+        "levenstein_distance": levenstein_distance,
     }
 
 
@@ -157,10 +172,7 @@ def calculate_sample_metrics(result: dict) -> dict:
     metrics_details["correct"] = answer == correct_answer
 
     diff_metrics = calculate_diff_metrics(answer, correct_answer)
-    metrics_details["diff_size_lines_added"] = diff_metrics["diff_size_lines_added"]
-    metrics_details["diff_size_lines_removed"] = diff_metrics["diff_size_lines_removed"]
-    metrics_details["diff_size_chars_added"] = diff_metrics["diff_size_chars_added"]
-    metrics_details["diff_size_chars_removed"] = diff_metrics["diff_size_chars_removed"]
+    metrics_details.update(diff_metrics)
 
     metrics_details["inference_ms"] = result.get("meta", {}).get("inference_ms")
 
@@ -202,10 +214,10 @@ def calculate_metrics(results: list[dict]) -> tuple[list[dict], dict]:
     aggregate_metrics["percentage_correct"] = round(len(correct) / len(results), 3)
 
     statistics_metrics = [
-        "diff_size_lines_added",
-        "diff_size_lines_removed",
+        "diff_size_lines",
         "diff_size_chars_added",
-        "diff_size_chars_removed",
+        "diff_size_chars_missing",
+        "levenstein_distance",
         "inference_ms",
     ]
 
